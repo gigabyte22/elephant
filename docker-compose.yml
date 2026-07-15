@@ -1,0 +1,38 @@
+services:
+  neo4j:
+    # 5.26 ships native VECTOR + queryNodes which is all the schema needs.
+    # Override with NEO4J_IMAGE_TAG=neo4j:2026-community (or 2026.x) when desired.
+    image: ${NEO4J_IMAGE_TAG:-neo4j:5.26-community}
+    container_name: elephant-neo4j
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+    ports:
+      - '7474:7474'
+      - '7687:7687'
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j-dev}
+      NEO4J_PLUGINS: '["apoc","graph-data-science"]'
+      NEO4J_dbms_security_procedures_unrestricted: 'apoc.*,gds.*'
+      NEO4J_dbms_security_procedures_allowlist: 'apoc.*,gds.*,db.*'
+      NEO4J_server_memory_pagecache_size: 1G
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 2G
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-import:/var/lib/neo4j/import
+      - neo4j-plugins:/plugins
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -q -O- http://localhost:7474 >/dev/null 2>&1 || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
+  neo4j-import:
+  neo4j-plugins:

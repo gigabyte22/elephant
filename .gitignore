@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.env
+.env.local
+.DS_Store
+*.log
+.vitest-cache
+
+# Local data — ingested knowledge blob store (KNOWLEDGE_BLOB_DIR)
+.knowledge-blobs/
+
+# Dev tooling artifacts
+.playwright-mcp/

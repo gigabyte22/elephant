@@ -1,0 +1,25 @@
+[Unit]
+Description=Elephant Neo4j (docker compose, force-recreate on boot)
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=__ELEPHANT_USER__
+Group=__ELEPHANT_GROUP__
+WorkingDirectory=__ELEPHANT_DIR__
+
+# Recreating (rather than starting) the container sidesteps environments where
+# `docker start` of an existing container fails AppArmor profile checks (e.g.
+# Docker inside an unprivileged LXC). Named volumes persist, so data is safe.
+ExecStart=/usr/bin/docker compose up -d --force-recreate neo4j
+
+# Wait (up to ~120s) for Bolt to accept TCP before we let elephant start.
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 60); do (exec 3<>/dev/tcp/127.0.0.1/7687) 2>/dev/null && exit 0; sleep 2; done; echo "neo4j bolt 7687 not ready after 120s" >&2; exit 1'
+
+ExecStop=/usr/bin/docker compose stop neo4j
+
+[Install]
+WantedBy=multi-user.target

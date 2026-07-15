@@ -1,0 +1,9 @@
+packages:
+  - .
+  - web
+allowBuilds:
+  '@biomejs/biome': true
+  cpu-features: false
+  esbuild: true
+  protobufjs: true
+  ssh2: false
