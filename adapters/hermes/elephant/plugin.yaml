@@ -1,0 +1,3 @@
+name: elephant
+version: 0.1.0
+description: "Elephant — self-hosted Neo4j memory service with hybrid GraphRAG recall, bi-temporal facts, versioned preferences, and nightly consolidation (dreaming). Stdlib-only client; requires a running elephant service."
