@@ -26,7 +26,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "rebuild:facts": "tsx scripts/rebuild-facts.ts"
+    "rebuild:facts": "tsx scripts/rebuild-facts.ts",
+    "sync:vendored-client": "tsx scripts/sync-vendored-client.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

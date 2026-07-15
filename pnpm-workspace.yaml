@@ -3,6 +3,7 @@ packages:
   - web
   - packages/client
   - adapters/mcp
+  - adapters/openclaw
 allowBuilds:
   '@biomejs/biome': true
   cpu-features: false

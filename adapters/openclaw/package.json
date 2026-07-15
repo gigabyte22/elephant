@@ -1,0 +1,24 @@
+{
+  "name": "openclaw-memory-elephant",
+  "version": "0.1.0",
+  "description": "OpenClaw memory plugin backed by the elephant memory service (Neo4j temporal knowledge graph)",
+  "type": "module",
+  "main": "index.ts",
+  "license": "MIT",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "keywords": ["openclaw", "openclaw-plugin", "memory", "elephant", "neo4j"],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.0"
+  }
+}

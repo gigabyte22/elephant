@@ -1,0 +1,70 @@
+{
+  "id": "memory-elephant",
+  "name": "Elephant Memory",
+  "description": "Long-term memory via the elephant service: hybrid GraphRAG recall, bi-temporal facts, preferences, and nightly consolidation on Neo4j",
+  "version": "0.1.0",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Elephant service URL",
+        "default": "http://127.0.0.1:18790"
+      },
+      "token": {
+        "type": "string",
+        "description": "Elephant bearer token (MEMORY_SERVICE_TOKEN, min 8 chars)"
+      },
+      "agentId": {
+        "type": "string",
+        "description": "Agent id stamped on writes and boosted at recall",
+        "default": "openclaw"
+      },
+      "projectId": { "type": "string", "description": "Optional project scope" },
+      "userId": { "type": "string", "description": "Optional user scope" },
+      "autoRecall": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true },
+          "limit": { "type": "number", "minimum": 1, "maximum": 50, "default": 8 },
+          "minImportance": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      },
+      "autoCapture": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean", "default": true }
+        }
+      }
+    },
+    "required": ["token"]
+  },
+  "tools": [
+    {
+      "name": "memory_recall",
+      "description": "Recall facts, preferences, insights, and procedures from long-term memory"
+    },
+    { "name": "memory_save", "description": "Save a durable fact to long-term memory" },
+    { "name": "memory_forget", "description": "Soft-delete a fact by id or query" },
+    {
+      "name": "memory_timeline",
+      "description": "What was believed at a point in time (bi-temporal)"
+    },
+    { "name": "memory_entity", "description": "Look up an entity and its fact subgraph" },
+    { "name": "memory_preference_get", "description": "Read a user preference" },
+    { "name": "memory_preference_set", "description": "Set a user preference (auto-supersedes)" },
+    { "name": "memory_observe", "description": "Write a short-lived session observation" }
+  ],
+  "cliCommands": [
+    { "name": "elephant status", "description": "Elephant service health" },
+    { "name": "elephant recall <query>", "description": "Search long-term memory" },
+    { "name": "elephant save <fact>", "description": "Save a fact" },
+    { "name": "elephant forget <id>", "description": "Soft-delete a fact" },
+    { "name": "elephant prefs", "description": "List active preferences" },
+    { "name": "elephant dream", "description": "Trigger a consolidation cycle" }
+  ]
+}
