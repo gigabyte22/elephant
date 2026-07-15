@@ -942,7 +942,7 @@ const memorySave: Tool = {
 export default memorySave;
 ```
 
-> **Note.** `POST /facts` does not currently take `agentId`/`sessionId`/`projectId` on the body — origin attribution flows through `sourceEpisodeId` linkage. For per-turn fact extraction, pass `sourceEpisodeId` from §4.6's flushed episode. For free-form `memory_save` calls (no associated episode yet), the fact lands without origin; the agent's per-turn observations and the next session-flush episode still capture context.
+> **Note.** `POST /facts` accepts optional `agentId`/`sessionId` (origin scope) and `actor` (audit attribution) alongside `projectId`/`userId`. When `sourceEpisodeId` is present, episode-derived origin still wins at recall; for free-form `memory_save` calls (no associated episode), pass `agentId`/`sessionId`/`actor` directly so the fact participates in agent/session scoping and the audit log shows who wrote it.
 
 ### 4.3 Recall (`memory_recall` tool)
 
@@ -1297,7 +1297,7 @@ const auditShow: Tool = {
 };
 ```
 
-**Pass `actor` on every elephant write** so audit is meaningful. The patterns above already do this (`actor: ctx.agentName`). For `saveFact` and `putPreference`, the routes don't currently accept an actor on the body — origin flows through episode linkage. If you need actor attribution on free-form fact writes, file an issue against elephant to add it; it's a small route change.
+**Pass `actor` on every elephant write** so audit is meaningful. The patterns above already do this (`actor: ctx.agentName`). `POST /facts` and `PUT /preferences/:key` both accept an optional `actor` on the body; omit it and audit falls back to the service's internal actor names.
 
 ### 4.13 Dreaming — surface health, optionally trigger
 
@@ -1482,7 +1482,7 @@ If any of the above fails, check the elephant `/health` endpoint first — `drea
 
 ## 8. Open questions and follow-ups
 
-- **Actor on direct fact writes.** The `POST /facts` route doesn't accept `actor` on the body today; attribution flows through `sourceEpisodeId`. For free-form `memory_save` (no associated episode), audit shows `(system)`. If actor on direct writes matters, propose adding it to `FactBody` in [src/http/routes/facts.ts](src/http/routes/facts.ts).
-- **Scope on direct fact writes.** Same caveat as above — `POST /facts` doesn't accept `scope`/`projectId`/`userId` on the body; they're inherited from the source episode. For non-episodic facts (most `memory_save` calls), they land unscoped. Same proposal applies.
+- ~~**Actor on direct fact writes.**~~ Done — `POST /facts` and `PUT /preferences/:key` accept an optional `actor` on the body ([src/http/routes/facts.ts](src/http/routes/facts.ts), [src/http/routes/preferences.ts](src/http/routes/preferences.ts)).
+- ~~**Scope on direct fact writes.**~~ Done — `POST /facts` accepts `projectId`/`userId`/`agentId`/`sessionId` on the body; direct-written facts participate in agent/session boost/filter at recall via a fact-level origin fallback ([src/services/retrieval/stages/AgentOriginAnnotationStage.ts](src/services/retrieval/stages/AgentOriginAnnotationStage.ts)).
 - **Tool discovery via recall.** §4.8 makes procedures discoverable. The same pattern can extend to your tool registry — embed each tool's `searchHint` and surface the top 3 in the prompt. Out of scope for this integration but a natural next step.
 - **Per-channel session retention.** `MEMORY_OBSERVATION_TTL_DAYS` (default 7) is per-deployment. If you want longer retention for paid users, run a separate elephant deployment or add a per-write TTL parameter (route change).
