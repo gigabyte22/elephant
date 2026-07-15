@@ -2,6 +2,7 @@ packages:
   - .
   - web
   - packages/client
+  - adapters/mcp
 allowBuilds:
   '@biomejs/biome': true
   cpu-features: false
