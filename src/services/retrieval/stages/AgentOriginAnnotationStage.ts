@@ -2,8 +2,9 @@
 // sourceEpisodeId, so downstream scoring and filtering can apply agent- and
 // session-scope logic without per-fact Cypher lookups.
 //
-// Facts without a sourceEpisodeId (direct POST /facts) keep both fields null —
-// they're treated as shared / unscoped content, neither boosted nor demoted.
+// Facts without a sourceEpisodeId (direct POST /facts) fall back to their own
+// agentId/sessionId props when the write supplied them; otherwise both fields
+// stay null and the fact is treated as shared / unscoped content.
 
 import { read } from '../../../config/neo4j.ts';
 import { EpisodeRepository } from '../../../repositories/EpisodeRepository.ts';
@@ -28,8 +29,8 @@ export function AgentOriginAnnotationStage(): RetrievalStage {
       for (const candidate of state.facts.values()) {
         const epId = candidate.fact.sourceEpisodeId;
         const m = epId ? meta?.get(epId) : undefined;
-        candidate.originAgentId = m?.agentId ?? null;
-        candidate.originSessionId = m?.sessionId ?? null;
+        candidate.originAgentId = m?.agentId ?? candidate.fact.agentId ?? null;
+        candidate.originSessionId = m?.sessionId ?? candidate.fact.sessionId ?? null;
       }
       return state;
     },

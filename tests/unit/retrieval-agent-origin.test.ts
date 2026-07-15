@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Fact } from '../../src/models/types.ts';
+import { AgentOriginAnnotationStage } from '../../src/services/retrieval/stages/AgentOriginAnnotationStage.ts';
 import { PostFilterStage } from '../../src/services/retrieval/stages/PostFilterStage.ts';
 import type { FactCandidate } from '../../src/services/retrieval/types.ts';
 import { makeCtx, makeFact, makeState } from './retrieval-fixtures.ts';
@@ -18,6 +19,34 @@ function makeCandidate(
     originSessionId,
   };
 }
+
+describe('AgentOriginAnnotationStage — direct-write scope fallback', () => {
+  // Facts here carry no sourceEpisodeId, so the stage never touches Neo4j.
+  test('fact-level agentId/sessionId flow into origin fields when there is no source episode', async () => {
+    const state = makeState([
+      makeCandidate(makeFact({ id: 'direct', agentId: 'alpha', sessionId: 's1' })),
+      makeCandidate(makeFact({ id: 'unscoped' })),
+    ]);
+    await AgentOriginAnnotationStage().run(makeCtx(), state);
+    const direct = state.facts.get('direct')!;
+    expect(direct.originAgentId).toBe('alpha');
+    expect(direct.originSessionId).toBe('s1');
+    const unscoped = state.facts.get('unscoped')!;
+    expect(unscoped.originAgentId).toBeNull();
+    expect(unscoped.originSessionId).toBeNull();
+  });
+
+  test('direct-write facts participate in agentScope=filter via the fallback', async () => {
+    const state = makeState([
+      makeCandidate(makeFact({ id: 'alpha-direct', agentId: 'alpha' })),
+      makeCandidate(makeFact({ id: 'beta-direct', agentId: 'beta' })),
+    ]);
+    const ctx = makeCtx({ query: { agentId: 'alpha', agentScope: 'filter' } });
+    await AgentOriginAnnotationStage().run(ctx, state);
+    await PostFilterStage().run(ctx, state);
+    expect(Array.from(state.facts.keys())).toEqual(['alpha-direct']);
+  });
+});
 
 describe('PostFilterStage — agent/session scope', () => {
   test('agentScope=filter drops non-matching origin but keeps null-origin (shared) facts', async () => {

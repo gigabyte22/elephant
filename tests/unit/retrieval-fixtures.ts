@@ -25,6 +25,8 @@ export function makeFact(partial: Partial<Fact> & { id: string }): Fact {
     sourceEpisodeId: partial.sourceEpisodeId,
     supersedesFactId: partial.supersedesFactId,
     category: partial.category,
+    agentId: partial.agentId,
+    sessionId: partial.sessionId,
   };
 }
 

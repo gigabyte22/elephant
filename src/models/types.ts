@@ -120,6 +120,11 @@ export const FactSchema = z
     // keeps it backwards-compatible with facts written before the columns existed.
     referenceCount: z.number().int().nonnegative().optional(),
     lastReferencedAt: z.date().nullable().optional(),
+    // Optional origin scope for direct writes with no source episode
+    // (precedent: IntentionSchema). Facts extracted from episodes derive
+    // origin from the episode instead; these stay unset there.
+    agentId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
   })
   .merge(ScopeSchema);
 export type Fact = z.infer<typeof FactSchema>;

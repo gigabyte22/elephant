@@ -20,6 +20,8 @@ function toFact(node: Record<string, unknown>, extras: { entityIds?: string[] } 
     sourceEpisodeId: (node.sourceEpisodeId as string | undefined) ?? undefined,
     referenceCount: (node.referenceCount as number | undefined) ?? 0,
     lastReferencedAt: toJsDateOrNull(node.lastReferencedAt),
+    agentId: (node.agentId as string | null | undefined) ?? undefined,
+    sessionId: (node.sessionId as string | null | undefined) ?? undefined,
     ...readScope(node),
   };
 }
@@ -44,7 +46,9 @@ export const FactRepository = {
            f.recordedAt = datetime($recordedAt),
            f.embedding = $embedding,
            f.sourceEpisodeId = $sourceEpisodeId,
-           f.mergedFromFactIds = $mergedFromFactIds
+           f.mergedFromFactIds = $mergedFromFactIds,
+           f.agentId = $agentId,
+           f.sessionId = $sessionId
        RETURN f {.*} AS f`,
       {
         id: fact.id,
@@ -58,6 +62,8 @@ export const FactRepository = {
         embedding: fact.embedding,
         sourceEpisodeId: fact.sourceEpisodeId ?? null,
         mergedFromFactIds: fact.mergedFromFactIds ?? null,
+        agentId: fact.agentId ?? null,
+        sessionId: fact.sessionId ?? null,
         ...memoryItemParams('fact', fact),
       },
     );

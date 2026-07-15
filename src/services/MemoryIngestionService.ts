@@ -51,6 +51,9 @@ interface SaveFactInput {
   sourceEpisodeId?: string;
   projectId?: string;
   userId?: string;
+  agentId?: string;
+  sessionId?: string;
+  actor?: string;
 }
 
 const SUPERSEDE_VECTOR_THRESHOLD = 0.85;
@@ -269,6 +272,8 @@ export function createMemoryIngestionService(deps: Deps) {
       sourceEpisodeId: input.sourceEpisodeId,
       projectId: input.projectId,
       userId: input.userId,
+      agentId: input.agentId,
+      sessionId: input.sessionId,
     };
 
     const created = await write(async (tx) => {
@@ -278,7 +283,7 @@ export function createMemoryIngestionService(deps: Deps) {
         kind: 'create',
         targetId: c.id,
         targetKind: 'fact',
-        actor: INGEST_ACTOR,
+        actor: input.actor ?? INGEST_ACTOR,
         payload: {
           category: c.category,
           sourceEpisodeId: c.sourceEpisodeId,

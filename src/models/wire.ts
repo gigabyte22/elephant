@@ -42,6 +42,9 @@ export interface WireFact extends WireScope {
   entities: string[]; // entity ids
   supersedes?: string;
   sourceEpisodeId?: string;
+  // Origin scope stamped on direct writes (POST /facts with agentId/sessionId).
+  agentId?: string;
+  sessionId?: string;
   // Retrieval-only metadata, absent on direct fact writes.
   refCount?: number;
   originAgentId?: string | null;
@@ -235,6 +238,8 @@ export function toWireFact(
     entities: f.entityIds,
     supersedes: f.supersedesFactId,
     sourceEpisodeId: f.sourceEpisodeId,
+    agentId: f.agentId,
+    sessionId: f.sessionId,
     refCount: f.referenceCount,
     originAgentId: f.originAgentId,
     originSessionId: f.originSessionId,

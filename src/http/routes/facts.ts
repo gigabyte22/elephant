@@ -18,6 +18,12 @@ const FactBody = z.object({
   sourceEpisodeId: z.string().uuid().optional(),
   projectId: z.string().min(1).optional(),
   userId: z.string().min(1).optional(),
+  // Origin scope for direct writes with no source episode (adapter tool calls).
+  // When sourceEpisodeId is present, episode-derived origin still wins at recall.
+  agentId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  // Attribution for the audit trail; defaults to the service's ingest actor.
+  actor: z.string().min(1).optional(),
 });
 
 const SupersedeBody = z.object({

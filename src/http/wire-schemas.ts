@@ -37,6 +37,9 @@ export const WireFactSchema = z.object({
   entities: z.array(z.string()),
   supersedes: z.string().optional(),
   sourceEpisodeId: z.string().optional(),
+  // Origin scope stamped on direct writes (POST /facts with agentId/sessionId).
+  agentId: z.string().optional(),
+  sessionId: z.string().optional(),
   // Optional retrieval metadata (populated by /recall; absent in /facts POST response).
   refCount: z.number().int().nonnegative().optional(),
   originAgentId: z.string().nullable().optional(),
