@@ -1,6 +1,7 @@
 packages:
   - .
   - web
+  - packages/client
 allowBuilds:
   '@biomejs/biome': true
   cpu-features: false
