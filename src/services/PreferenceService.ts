@@ -21,6 +21,7 @@ export function createPreferenceService(deps: Deps) {
     key: string;
     value: string;
     confidence?: number;
+    actor?: string;
   }): Promise<Preference> {
     const embedding = await embedder.embed(`${input.key}: ${input.value}`);
     return write(async (tx) => {
@@ -40,7 +41,7 @@ export function createPreferenceService(deps: Deps) {
           before: prior,
           kind: 'preference',
           reason: 'preference updated',
-          actor: PREFERENCE_ACTOR,
+          actor: input.actor ?? PREFERENCE_ACTOR,
           eventKind: 'supersede',
           payload: { key: input.key, newId: next.id, priorId: prior.id },
         });
@@ -50,7 +51,7 @@ export function createPreferenceService(deps: Deps) {
           kind: 'create',
           targetId: next.id,
           targetKind: 'preference',
-          actor: PREFERENCE_ACTOR,
+          actor: input.actor ?? PREFERENCE_ACTOR,
           payload: { key: input.key },
         });
       }

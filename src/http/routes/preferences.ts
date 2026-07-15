@@ -42,6 +42,8 @@ export function registerPreferencesRoutes(app: App, container: Container): void 
       body: z.object({
         value: z.string(),
         confidence: z.number().min(0).max(1).optional(),
+        // Attribution for the audit trail; defaults to the preference service actor.
+        actor: z.string().min(1).optional(),
       }),
       response: { 200: okEnvelope(WirePreferenceSchema) },
     },
@@ -50,6 +52,7 @@ export function registerPreferencesRoutes(app: App, container: Container): void 
         key: req.params.key,
         value: req.body.value,
         confidence: req.body.confidence,
+        actor: req.body.actor,
       });
       return { ok: true as const, data: toWirePreference(pref) };
     },
