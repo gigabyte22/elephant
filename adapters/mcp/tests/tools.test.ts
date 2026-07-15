@@ -146,12 +146,26 @@ describe('memory_recall', () => {
 });
 
 describe('memory_forget', () => {
+  const FACT_ID = '3f0e8f6a-58a2-4bfb-9d6e-0f6f4a1c2b3d';
+
   test('factId path deletes directly', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: { deleted: true } }));
-    const result = await client.callTool({ name: 'memory_forget', arguments: { factId: 'f9' } });
-    expect(textOf(result)).toContain('Soft-deleted fact f9');
-    expect(fetchMock.mock.calls[0]![0]).toBe('http://elephant.test/facts/f9');
+    const result = await client.callTool({
+      name: 'memory_forget',
+      arguments: { factId: FACT_ID },
+    });
+    expect(textOf(result)).toContain(`Soft-deleted fact ${FACT_ID}`);
+    expect(fetchMock.mock.calls[0]![0]).toBe(`http://elephant.test/facts/${FACT_ID}`);
     expect(fetchMock.mock.calls[0]![1]?.method).toBe('DELETE');
+  });
+
+  test('non-UUID factId is rejected by the schema, no request made', async () => {
+    const result = await client.callTool({
+      name: 'memory_forget',
+      arguments: { factId: '../dream' },
+    });
+    expect(result.isError).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test('fuzzy query with multiple matches returns candidates, deletes nothing', async () => {

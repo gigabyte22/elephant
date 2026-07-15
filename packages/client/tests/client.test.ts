@@ -124,6 +124,21 @@ describe('query-string building', () => {
   });
 });
 
+describe('path-segment encoding', () => {
+  test('ids are encoded so they cannot traverse to another endpoint', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { deleted: true } }));
+    const client = new ElephantClient(cfg);
+    await client.deleteFact('../dream');
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://elephant.test/facts/..%2Fdream');
+    await client.getEntity('a/b?x=1');
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'http://elephant.test/entities/a%2Fb%3Fx%3D1?includeSuperseded=false',
+    );
+  });
+});
+
 describe('non-JSON failure', () => {
   test('HTML error page still yields ElephantError with the status', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

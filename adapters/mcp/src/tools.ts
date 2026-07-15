@@ -87,7 +87,7 @@ export function registerTools(
       description:
         'Soft-delete a fact by id (preferred), or search by query. A fuzzy query never bulk-deletes: unless exactly one fact matches, the candidates are returned so you can call again with factId.',
       inputSchema: {
-        factId: z.string().optional().describe('Exact fact id (preferred)'),
+        factId: z.string().uuid().optional().describe('Exact fact id (preferred)'),
         query: z.string().optional().describe('Match facts to soft-delete'),
       },
     },
@@ -97,10 +97,12 @@ export function registerTools(
         return textResult(`Soft-deleted fact ${factId}. Audit history preserved.`);
       }
       if (!query) return textResult('Provide factId or query.');
+      // Hard-filter to this agent's own facts: a fuzzy forget must never
+      // land on (let alone delete) another agent's memory.
       const result = await client.recall({
         q: query,
         agentId: scope.agentId,
-        agentScope: scope.agentScope,
+        agentScope: 'filter',
         kinds: ['fact'],
         limit: 5,
       });
@@ -160,7 +162,7 @@ export function registerTools(
         'Fuzzy-search entities by name, or fetch one entity with its fact subgraph by id.',
       inputSchema: {
         name: z.string().optional().describe('Entity name (fuzzy match)'),
-        id: z.string().optional().describe('Exact entity id'),
+        id: z.string().uuid().optional().describe('Exact entity id'),
       },
       annotations: { readOnlyHint: true },
     },

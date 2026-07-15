@@ -108,10 +108,10 @@ export class ElephantClient {
     reason: string,
     opts?: RequestOpts,
   ): Promise<{ ok: true }> {
-    return this.request('POST', `/facts/${oldId}/supersede`, { newFactId, reason }, opts);
+    return this.request('POST', `/facts/${seg(oldId)}/supersede`, { newFactId, reason }, opts);
   }
   deleteFact(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/facts/${id}`, undefined, opts);
+    return this.request('DELETE', `/facts/${seg(id)}`, undefined, opts);
   }
 
   // ─ Recall + Timeline ──
@@ -132,7 +132,12 @@ export class ElephantClient {
     includeSuperseded = false,
     opts?: RequestOpts,
   ): Promise<{ entity: { id: string; name: string; type: string }; facts: WireFact[] }> {
-    return this.request('GET', `/entities/${id}?${qs({ includeSuperseded })}`, undefined, opts);
+    return this.request(
+      'GET',
+      `/entities/${seg(id)}?${qs({ includeSuperseded })}`,
+      undefined,
+      opts,
+    );
   }
   searchEntities(
     name: string,
@@ -198,7 +203,7 @@ export class ElephantClient {
     return this.request('POST', '/intentions', input, opts);
   }
   getIntention(id: string, opts?: RequestOpts): Promise<WireIntention> {
-    return this.request('GET', `/intentions/${id}`, undefined, opts);
+    return this.request('GET', `/intentions/${seg(id)}`, undefined, opts);
   }
   listIntentions(
     query?: {
@@ -232,21 +237,21 @@ export class ElephantClient {
     input: { actor?: string; reason?: string } = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${id}/complete`, input, opts);
+    return this.request('POST', `/intentions/${seg(id)}/complete`, input, opts);
   }
   cancelIntention(
     id: string,
     input: { actor?: string; reason?: string } = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${id}/cancel`, input, opts);
+    return this.request('POST', `/intentions/${seg(id)}/cancel`, input, opts);
   }
   markIntentionFired(
     id: string,
     input: { actor?: string; reason?: string } = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${id}/fired`, input, opts);
+    return this.request('POST', `/intentions/${seg(id)}/fired`, input, opts);
   }
 
   // ─ Dream ──
@@ -268,7 +273,7 @@ export class ElephantClient {
     insightsPromoted: number;
     error?: string;
   }> {
-    return this.request('GET', `/dream/${jobId}`, undefined, opts);
+    return this.request('GET', `/dream/${seg(jobId)}`, undefined, opts);
   }
 
   // ─ Knowledge ──
@@ -301,10 +306,10 @@ export class ElephantClient {
     },
     opts?: RequestOpts,
   ): Promise<WireKnowledgeDocument> {
-    return this.request('PUT', `/knowledge/documents/${id}`, input, opts);
+    return this.request('PUT', `/knowledge/documents/${seg(id)}`, input, opts);
   }
   getKnowledge(id: string, opts?: RequestOpts): Promise<WireKnowledgeDocument> {
-    return this.request('GET', `/knowledge/documents/${id}`, undefined, opts);
+    return this.request('GET', `/knowledge/documents/${seg(id)}`, undefined, opts);
   }
   listKnowledge(
     query?: { projectId?: string; userId?: string; limit?: number },
@@ -317,7 +322,12 @@ export class ElephantClient {
     purge = false,
     opts?: RequestOpts,
   ): Promise<{ deleted: true; chunksDeleted: number }> {
-    return this.request('DELETE', `/knowledge/documents/${id}?${qs({ purge })}`, undefined, opts);
+    return this.request(
+      'DELETE',
+      `/knowledge/documents/${seg(id)}?${qs({ purge })}`,
+      undefined,
+      opts,
+    );
   }
 
   // ─ Knowledge attachments ──
@@ -331,7 +341,7 @@ export class ElephantClient {
     },
     opts?: RequestOpts,
   ): Promise<WireKnowledgeAttachment> {
-    return this.request('POST', `/knowledge/documents/${documentId}/attachments`, input, opts);
+    return this.request('POST', `/knowledge/documents/${seg(documentId)}/attachments`, input, opts);
   }
   deleteAttachment(
     documentId: string,
@@ -340,7 +350,7 @@ export class ElephantClient {
   ): Promise<{ deleted: true }> {
     return this.request(
       'DELETE',
-      `/knowledge/documents/${documentId}/attachments/${attachmentId}`,
+      `/knowledge/documents/${seg(documentId)}/attachments/${seg(attachmentId)}`,
       undefined,
       opts,
     );
@@ -352,7 +362,7 @@ export class ElephantClient {
     const timer = setTimeout(() => ctl.abort(), opts?.timeoutMs ?? this.cfg.timeoutMs ?? 30_000);
     opts?.signal?.addEventListener('abort', () => ctl.abort(opts.signal?.reason), { once: true });
     try {
-      const res = await fetch(`${this.cfg.url}/knowledge/attachments/${blobId}`, {
+      const res = await fetch(`${this.cfg.url}/knowledge/attachments/${seg(blobId)}`, {
         signal: ctl.signal,
         headers: { authorization: `Bearer ${this.cfg.token}` },
       });
@@ -379,7 +389,7 @@ export class ElephantClient {
     return this.request('POST', '/procedures', input, opts);
   }
   getProcedure(id: string, opts?: RequestOpts): Promise<WireProcedure> {
-    return this.request('GET', `/procedures/${id}`, undefined, opts);
+    return this.request('GET', `/procedures/${seg(id)}`, undefined, opts);
   }
   getProcedureByName(
     name: string,
@@ -402,7 +412,7 @@ export class ElephantClient {
     }>,
     opts?: RequestOpts,
   ): Promise<WireProcedure> {
-    return this.request('PUT', `/procedures/${id}`, patch, opts);
+    return this.request('PUT', `/procedures/${seg(id)}`, patch, opts);
   }
   listProcedures(
     query?: { projectId?: string; userId?: string; limit?: number },
@@ -411,7 +421,7 @@ export class ElephantClient {
     return this.request('GET', `/procedures?${qs(query ?? {})}`, undefined, opts);
   }
   deleteProcedure(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/procedures/${id}`, undefined, opts);
+    return this.request('DELETE', `/procedures/${seg(id)}`, undefined, opts);
   }
 
   // ─ Research ──
@@ -434,7 +444,7 @@ export class ElephantClient {
     return this.request('POST', '/research', input, opts);
   }
   getResearch(id: string, opts?: RequestOpts): Promise<WireResearch> {
-    return this.request('GET', `/research/${id}`, undefined, opts);
+    return this.request('GET', `/research/${seg(id)}`, undefined, opts);
   }
   listResearch(
     query: { projectId: string; userId?: string; limit?: number },
@@ -443,7 +453,7 @@ export class ElephantClient {
     return this.request('GET', `/research?${qs(query)}`, undefined, opts);
   }
   deleteResearch(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/research/${id}`, undefined, opts);
+    return this.request('DELETE', `/research/${seg(id)}`, undefined, opts);
   }
 
   // ─ Working state ──
@@ -499,7 +509,7 @@ export class ElephantClient {
     revisions: Array<{ archivedAt: string; reason?: string; payload: unknown }>;
     events: WireAuditEvent[];
   }> {
-    return this.request('GET', `/audit/${targetId}?${qs({ limit })}`, undefined, opts);
+    return this.request('GET', `/audit/${seg(targetId)}?${qs({ limit })}`, undefined, opts);
   }
   auditList(
     query?: { actor?: string; from?: Date; to?: Date; limit?: number },
@@ -566,6 +576,12 @@ export class ElephantClient {
     // Unreachable: loop either returns or throws.
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
+}
+
+/** Encode a caller-supplied id as a single path segment — an id containing
+ *  `/` or `..` must not be able to reroute the request to another endpoint. */
+function seg(id: string): string {
+  return encodeURIComponent(id);
 }
 
 /** URLSearchParams string from a plain object. Skips undefined/null; Dates → ISO; arrays → comma-joined. */
