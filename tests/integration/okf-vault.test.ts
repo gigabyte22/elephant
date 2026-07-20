@@ -202,3 +202,77 @@ describe('OKF vault projection', () => {
     ).rejects.toThrow();
   });
 });
+
+// The dashboard's "open as markdown" must not become a second, drifting
+// definition of what a node's markdown is. It reuses the vault serializer, so
+// these assertions pin byte equality with the file on disk.
+describe('dashboard markdown view', () => {
+  test('research markdown is byte-identical to the vault file', async () => {
+    await clearDb();
+    const content = '# Findings\n\n- p99 regressed\n- traced to the retry loop';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'Drift guard', source: 'manual', content, projectId: PROJECT },
+    });
+    const id = created.json().data.id as string;
+    const onDisk = await readFile(join(root, 'projects', PROJECT, 'research', `${id}.md`), 'utf8');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/dashboard/api/research/${id}/markdown`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.markdown).toBe(onDisk);
+    expect(res.json().data.filename).toBe(`${id}.md`);
+  });
+
+  test('knowledge document markdown is byte-identical to the vault file', async () => {
+    await clearDb();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/knowledge/documents',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'Shared doc', source: 'manual', content: 'a shared knowledge note' },
+    });
+    const id = created.json().data.id as string;
+    const onDisk = await readFile(join(root, 'shared', 'documents', `${id}.md`), 'utf8');
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/dashboard/api/knowledge/documents/${id}/markdown`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data.markdown).toBe(onDisk);
+  });
+
+  // Existence is itself scoped: asking for another project's record must look
+  // identical to the record not existing.
+  test('cross-project research id reports notFound, not forbidden', async () => {
+    await clearDb();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'Scoped', source: 'manual', content: 'body', projectId: PROJECT },
+    });
+    const id = created.json().data.id as string;
+
+    const other = await app.inject({
+      method: 'GET',
+      url: `/dashboard/api/research/${id}/markdown?projectId=someone-else`,
+      headers: auth,
+    });
+    expect(other.statusCode).toBe(404);
+
+    const own = await app.inject({
+      method: 'GET',
+      url: `/dashboard/api/research/${id}/markdown?projectId=${PROJECT}`,
+      headers: auth,
+    });
+    expect(own.statusCode).toBe(200);
+  });
+});

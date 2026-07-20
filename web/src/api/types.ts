@@ -231,3 +231,14 @@ export interface AuditEvent {
 export interface AuditPayload {
   items: AuditEvent[];
 }
+
+// The node kinds that retain a full body on-node, and so have a markdown
+// projection in the vault.
+export type NarrativeKind = 'research' | 'knowledge_document';
+
+// The vault's markdown projection of a research / knowledge document, served
+// inside the standard envelope by /dashboard/api/*/markdown.
+export interface NarrativeMarkdownPayload {
+  markdown: string;
+  filename: string;
+}
