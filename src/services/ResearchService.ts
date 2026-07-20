@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
-import { frontmatterFor } from '../adapters/vault/frontmatter.ts';
+import { projectToVault, tombstoneInVault } from '../adapters/vault/project.ts';
 import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound } from '../http/errors.ts';
@@ -59,31 +59,6 @@ export interface UpdateResearchInput {
 export function createResearchService(deps: Deps) {
   const { llm, embedder, config, vault } = deps;
   const chunker = deps.chunker ?? createChunker({ countTokens: embedder.countTokens });
-
-  // OKF vault projection runs AFTER the graph transaction commits and is
-  // log-and-continue: failing the request post-commit would report a false
-  // failure, and scripts/okf-sync.ts is the repair path.
-  async function vaultProject(item: Research): Promise<void> {
-    if (!vault) return;
-    try {
-      await vault.write(frontmatterFor('research', item), item.content ?? item.summary);
-    } catch (err) {
-      console.error('[okf] vault write failed', { id: item.id, err });
-    }
-  }
-
-  async function vaultTombstone(item: Research, at: Date): Promise<void> {
-    if (!vault) return;
-    try {
-      await vault.tombstone(
-        { id: item.id, kind: 'research', projectId: item.projectId },
-        at,
-        'soft_delete',
-      );
-    } catch (err) {
-      console.error('[okf] vault tombstone failed', { id: item.id, err });
-    }
-  }
   const embedderLimit = Math.min(
     embedder.maxInputTokens,
     config.embedderMaxInputTokens ?? embedder.maxInputTokens,
@@ -184,7 +159,7 @@ export function createResearchService(deps: Deps) {
       });
       return item;
     });
-    await vaultProject(created);
+    await projectToVault(vault, 'research', created);
     return created;
   }
 
@@ -247,7 +222,7 @@ export function createResearchService(deps: Deps) {
       }
       return item;
     });
-    await vaultProject(updated);
+    await projectToVault(vault, 'research', updated);
     return updated;
   }
 
@@ -276,7 +251,7 @@ export function createResearchService(deps: Deps) {
         actor,
       });
     });
-    if (existing) await vaultTombstone(existing, at);
+    if (existing) await tombstoneInVault(vault, 'research', existing, at);
   }
 
   return { create, update, get, list, softDelete };

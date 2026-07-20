@@ -131,13 +131,17 @@ export interface InsightCandidate {
   blendedScore?: number;
 }
 
-export interface KnowledgeChunkCandidate {
-  chunk: KnowledgeChunk;
+// Shared shape for chunk-shaped fused candidates (knowledge + research):
+// multi-source hits blended into a single ranked entry.
+export interface FusedChunkCandidate<C> {
+  chunk: C;
   sources: RankedSource[];
   fusedScore?: number;
   blendedScore?: number;
   expansionReason: CandidateSource;
 }
+
+export type KnowledgeChunkCandidate = FusedChunkCandidate<KnowledgeChunk>;
 
 export interface ProcedureCandidate {
   procedure: Procedure;
@@ -154,13 +158,7 @@ export interface ResearchCandidate {
   blendedScore?: number;
 }
 
-export interface ResearchChunkCandidate {
-  chunk: ResearchChunk;
-  sources: RankedSource[];
-  fusedScore?: number;
-  blendedScore?: number;
-  expansionReason: CandidateSource;
-}
+export type ResearchChunkCandidate = FusedChunkCandidate<ResearchChunk>;
 
 export interface IntentionCandidate {
   intention: Intention;

@@ -1,18 +1,12 @@
 // Shared helpers used by the hybrid-search source stages. Keeps the per-stage
 // files focused on the repository call and filter, not the map bookkeeping.
 
-import type {
-  Chunk,
-  Fact,
-  Intention,
-  KnowledgeChunk,
-  Procedure,
-  Research,
-} from '../../../models/types.ts';
+import type { Chunk, Fact, Intention, Procedure, Research } from '../../../models/types.ts';
 import type {
   CandidateSource,
   ChunkCandidate,
   FactCandidate,
+  FusedChunkCandidate,
   PipelineState,
   ProcedureCandidate,
   RetrievalContext,
@@ -64,16 +58,7 @@ export function upsertChunkHits(
 // only differs in the candidate map it fills and the source tag it stamps;
 // this generic covers every chunk-shaped map (knowledgeChunks, researchChunks).
 export function upsertFusedChunkHits<C extends { id: string }>(
-  map: Map<
-    string,
-    {
-      chunk: C;
-      sources: Array<{ source: CandidateSource; rank: number; rawScore?: number }>;
-      fusedScore?: number;
-      blendedScore?: number;
-      expansionReason: CandidateSource;
-    }
-  >,
+  map: Map<string, FusedChunkCandidate<C>>,
   hits: ReadonlyArray<C & { score: number }>,
   source: CandidateSource,
 ): void {
@@ -86,14 +71,6 @@ export function upsertFusedChunkHits<C extends { id: string }>(
     entry.sources.push({ source, rank: i, rawScore: chunk.score });
     map.set(chunk.id, entry);
   });
-}
-
-export function upsertKnowledgeChunkHits(
-  state: PipelineState,
-  hits: ReadonlyArray<KnowledgeChunk & { score: number }>,
-  source: Extract<CandidateSource, 'knowledge_chunk_vector' | 'knowledge_chunk_fulltext'>,
-): void {
-  upsertFusedChunkHits(state.knowledgeChunks, hits, source);
 }
 
 export function upsertProcedureHits(

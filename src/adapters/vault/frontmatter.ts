@@ -56,7 +56,7 @@ export function parseVaultDoc(text: string): { meta: VaultFrontmatter; body: str
 }
 
 // Shared shape of Research / KnowledgeDocument that maps onto frontmatter.
-interface NarrativeItem {
+export interface NarrativeItem {
   id: string;
   title: string;
   source: string;

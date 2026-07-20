@@ -8,7 +8,7 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { ExtractionService } from '../adapters/extraction/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import type { BlobStore } from '../adapters/storage/types.ts';
-import { frontmatterFor } from '../adapters/vault/frontmatter.ts';
+import { projectToVault, tombstoneInVault } from '../adapters/vault/project.ts';
 import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound, payloadTooLarge } from '../http/errors.ts';
@@ -76,31 +76,6 @@ export interface UpdateKnowledgeDocumentInput {
 export function createKnowledgeIngestionService(deps: Deps) {
   const { llm, embedder, config, vault } = deps;
   const chunker = deps.chunker ?? createChunker({ countTokens: (t) => embedder.countTokens(t) });
-
-  // OKF vault projection runs AFTER the graph transaction commits and is
-  // log-and-continue: failing the request post-commit would report a false
-  // failure, and scripts/okf-sync.ts is the repair path.
-  async function vaultProject(doc: KnowledgeDocument): Promise<void> {
-    if (!vault) return;
-    try {
-      await vault.write(frontmatterFor('knowledge_document', doc), doc.content ?? doc.summary);
-    } catch (err) {
-      console.error('[okf] vault write failed', { id: doc.id, err });
-    }
-  }
-
-  async function vaultTombstone(doc: KnowledgeDocument, at: Date): Promise<void> {
-    if (!vault) return;
-    try {
-      await vault.tombstone(
-        { id: doc.id, kind: 'knowledge_document', projectId: doc.projectId },
-        at,
-        'soft_delete',
-      );
-    } catch (err) {
-      console.error('[okf] vault tombstone failed', { id: doc.id, err });
-    }
-  }
 
   const embedderLimit = Math.min(
     embedder.maxInputTokens,
@@ -193,7 +168,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
       });
       return doc;
     });
-    await vaultProject(created);
+    await projectToVault(vault, 'knowledge_document', created);
     return created;
   }
 
@@ -270,7 +245,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
       });
       return doc;
     });
-    await vaultProject(updated);
+    await projectToVault(vault, 'knowledge_document', updated);
     return updated;
   }
 
@@ -470,7 +445,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
         actor: opts.actor,
       });
     });
-    if (existing) await vaultTombstone(existing, at);
+    if (existing) await tombstoneInVault(vault, 'knowledge_document', existing, at);
   }
 
   return {
