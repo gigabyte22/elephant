@@ -82,6 +82,7 @@ export function makeState(
     knowledgeChunks: extras.knowledgeChunks ?? new Map(),
     procedures: extras.procedures ?? new Map(),
     research: extras.research ?? new Map(),
+    researchChunks: extras.researchChunks ?? new Map(),
     intentions: extras.intentions ?? new Map(),
   };
 }

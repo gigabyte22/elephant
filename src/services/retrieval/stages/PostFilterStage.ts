@@ -65,6 +65,7 @@ export function PostFilterStage(): RetrievalStage {
         state.knowledgeChunks.clear();
         state.procedures.clear();
         state.research.clear();
+        state.researchChunks.clear();
       }
 
       const filterArgs = { q, projectScope, userScope, kinds: kindSet };
@@ -76,6 +77,7 @@ export function PostFilterStage(): RetrievalStage {
       filterByScope(state.knowledgeChunks, (c) => c.chunk, 'knowledge_chunk', filterArgs);
       filterByScope(state.procedures, (c) => c.procedure, 'procedure', filterArgs);
       filterByScope(state.research, (c) => c.research, 'research', filterArgs);
+      filterByScope(state.researchChunks, (c) => c.chunk, 'research_chunk', filterArgs);
 
       // If kinds filter excludes chunk context, drop it.
       if (kindSet && !kindSet.has('chunk')) state.chunks.clear();

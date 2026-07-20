@@ -5,9 +5,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
-import { write as txWrite } from '../../src/config/neo4j.ts';
+import { read, write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
 import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { ResearchChunkRepository } from '../../src/repositories/ResearchChunkRepository.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
@@ -192,6 +193,91 @@ describe('research body retention', () => {
       payload: { actor: 'tester' },
     });
     expect(empty.statusCode).toBe(400);
+  });
+
+  test('long body → multiple ResearchChunk nodes; PUT replaces the chunk set; DELETE hard-deletes', async () => {
+    await clearDb();
+    const longBody = 'novel findings about zeppelin flight dynamics and airframe design. '.repeat(
+      60,
+    );
+    const id = await createResearch(longBody);
+
+    const chunks = await read((tx) => ResearchChunkRepository.listByResearch(tx, id));
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.map((c) => c.position)).toEqual(chunks.map((_, i) => i));
+    expect(chunks.every((c) => c.projectId === PROJECT)).toBe(true);
+    const originalIds = new Set(chunks.map((c) => c.id));
+
+    const replacement = 'entirely new zeppelin findings after the redesign. '.repeat(60);
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/research/${id}`,
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { content: replacement },
+    });
+    expect(put.statusCode).toBe(200);
+    const rechunked = await read((tx) => ResearchChunkRepository.listByResearch(tx, id));
+    expect(rechunked.length).toBeGreaterThan(1);
+    expect(rechunked.some((c) => originalIds.has(c.id))).toBe(false);
+
+    const del = await app.inject({ method: 'DELETE', url: `/research/${id}`, headers: auth });
+    expect(del.statusCode).toBe(200);
+    const afterDelete = await read((tx) => ResearchChunkRepository.listByResearch(tx, id));
+    expect(afterDelete).toHaveLength(0);
+  });
+
+  test('recall surfaces researchChunks only when includeResearch is set, never via includeKnowledge', async () => {
+    await clearDb();
+    const body = 'the moonbase reactor requires cryogenic argon coolant cycling. '.repeat(60);
+    const id = await createResearch(body);
+
+    const withResearch = await app.inject({
+      method: 'GET',
+      url: `/recall?q=${encodeURIComponent('moonbase reactor coolant')}&includeResearch=true&projectId=${PROJECT}`,
+      headers: auth,
+    });
+    expect(withResearch.statusCode).toBe(200);
+    const data = withResearch.json().data;
+    expect(data.research?.some((r: { id: string }) => r.id === id)).toBe(true);
+    expect(data.researchChunks?.length).toBeGreaterThan(0);
+    expect(data.researchChunks.every((c: { researchId: string }) => c.researchId === id)).toBe(
+      true,
+    );
+
+    // Knowledge-only recall must not leak research chunks (separate label + indexes).
+    const knowledgeOnly = await app.inject({
+      method: 'GET',
+      url: `/recall?q=${encodeURIComponent('moonbase reactor coolant')}&includeKnowledge=true&projectId=${PROJECT}`,
+      headers: auth,
+    });
+    expect(knowledgeOnly.statusCode).toBe(200);
+    const kData = knowledgeOnly.json().data;
+    expect(kData.researchChunks).toBeUndefined();
+    expect(
+      (kData.knowledgeChunks ?? []).some((c: { text: string }) => c.text.includes('moonbase')),
+    ).toBe(false);
+  });
+
+  test('expired research is excluded from chunk recall by the parent-liveness guard', async () => {
+    await clearDb();
+    const body = 'quantum widget calibration procedure for the flux array. '.repeat(60);
+    const id = await createResearch(body);
+
+    // Expire the parent directly — chunks remain in the graph but must not recall.
+    await txWrite(async (tx) => {
+      await tx.run(`MATCH (r:Research {id: $id}) SET r.expiresAt = datetime() - duration('PT1H')`, {
+        id,
+      });
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/recall?q=${encodeURIComponent('quantum widget calibration')}&includeResearch=true&projectId=${PROJECT}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+    const data = res.json().data;
+    expect(data.researchChunks ?? []).toHaveLength(0);
   });
 
   test('pre-retention rows without content still deserialize (content absent)', async () => {

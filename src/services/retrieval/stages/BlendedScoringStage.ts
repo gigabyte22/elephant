@@ -79,6 +79,14 @@ export function BlendedScoringStage(): RetrievalStage {
         r.blendedScore = researchBlend(r, ctx.now, w, half, maxResearch) * boostFor(r.research);
       }
 
+      // Research chunks are pure context, same shape as knowledge chunks.
+      const maxResearchChunk = maxFused(state.researchChunks.values());
+      for (const c of state.researchChunks.values()) {
+        c.blendedScore =
+          rrfPlusRecency(c.fusedScore, maxResearchChunk, c.chunk.createdAt, ctx.now, half, w) *
+          boostFor(c.chunk);
+      }
+
       const maxIntention = maxFused(state.intentions.values());
       for (const i of state.intentions.values()) {
         i.blendedScore = intentionBlend(i, ctx.now, w, half, maxIntention) * boostFor(i.intention);

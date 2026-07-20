@@ -27,6 +27,8 @@ import { ProcedureVectorSource } from './stages/ProcedureVectorSource.ts';
 import { QueryEntityLinkStage } from './stages/QueryEntityLinkStage.ts';
 import { QueryPreparerStage } from './stages/QueryPreparerStage.ts';
 import { RefCountTickStage } from './stages/RefCountTickStage.ts';
+import { ResearchChunkFullTextSource } from './stages/ResearchChunkFullTextSource.ts';
+import { ResearchChunkVectorSource } from './stages/ResearchChunkVectorSource.ts';
 import { ResearchVectorSource } from './stages/ResearchVectorSource.ts';
 import { RrfFusionStage } from './stages/RrfFusionStage.ts';
 import { TopKStage } from './stages/TopKStage.ts';
@@ -77,6 +79,8 @@ export function buildDefaultRetrievalPipeline(deps: PipelineDeps): Pipeline {
     ProcedureVectorSource(),
     ProcedureFullTextSource(),
     ResearchVectorSource(),
+    ResearchChunkVectorSource(),
+    ResearchChunkFullTextSource(),
     IntentionVectorSource(),
     ChunkToFactProjector(),
     // PPR-only; adds an `entity_ppr` source list that RrfFusion then blends.

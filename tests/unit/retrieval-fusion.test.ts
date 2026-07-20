@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import type { Chunk } from '../../src/models/types.ts';
+import type { Chunk, ResearchChunk } from '../../src/models/types.ts';
 import { RrfFusionStage } from '../../src/services/retrieval/stages/RrfFusionStage.ts';
 import type { FactCandidate, PipelineState } from '../../src/services/retrieval/types.ts';
-import { makeCtx, makeFact } from './retrieval-fixtures.ts';
+import { makeCtx, makeFact, makeState } from './retrieval-fixtures.ts';
 
 describe('RrfFusionStage', () => {
   test('facts present in multiple source lists rank higher than single-source facts', async () => {
@@ -46,6 +46,7 @@ describe('RrfFusionStage', () => {
       knowledgeChunks: new Map(),
       procedures: new Map(),
       research: new Map(),
+      researchChunks: new Map(),
       intentions: new Map(),
     };
     await RrfFusionStage().run(makeCtx(), state);
@@ -96,11 +97,52 @@ describe('RrfFusionStage', () => {
       knowledgeChunks: new Map(),
       procedures: new Map(),
       research: new Map(),
+      researchChunks: new Map(),
       intentions: new Map(),
     };
     await RrfFusionStage().run(makeCtx(), state);
     expect(state.chunks.get('both')!.fusedScore!).toBeGreaterThan(
       state.chunks.get('solo')!.fusedScore!,
+    );
+  });
+
+  test('research chunk fusion: chunks in both vector and fulltext lists rank higher', async () => {
+    const makeResearchChunk = (id: string): ResearchChunk => ({
+      id: `00000000-0000-4000-8000-00000000000${id}`,
+      researchId: '00000000-0000-4000-8000-0000000000ff',
+      position: 0,
+      text: `research chunk ${id}`,
+      tokenCount: 1,
+      embedding: [],
+      createdAt: new Date(),
+      projectId: 'proj',
+    });
+    const state = makeState([], {
+      researchChunks: new Map([
+        [
+          'both',
+          {
+            chunk: makeResearchChunk('1'),
+            sources: [
+              { source: 'research_chunk_vector', rank: 0 },
+              { source: 'research_chunk_fulltext', rank: 0 },
+            ],
+            expansionReason: 'research_chunk_vector',
+          },
+        ],
+        [
+          'solo',
+          {
+            chunk: makeResearchChunk('2'),
+            sources: [{ source: 'research_chunk_vector', rank: 0 }],
+            expansionReason: 'research_chunk_vector',
+          },
+        ],
+      ]),
+    });
+    await RrfFusionStage().run(makeCtx(), state);
+    expect(state.researchChunks.get('both')!.fusedScore!).toBeGreaterThan(
+      state.researchChunks.get('solo')!.fusedScore!,
     );
   });
 
@@ -144,6 +186,7 @@ describe('RrfFusionStage', () => {
       knowledgeChunks: new Map(),
       procedures: new Map(),
       research: new Map(),
+      researchChunks: new Map(),
       intentions: new Map(),
     };
     await RrfFusionStage().run(makeCtx(), state);

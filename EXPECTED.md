@@ -83,8 +83,11 @@ GET /recall?
   &includeProcedures=true
   &includeResearch=true
 Returns ranked Fact[] + optional relatedEntities[] for GraphRAG expansion,
-plus v1.2 categories (knowledgeChunks[], procedures[], research[]) when
-explicitly opted into via includeKnowledge / includeProcedures / includeResearch.
+plus v1.2 categories (knowledgeChunks[], procedures[], research[],
+researchChunks[]) when explicitly opted into via includeKnowledge /
+includeProcedures / includeResearch. Research bodies are chunked into
+:ResearchChunk nodes (own vector + fulltext indexes, RRF-fused) so recall
+matches chunk-level content, not just the summary embedding.
 
 2. Orchestrator-side tools
 Keep the existing memory_save / memory_recall / memory_forget names so existing soul prompts still work — just reimplement them against the service. Add new ones for the richer surface.
