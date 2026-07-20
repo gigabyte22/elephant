@@ -39,8 +39,8 @@ GET    /procedures?name=…&projectId=…   lookup or paginated list
 DELETE /procedures/:id              soft-delete
 
 POST   /research                    project-scoped research artifact (projectId required)
-GET    /research/:id                fetch one
-GET    /research?projectId=…        list (projectId required)
+GET    /research/:id                fetch one (includes full `content` body)
+GET    /research?projectId=…        list (projectId required; rows include `content`)
 DELETE /research/:id                soft-delete
 
 POST   /state                       set working-state value (scope, key, value, ttlSec?)

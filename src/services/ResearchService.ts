@@ -8,8 +8,8 @@ import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest } from '../http/errors.ts';
 import type { Research } from '../models/types.ts';
-import type { RetrievalScope } from '../repositories/scope.ts';
 import { ResearchRepository } from '../repositories/ResearchRepository.ts';
+import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
 import { AuditService } from './AuditService.ts';
 
@@ -73,6 +73,7 @@ export function createResearchService(deps: Deps) {
       title: input.title,
       source: input.source,
       sourceUri: input.sourceUri,
+      content: input.content,
       contentHash: createHash('sha256').update(input.content).digest('hex'),
       summary,
       embedding,
