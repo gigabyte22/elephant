@@ -264,6 +264,15 @@ export const WireSupersedeChainSchema = z.object({
   chain: z.array(WireFactSchema),
 });
 
+// --- Narrative markdown view ----------------------------------------------
+
+export const WireNarrativeMarkdownSchema = z.object({
+  // The vault's own serialization of the node, frontmatter included.
+  markdown: z.string(),
+  // Basename the vault would give the file, used as the download name.
+  filename: z.string(),
+});
+
 // --- Shared scope query schema --------------------------------------------
 
 export const ScopeQuerySchema = z.object({
