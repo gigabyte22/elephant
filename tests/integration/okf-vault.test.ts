@@ -127,7 +127,7 @@ describe('OKF vault projection', () => {
 
   test('okf-sync restores a deleted vault file and tombstones lapsed research', async () => {
     await clearDb();
-    const { syncVault } = await import('../../scripts/okf-sync.ts');
+    const { syncVault } = await import('../../src/adapters/vault/sync.ts');
 
     const keptContent = 'body that will be restored by sync';
     const kept = await app.inject({

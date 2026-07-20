@@ -61,6 +61,10 @@ const EnvSchema = z
     OLLAMA_EMBED_MODEL: z.string().default('nomic-embed-text'),
 
     MEMORY_DREAM_CRON: z.string().default('0 3 * * *'),
+    // OKF vault sweep. Staggered off MEMORY_DREAM_CRON because the dream cycle
+    // can run for DREAM_DEADLINE_MS against the same driver pool. Only starts
+    // when OKF_ENABLED (see scripts/serve.ts).
+    OKF_SYNC_CRON: z.string().default('30 3 * * *'),
     MEMORY_OBSERVATION_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
     // Working-state backend selection. Default Neo4j keeps everything in one

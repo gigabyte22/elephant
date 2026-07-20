@@ -301,7 +301,12 @@ Contract:
   request (the graph already committed). `pnpm okf:sync` is the repair path:
   hash-gated (frontmatter `contentHash` + `updatedAt` vs node), idempotent,
   batched; it also tombstones naturally-lapsed research (`deleteReason:
-  expired`) since expiry is enforced on read and no reaper exists.
+  expired`) since expiry is enforced on read and no graph-side reaper exists.
+  The same sweep runs on `OKF_SYNC_CRON` while `OKF_ENABLED`, so lapsed
+  research reaches `_trash/` without a manual run; `pnpm okf:sync` remains the
+  on-demand path. Overruns are skipped per-process, but there is no
+  cross-process lock — a manual run can race a scheduled tick (writes are
+  atomic temp-sibling + rename, so a file is never torn).
 - **Frontmatter = identity + provenance** (id, kind, title, scope, source,
   tags, timestamps, contentHash, summary); **body = the retained content**
   (summary + "body not retained" note for pre-retention rows).
@@ -322,3 +327,4 @@ Contract:
 |---|---|---|
 | OKF_ENABLED | false | Enable vault materialization |
 | OKF_DIR | ./.okf-vault | Vault root directory |
+| OKF_SYNC_CRON | 30 3 * * * | Scheduled vault sweep (only runs when OKF_ENABLED) |
