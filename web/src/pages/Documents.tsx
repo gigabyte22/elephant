@@ -22,7 +22,7 @@ const MarkdownPanel = lazy(() =>
 );
 
 const PAGE_SIZE = 50;
-const GRID = 'grid-cols-[2.5rem_9rem_1fr_8rem_6rem_5.5rem]';
+const GRID = 'grid-cols-[2.5rem_11rem_1fr_8rem_6rem_5.5rem]';
 
 const SORTS: ReadonlyArray<DocumentSort> = ['recent', 'created', 'title'];
 const SORT_LABEL: Record<DocumentSort, string> = {
@@ -123,7 +123,7 @@ export function Documents() {
 
       {docs.data && (
         <>
-          <LedgerScroll minWidth="52rem">
+          <LedgerScroll minWidth="54rem">
             <RowHeader />
             <ol>
               {items.map((d, i) => (
