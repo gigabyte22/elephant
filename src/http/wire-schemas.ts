@@ -245,6 +245,7 @@ export const WireMemoryKindSchema = z.enum([
   'knowledge_chunk',
   'procedure',
   'research',
+  'research_chunk',
   'intention',
 ]);
 

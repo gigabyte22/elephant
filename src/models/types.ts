@@ -21,6 +21,7 @@ export const MemoryKindSchema = z.enum([
   'knowledge_chunk',
   'procedure',
   'research',
+  'research_chunk',
   'intention',
 ]);
 export type MemoryKind = z.infer<typeof MemoryKindSchema>;
@@ -317,6 +318,22 @@ export const ResearchSchema = KnowledgeDocumentSchema.extend({
   projectId: z.string().min(1),
 });
 export type Research = z.infer<typeof ResearchSchema>;
+
+// Research body chunks — same shape as KnowledgeChunk but parented on a
+// Research node (no attachments on research). Kept as a separate label so
+// research recall never leaks into knowledge indexes and vice versa.
+export const ResearchChunkSchema = z
+  .object({
+    id: z.string().uuid(),
+    researchId: z.string().uuid(),
+    position: z.number().int().nonnegative(),
+    text: z.string().min(1),
+    tokenCount: z.number().int().nonnegative(),
+    embedding: EmbeddingSchema,
+    createdAt: z.date(),
+  })
+  .merge(ScopeSchema);
+export type ResearchChunk = z.infer<typeof ResearchChunkSchema>;
 
 // --- ArchivedRevision ------------------------------------------------------
 // Snapshot of a memory item taken before mutation. Linked to the live node

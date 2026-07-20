@@ -19,6 +19,7 @@ const VECTOR_INDEX_LABELS = [
   'KnowledgeChunk',
   'Procedure',
   'Research',
+  'ResearchChunk',
   'Intention',
   // Entity vectors back synonym detection (dream cycle) and query→entity
   // linking (PPR retrieval). Entity embeddings are re-derived from the entity
@@ -87,6 +88,11 @@ export function buildStatements(embedDim: number): Statement[] {
     {
       name: 'constraint:research_id',
       cypher: 'CREATE CONSTRAINT research_id IF NOT EXISTS FOR (r:Research) REQUIRE r.id IS UNIQUE',
+    },
+    {
+      name: 'constraint:research_chunk_id',
+      cypher:
+        'CREATE CONSTRAINT research_chunk_id IF NOT EXISTS FOR (c:ResearchChunk) REQUIRE c.id IS UNIQUE',
     },
     {
       name: 'constraint:intention_id',
@@ -193,6 +199,11 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'fulltext:research',
       cypher:
         "CREATE FULLTEXT INDEX research_fulltext IF NOT EXISTS FOR (r:Research) ON EACH [r.title, r.summary] OPTIONS {indexConfig: {`fulltext.analyzer`: 'english'}}",
+    },
+    {
+      name: 'fulltext:research_chunk_text',
+      cypher:
+        "CREATE FULLTEXT INDEX research_chunk_fulltext IF NOT EXISTS FOR (c:ResearchChunk) ON EACH [c.text] OPTIONS {indexConfig: {`fulltext.analyzer`: 'english'}}",
     },
     {
       name: 'fulltext:intention',

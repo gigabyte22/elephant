@@ -7,16 +7,21 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound } from '../http/errors.ts';
-import type { Research } from '../models/types.ts';
+import type { Research, ResearchChunk } from '../models/types.ts';
+import { ResearchChunkRepository } from '../repositories/ResearchChunkRepository.ts';
 import { ResearchRepository } from '../repositories/ResearchRepository.ts';
 import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
 import { AuditService } from './AuditService.ts';
+import { type Chunker, createChunker } from './Chunker.ts';
 
 interface Deps {
   llm: LLMAdapter;
   embedder: EmbeddingAdapter;
+  chunker?: Chunker;
   config: {
+    chunkTargetTokens: number;
+    chunkOverlapTokens: number;
     summaryThresholdTokens: number;
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
@@ -50,10 +55,43 @@ export interface UpdateResearchInput {
 
 export function createResearchService(deps: Deps) {
   const { llm, embedder, config } = deps;
+  const chunker = deps.chunker ?? createChunker({ countTokens: embedder.countTokens });
   const embedderLimit = Math.min(
     embedder.maxInputTokens,
     config.embedderMaxInputTokens ?? embedder.maxInputTokens,
   );
+  // Chunks must fit the embedder — chunk-don't-truncate, same as knowledge.
+  const chunkTarget = Math.min(config.chunkTargetTokens, embedderLimit);
+
+  // Chunk the body and batch-embed [summary, ...chunks] in one call.
+  // Returns the summary vector plus fully-built chunk rows.
+  async function chunkAndEmbed(input: {
+    researchId: string;
+    content: string;
+    summary: string;
+    at: Date;
+    projectId: string;
+    userId?: string;
+  }): Promise<{ embedding: number[]; chunks: ResearchChunk[] }> {
+    const pieces = await chunker.chunk(input.content, {
+      maxTokens: chunkTarget,
+      overlapTokens: config.chunkOverlapTokens,
+    });
+    if (pieces.length === 0) throw badRequest('research content produced no chunks');
+    const vectors = await embedder.embedBatch([input.summary, ...pieces.map((p) => p.text)]);
+    const chunks: ResearchChunk[] = pieces.map((p, i) => ({
+      id: newId(),
+      researchId: input.researchId,
+      position: p.position,
+      text: p.text,
+      tokenCount: p.tokenCount,
+      embedding: vectors[i + 1] ?? [],
+      createdAt: input.at,
+      projectId: input.projectId,
+      ...(input.userId !== undefined && { userId: input.userId }),
+    }));
+    return { embedding: vectors[0] ?? [], chunks };
+  }
 
   // Explicit summary is validated against the embedder limit; otherwise long
   // content is LLM-summarized and short content doubles as its own summary.
@@ -78,10 +116,18 @@ export function createResearchService(deps: Deps) {
     if (!input.projectId) throw badRequest('research items require projectId');
 
     const summary = await resolveSummary(input.content, input.summary);
-    const embedding = await embedder.embed(summary);
     const now = new Date();
+    const id = input.id ?? newId();
+    const { embedding, chunks } = await chunkAndEmbed({
+      researchId: id,
+      content: input.content,
+      summary,
+      at: now,
+      projectId: input.projectId,
+      userId: input.userId,
+    });
     const research: Research = {
-      id: input.id ?? newId(),
+      id,
       title: input.title,
       source: input.source,
       sourceUri: input.sourceUri,
@@ -99,13 +145,14 @@ export function createResearchService(deps: Deps) {
 
     return write(async (tx) => {
       const created = await ResearchRepository.create(tx, research);
+      await ResearchChunkRepository.createForResearch(tx, { researchId: created.id, chunks });
       await AuditService.record({
         tx,
         kind: 'create',
         targetId: created.id,
         targetKind: 'research',
         actor: input.actor,
-        payload: { projectId: created.projectId, source: created.source },
+        payload: { projectId: created.projectId, source: created.source, chunkCount: chunks.length },
       });
       return created;
     });
@@ -120,10 +167,20 @@ export function createResearchService(deps: Deps) {
     let summary: string | undefined;
     let embedding: number[] | undefined;
     let contentHash: string | undefined;
+    let newChunks: ResearchChunk[] | undefined;
     if (contentChanged && input.content !== undefined) {
       summary = await resolveSummary(input.content, input.summary);
-      embedding = await embedder.embed(summary);
       contentHash = createHash('sha256').update(input.content).digest('hex');
+      const chunked = await chunkAndEmbed({
+        researchId: id,
+        content: input.content,
+        summary,
+        at: new Date(),
+        projectId: before.projectId,
+        userId: before.userId,
+      });
+      embedding = chunked.embedding;
+      newChunks = chunked.chunks;
     } else if (input.summary !== undefined && input.summary !== before.summary) {
       summary = await resolveSummary(before.content ?? before.summary, input.summary);
       embedding = await embedder.embed(summary);
@@ -140,7 +197,7 @@ export function createResearchService(deps: Deps) {
         kind: 'research',
         reason: input.reason ?? 'manual update',
         actor: input.actor,
-        payload: { changes, contentChanged },
+        payload: { changes, contentChanged, ...(newChunks && { chunkCount: newChunks.length }) },
       });
       const updated = await ResearchRepository.update(tx, id, {
         title: input.title,
@@ -154,6 +211,10 @@ export function createResearchService(deps: Deps) {
         updatedAt: new Date(),
       });
       if (!updated) throw notFound(`research ${id}`);
+      if (newChunks) {
+        await ResearchChunkRepository.deleteForResearch(tx, id);
+        await ResearchChunkRepository.createForResearch(tx, { researchId: id, chunks: newChunks });
+      }
       return updated;
     });
   }
@@ -169,6 +230,9 @@ export function createResearchService(deps: Deps) {
   async function softDelete(id: string, actor?: string): Promise<void> {
     await write(async (tx) => {
       await ResearchRepository.softDelete(tx, id, new Date());
+      // Chunks are derived data (reproducible from on-node content) — hard
+      // delete so deleted research can never resurface through chunk recall.
+      await ResearchChunkRepository.deleteForResearch(tx, id);
       await AuditService.record({
         tx,
         kind: 'soft_delete',
