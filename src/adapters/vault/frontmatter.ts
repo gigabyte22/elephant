@@ -56,11 +56,14 @@ export function parseVaultDoc(text: string): { meta: VaultFrontmatter; body: str
 }
 
 // Shared shape of Research / KnowledgeDocument that maps onto frontmatter.
+// `content` is absent from frontmatter but belongs here: it is what bodyFor
+// projects, and every caller of frontmatterFor also needs a body.
 export interface NarrativeItem {
   id: string;
   title: string;
   source: string;
   sourceUri?: string;
+  content?: string;
   contentHash?: string;
   summary: string;
   tags: string[];
@@ -68,6 +71,16 @@ export interface NarrativeItem {
   updatedAt: Date;
   projectId?: string;
   userId?: string;
+}
+
+// The one answer to "what is the markdown body of a narrative node". Rows
+// created before content retention (M1) only have a summary, so say so
+// explicitly rather than silently presenting a summary as if it were the body.
+// Every projection — live write, sync repair, and the dashboard's read-only
+// markdown view — goes through here so they cannot drift apart.
+export function bodyFor(item: Pick<NarrativeItem, 'content' | 'summary'>): string {
+  if (item.content !== undefined && item.content !== '') return item.content;
+  return `${item.summary}\n\n> body not retained (pre-OKF record; only the summary survives)`;
 }
 
 export function frontmatterFor(kind: VaultKind, item: NarrativeItem): VaultFrontmatter {
