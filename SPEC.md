@@ -30,7 +30,7 @@ Categories supported in v1.2 (existing + new):
 - **Insights** — `:Insight` (existing, promoted from high-importance facts during dreaming).
 - **Knowledge** — `:KnowledgeDocument` + `:KnowledgeChunk` (new). Shared / RAG documents.
 - **Procedural** — `:Procedure` (new). Skills, workflows, agent how-to. Versioned via `:SUPERSEDES` chains.
-- **Research** — `:Research` (new). Project-scoped research artifacts; same shape as KnowledgeDocument but `projectId` is required.
+- **Research** — `:Research` (new). Project-scoped research artifacts; same shape as KnowledgeDocument but `projectId` is required. The full `content` body is retained on the node (like KnowledgeDocument) — `contentHash` + `summary` are derived from it, never a replacement for it.
 
 Cross-cutting scope axes on every memory item: `projectId`, `userId`, plus the existing `agentId` / `sessionId`. Each axis runs in retrieval mode `boost` (default), `filter` (hard match), or `none`.
 
