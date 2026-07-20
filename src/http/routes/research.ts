@@ -44,11 +44,18 @@ export function registerResearchRoutes(app: App, container: Container): void {
     url: '/research/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: z.object({ projectId: z.string().optional() }),
       response: { 200: okEnvelope(WireResearchSchema) },
     },
     handler: async (req) => {
       const research = await container.research.get(req.params.id);
       if (!research) throw notFound(`research ${req.params.id}`);
+      // Scope check: a caller asking within a project must not read another
+      // project's record by id. Repository.get is scope-blind, so guard here.
+      // Reported as notFound rather than forbidden — existence is itself scoped.
+      if (req.query.projectId && research.projectId && research.projectId !== req.query.projectId) {
+        throw notFound(`research ${req.params.id}`);
+      }
       return { ok: true as const, data: toWireResearch(research) };
     },
   });
@@ -65,6 +72,10 @@ export function registerResearchRoutes(app: App, container: Container): void {
         scope: {
           projectId: req.query.projectId,
           userId: req.query.userId,
+          // Without an explicit mode, scopeFilterClause emits an empty predicate and
+          // this returns every project's research. Mirrors knowledge.ts.
+          projectScope: req.query.projectId ? 'filter' : 'none',
+          userScope: req.query.userId ? 'filter' : 'none',
         },
         limit: req.query.limit,
       });

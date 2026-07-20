@@ -77,9 +77,15 @@ export const ResearchRepository = {
   ): Promise<Research[]> {
     const limit = input.limit ?? 50;
     const { clause, params } = scopeWhereClause('r', input.scope);
+    // Research is the EXPIRABLE tier — that property is the whole reason it is
+    // delegable to sub-agents. Without this predicate nothing ever expires on
+    // read, and because softDelete is implemented as "set expiresAt = now",
+    // deleted records kept coming straight back in the next list (2026-07-20).
+    const live = 'r.expiresAt IS NULL OR r.expiresAt > datetime()';
+    const where = clause ? `${clause} AND (${live})` : `WHERE ${live}`;
     const result = await tx.run(
       `MATCH (r:Research)
-       ${clause}
+       ${where}
        RETURN r {.*} AS r
        ORDER BY r.updatedAt DESC
        LIMIT toInteger($limit)`,

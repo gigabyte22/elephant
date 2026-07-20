@@ -96,6 +96,10 @@ export function registerProceduresRoutes(app: App, container: Container): void {
         scope: {
           projectId: req.query.projectId,
           userId: req.query.userId,
+          // Without an explicit mode, scopeFilterClause emits an empty predicate and
+          // this returns every project's procedures. Mirrors knowledge.ts.
+          projectScope: req.query.projectId ? 'filter' : 'none',
+          userScope: req.query.userId ? 'filter' : 'none',
         },
         limit: req.query.limit,
       });

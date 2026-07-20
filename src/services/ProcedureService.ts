@@ -7,6 +7,7 @@ import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound } from '../http/errors.ts';
 import type { Procedure, Scope } from '../models/types.ts';
 import { ProcedureRepository } from '../repositories/ProcedureRepository.ts';
+import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
 import { AuditService } from './AuditService.ts';
 
@@ -180,7 +181,7 @@ export function createProcedureService(deps: Deps) {
     return read((tx) => ProcedureRepository.getByName(tx, { name, projectId: projectId ?? null }));
   }
 
-  async function list(opts: { scope?: Scope; limit?: number } = {}): Promise<Procedure[]> {
+  async function list(opts: { scope?: RetrievalScope; limit?: number } = {}): Promise<Procedure[]> {
     return read((tx) => ProcedureRepository.list(tx, opts));
   }
 

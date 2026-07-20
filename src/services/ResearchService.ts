@@ -7,7 +7,8 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest } from '../http/errors.ts';
-import type { Research, Scope } from '../models/types.ts';
+import type { Research } from '../models/types.ts';
+import type { RetrievalScope } from '../repositories/scope.ts';
 import { ResearchRepository } from '../repositories/ResearchRepository.ts';
 import { newId } from '../utils/ids.ts';
 import { AuditService } from './AuditService.ts';
@@ -101,7 +102,7 @@ export function createResearchService(deps: Deps) {
     return read((tx) => ResearchRepository.get(tx, id));
   }
 
-  async function list(opts: { scope?: Scope; limit?: number } = {}): Promise<Research[]> {
+  async function list(opts: { scope?: RetrievalScope; limit?: number } = {}): Promise<Research[]> {
     return read((tx) => ResearchRepository.list(tx, opts));
   }
 
