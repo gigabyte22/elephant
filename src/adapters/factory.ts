@@ -15,6 +15,8 @@ import { createOpenAILLMAdapter } from './llm/openai.ts';
 import type { LLMAdapter } from './llm/types.ts';
 import { createFsBlobStore } from './storage/fs-blob-store.ts';
 import type { BlobStore } from './storage/types.ts';
+import { createFsVaultWriter } from './vault/fs-vault-writer.ts';
+import type { VaultWriter } from './vault/types.ts';
 import { Neo4jWorkingStateAdapter } from './working-state/neo4j.ts';
 import type { WorkingStateAdapter } from './working-state/types.ts';
 
@@ -88,6 +90,10 @@ export async function buildWorkingStateAdapter(env: Env): Promise<WorkingStateAd
 
 export function buildBlobStore(env: Env): BlobStore {
   return createFsBlobStore(env.KNOWLEDGE_BLOB_DIR);
+}
+
+export function buildVaultWriter(env: Env): VaultWriter | undefined {
+  return env.OKF_ENABLED ? createFsVaultWriter(env.OKF_DIR) : undefined;
 }
 
 // Resolve the vision provider for image extraction. 'auto' prefers Anthropic,

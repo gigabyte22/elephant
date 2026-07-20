@@ -81,6 +81,10 @@ const EnvSchema = z
     LLM_MAX_CONTEXT_TOKENS: z.coerce.number().int().positive().optional(),
     MAX_BODY_BYTES: z.coerce.number().int().positive().default(10_000_000),
 
+    // OKF vault: one-way markdown projection of research + knowledge docs.
+    OKF_ENABLED: boolEnv(false),
+    OKF_DIR: z.string().default('./.okf-vault'),
+
     // Knowledge attachments: filesystem blob store + multimodal extraction.
     KNOWLEDGE_BLOB_DIR: z.string().default('./.knowledge-blobs'),
     KNOWLEDGE_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(26_214_400), // 25 MiB
