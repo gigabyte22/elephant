@@ -54,6 +54,14 @@ export interface DashboardService {
   topEntities(input: { limit: number; scope: ScopeInput }): Promise<TopEntitiesPayload>;
   entityTypes(): Promise<EntityTypesPayload>;
   episodeOrigins(scope: ScopeInput): Promise<EpisodeOriginsPayload>;
+  documents(input: {
+    kind?: 'research' | 'knowledge_document';
+    q?: string;
+    sort: 'recent' | 'created' | 'title';
+    limit: number;
+    offset: number;
+    scope: ScopeInput;
+  }): Promise<DocumentsPayload>;
   graphSearch(input: { q: string; limit: number }): Promise<GraphSearchPayload>;
   graphNeighborhood(input: {
     nodeId: string;
@@ -145,6 +153,28 @@ export interface EntityTypesPayload {
 
 export interface EpisodeOriginsPayload {
   items: Array<{ origin: string; count: number }>;
+}
+
+export interface DocumentItem {
+  id: string;
+  kind: 'research' | 'knowledge_document';
+  title: string;
+  summary: string;
+  source: string;
+  tags: string[];
+  projectId?: string;
+  userId?: string;
+  hasContent: boolean;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
+}
+
+export interface DocumentsPayload {
+  sort: 'recent' | 'created' | 'title';
+  total: number;
+  offset: number;
+  items: DocumentItem[];
 }
 
 export interface GraphSearchPayload {
@@ -435,17 +465,56 @@ export function createDashboardService(config: DashboardServiceConfig = {}): Das
       });
     },
 
+    async documents(input) {
+      return read(async (tx) => {
+        const scope = toScopeFilter(input.scope);
+        const [rows, total] = await Promise.all([
+          DashboardRepository.listDocuments(tx, { ...input, scope }),
+          DashboardRepository.countDocuments(tx, { kind: input.kind, q: input.q, scope }),
+        ]);
+        return {
+          sort: input.sort,
+          total,
+          offset: input.offset,
+          items: rows.map((r) => ({
+            id: r.id,
+            kind: r.kind,
+            title: r.title,
+            summary: r.summary,
+            source: r.source,
+            tags: r.tags,
+            ...(r.projectId !== null && { projectId: r.projectId }),
+            ...(r.userId !== null && { userId: r.userId }),
+            hasContent: r.hasContent,
+            createdAt: r.createdAt.toISOString(),
+            updatedAt: r.updatedAt.toISOString(),
+            ...(r.expiresAt !== null && { expiresAt: r.expiresAt.toISOString() }),
+          })),
+        };
+      });
+    },
+
     async graphSearch(input) {
       return read(async (tx) => {
         const perSource = Math.max(5, Math.ceil(input.limit / 2));
-        const [facts, chunks, knowledge, procs, entities] = await Promise.all([
+        const [facts, chunks, knowledge, docs, research, procs, entities] = await Promise.all([
           DashboardRepository.searchFacts(tx, input.q, perSource).catch(() => []),
           DashboardRepository.searchChunks(tx, input.q, perSource).catch(() => []),
           DashboardRepository.searchKnowledgeChunks(tx, input.q, perSource).catch(() => []),
+          DashboardRepository.searchKnowledgeDocuments(tx, input.q, perSource).catch(() => []),
+          DashboardRepository.searchResearch(tx, input.q, perSource).catch(() => []),
           DashboardRepository.searchProcedures(tx, input.q, perSource).catch(() => []),
           DashboardRepository.searchEntities(tx, input.q, perSource),
         ]);
-        const merged = [...facts, ...chunks, ...knowledge, ...procs, ...entities]
+        const merged = [
+          ...facts,
+          ...chunks,
+          ...knowledge,
+          ...docs,
+          ...research,
+          ...procs,
+          ...entities,
+        ]
           .sort((a, b) => b.score - a.score)
           .slice(0, input.limit);
         return { q: input.q, results: merged };

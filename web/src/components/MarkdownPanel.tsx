@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { NarrativeKind } from '../../api/types.ts';
-import { useNarrativeMarkdown } from '../../hooks/useNarrativeMarkdown.ts';
-import { useScope } from '../../hooks/useScope.ts';
-import { DetailPanel } from '../DetailPanel.tsx';
-import { SegBtnGroup } from '../SegButtons.tsx';
+import type { NarrativeKind } from '../api/types.ts';
+import { useNarrativeMarkdown } from '../hooks/useNarrativeMarkdown.ts';
+import { useScope } from '../hooks/useScope.ts';
+import { DetailPanel } from './DetailPanel.tsx';
+import { SegBtnGroup } from './SegButtons.tsx';
 
 // "Open as markdown" for a research / knowledge node. Shows exactly what the
 // OKF vault would write for this node — the endpoint reuses the vault's own

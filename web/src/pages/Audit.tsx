@@ -87,7 +87,7 @@ export function Audit() {
   return (
     <div className="mx-auto max-w-7xl pb-20">
       <PageHeading
-        rank={8}
+        rank={9}
         title="audit"
         right={
           <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">

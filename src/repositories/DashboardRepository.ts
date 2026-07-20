@@ -57,6 +57,32 @@ function buildFactListFilter(input: {
   return { clause: parts.length ? `AND ${parts.join(' AND ')}` : '', params };
 }
 
+// Shared WHERE fragment for the documents ledger (list + count). Both Research
+// and KnowledgeDocument implement soft-delete as `expiresAt = now`, so the
+// liveness predicate is uniform across the two labels. Substring match rather
+// than the fulltext indexes so sorting stays stable under offset pagination —
+// the same trade the facts ledger makes.
+function buildDocumentListFilter(input: {
+  kind?: 'research' | 'knowledge_document';
+  q?: string;
+  scope: ScopeFilter;
+}): { clause: string; params: Record<string, string> } {
+  const scoped = buildScopeClause('n', input.scope);
+  const parts = ['(n.expiresAt IS NULL OR n.expiresAt > datetime())'];
+  const params: Record<string, string> = { ...scoped.params };
+  if (scoped.clause) parts.push(scoped.clause);
+  if (input.kind) {
+    parts.push(input.kind === 'research' ? 'n:Research' : 'n:KnowledgeDocument');
+  }
+  if (input.q) {
+    parts.push(
+      '(toLower(n.title) CONTAINS toLower($q) OR toLower(n.summary) CONTAINS toLower($q))',
+    );
+    params.q = input.q;
+  }
+  return { clause: parts.join(' AND '), params };
+}
+
 // --- Memory item kinds → timeline source mapping --------------------------
 //
 // Each :MemoryItem subtype has its own primary timestamp property. Mapped
@@ -150,6 +176,23 @@ export interface GraphSearchHit {
   label: string;
   snippet?: string;
   score: number;
+}
+
+export interface DocumentRow {
+  id: string;
+  kind: 'research' | 'knowledge_document';
+  title: string;
+  summary: string;
+  source: string;
+  tags: string[];
+  projectId: string | null;
+  userId: string | null;
+  // Pre-retention rows have no body — the ledger flags them so a stub is
+  // visibly different from a document whose markdown is worth opening.
+  hasContent: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date | null;
 }
 
 export const DashboardRepository = {
@@ -422,6 +465,72 @@ export const DashboardRepository = {
   // Returning a normalized row shape per source means the service can
   // concatenate without per-source branching.
 
+  async listDocuments(
+    tx: ManagedTransaction,
+    input: {
+      kind?: 'research' | 'knowledge_document';
+      q?: string;
+      sort: 'recent' | 'created' | 'title';
+      limit: number;
+      offset: number;
+      scope: ScopeFilter;
+    },
+  ): Promise<DocumentRow[]> {
+    const { clause, params } = buildDocumentListFilter(input);
+    // Repo-controlled identifiers, never user input.
+    const order =
+      input.sort === 'title'
+        ? 'toLower(n.title) ASC'
+        : input.sort === 'created'
+          ? 'n.createdAt DESC'
+          : 'n.updatedAt DESC';
+    const result = await tx.run(
+      `MATCH (n:Research|KnowledgeDocument)
+       WHERE ${clause}
+       RETURN n {.*} AS n, labels(n) AS labels
+       ORDER BY ${order}
+       SKIP toInteger($offset) LIMIT toInteger($limit)`,
+      { ...params, offset: input.offset, limit: input.limit },
+    );
+    return result.records.map((r) => {
+      const n = r.get('n') as Record<string, unknown>;
+      const labels = r.get('labels') as string[];
+      const content = n.content as string | undefined;
+      return {
+        id: n.id as string,
+        kind: labels.includes('Research') ? 'research' : 'knowledge_document',
+        title: (n.title as string) ?? '(untitled)',
+        summary: (n.summary as string) ?? '',
+        source: (n.source as string) ?? 'unknown',
+        tags: (n.tags as string[]) ?? [],
+        projectId: (n.projectId as string | undefined) ?? null,
+        userId: (n.userId as string | undefined) ?? null,
+        hasContent: content !== undefined && content !== '',
+        createdAt: toJsDate(n.createdAt),
+        updatedAt: toJsDate(n.updatedAt),
+        expiresAt: toJsDateOrNull(n.expiresAt),
+      };
+    });
+  },
+
+  async countDocuments(
+    tx: ManagedTransaction,
+    input: {
+      kind?: 'research' | 'knowledge_document';
+      q?: string;
+      scope: ScopeFilter;
+    },
+  ): Promise<number> {
+    const { clause, params } = buildDocumentListFilter(input);
+    const result = await tx.run(
+      `MATCH (n:Research|KnowledgeDocument)
+       WHERE ${clause}
+       RETURN count(n) AS total`,
+      params,
+    );
+    return (result.records[0]?.get('total') as number | undefined) ?? 0;
+  },
+
   async searchFacts(tx: ManagedTransaction, q: string, limit: number): Promise<GraphSearchHit[]> {
     return runFulltextSearch(tx, {
       q,
@@ -457,6 +566,56 @@ export const DashboardRepository = {
       textField: 'text',
       kind: 'knowledge_chunk',
     });
+  },
+
+  // Research and KnowledgeDocument get their own queries rather than going
+  // through runFulltextSearch: their indexes cover title+summary, so the
+  // display label is the title, not a truncation of the body.
+  //
+  // Both kinds implement soft-delete as `expiresAt = now`, so both need the
+  // liveness predicate — without it, deleted documents keep showing up in
+  // search results.
+  async searchResearch(
+    tx: ManagedTransaction,
+    q: string,
+    limit: number,
+  ): Promise<GraphSearchHit[]> {
+    const result = await tx.run(
+      `CALL db.index.fulltext.queryNodes('research_fulltext', $q) YIELD node, score
+       WHERE node:Research AND (node.expiresAt IS NULL OR node.expiresAt > datetime())
+       RETURN node.id AS id, node.title AS title, node.summary AS summary, score
+       LIMIT toInteger($limit)`,
+      { q, limit },
+    );
+    return result.records.map((r) => ({
+      id: r.get('id') as string,
+      kind: 'research',
+      label: (r.get('title') as string) ?? '(untitled)',
+      snippet: truncate((r.get('summary') as string) ?? '', 200),
+      score: r.get('score') as number,
+    }));
+  },
+
+  async searchKnowledgeDocuments(
+    tx: ManagedTransaction,
+    q: string,
+    limit: number,
+  ): Promise<GraphSearchHit[]> {
+    const result = await tx.run(
+      `CALL db.index.fulltext.queryNodes('knowledge_document_fulltext', $q) YIELD node, score
+       WHERE node:KnowledgeDocument
+         AND (node.expiresAt IS NULL OR node.expiresAt > datetime())
+       RETURN node.id AS id, node.title AS title, node.summary AS summary, score
+       LIMIT toInteger($limit)`,
+      { q, limit },
+    );
+    return result.records.map((r) => ({
+      id: r.get('id') as string,
+      kind: 'knowledge_document',
+      label: (r.get('title') as string) ?? '(untitled)',
+      snippet: truncate((r.get('summary') as string) ?? '', 200),
+      score: r.get('score') as number,
+    }));
   },
 
   async searchProcedures(

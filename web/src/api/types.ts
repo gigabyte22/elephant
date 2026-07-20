@@ -242,3 +242,29 @@ export interface NarrativeMarkdownPayload {
   markdown: string;
   filename: string;
 }
+
+// A row in the documents ledger. `hasContent` is false for pre-retention
+// records whose body was never kept — only a summary survives.
+export interface DocumentItem {
+  id: string;
+  kind: NarrativeKind;
+  title: string;
+  summary: string;
+  source: string;
+  tags: string[];
+  projectId?: string;
+  userId?: string;
+  hasContent: boolean;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt?: string;
+}
+
+export type DocumentSort = 'recent' | 'created' | 'title';
+
+export interface DocumentsPayload {
+  sort: DocumentSort;
+  total: number;
+  offset: number;
+  items: DocumentItem[];
+}
