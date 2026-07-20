@@ -12,3 +12,4 @@ coverage
 
 # Dev tooling artifacts
 .playwright-mcp/
+.okf-vault/

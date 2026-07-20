@@ -8,10 +8,12 @@ import {
   buildEmbeddingAdapter,
   buildExtractionService,
   buildLLMAdapter,
+  buildVaultWriter,
   buildWorkingStateAdapter,
 } from './adapters/factory.ts';
 import type { LLMAdapter } from './adapters/llm/types.ts';
 import type { BlobStore } from './adapters/storage/types.ts';
+import type { VaultWriter } from './adapters/vault/types.ts';
 import type { WorkingStateAdapter } from './adapters/working-state/types.ts';
 import type { Env } from './config/env.ts';
 import { loadEnv } from './config/env.ts';
@@ -53,6 +55,7 @@ export interface Container {
   llm: LLMAdapter;
   embedder: EmbeddingAdapter;
   blobStore: BlobStore;
+  vault?: VaultWriter;
   extraction: ExtractionService;
   ingestion: MemoryIngestionService;
   retrieval: RetrievalService;
@@ -75,6 +78,7 @@ export interface ContainerOverrides {
   embedder?: EmbeddingAdapter;
   retrievalPipeline?: Pipeline;
   workingStateAdapter?: WorkingStateAdapter;
+  vault?: VaultWriter;
 }
 
 export async function buildContainer(overrides: ContainerOverrides = {}): Promise<Container> {
@@ -99,6 +103,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
   };
 
   const blobStore = buildBlobStore(env);
+  const vault = overrides.vault ?? buildVaultWriter(env);
   const extraction = buildExtractionService(env);
   const graphProjection = createGraphProjectionService();
 
@@ -107,6 +112,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     llm,
     embedder,
     blobStore,
+    vault,
     extraction,
     ingestion: createMemoryIngestionService({ llm, embedder, config: sharedConfig }),
     retrieval: createRetrievalService({
@@ -150,6 +156,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       embedder,
       blobStore,
       extraction,
+      vault,
       config: { ...sharedConfig, maxAttachmentBytes: env.KNOWLEDGE_MAX_ATTACHMENT_BYTES },
     }),
     procedures: createProcedureService({
@@ -160,7 +167,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       embedder,
       config: { embedderMaxInputTokens: env.EMBED_MAX_INPUT_TOKENS },
     }),
-    research: createResearchService({ llm, embedder, config: sharedConfig }),
+    research: createResearchService({ llm, embedder, vault, config: sharedConfig }),
     workingState: createWorkingStateService({ adapter: workingStateAdapter }),
     workingStateAdapter,
     dashboard: createDashboardService({

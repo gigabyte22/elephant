@@ -5,6 +5,8 @@
 import { createHash } from 'node:crypto';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
+import { frontmatterFor } from '../adapters/vault/frontmatter.ts';
+import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound } from '../http/errors.ts';
 import type { Research, ResearchChunk } from '../models/types.ts';
@@ -19,6 +21,7 @@ interface Deps {
   llm: LLMAdapter;
   embedder: EmbeddingAdapter;
   chunker?: Chunker;
+  vault?: VaultWriter;
   config: {
     chunkTargetTokens: number;
     chunkOverlapTokens: number;
@@ -54,8 +57,33 @@ export interface UpdateResearchInput {
 }
 
 export function createResearchService(deps: Deps) {
-  const { llm, embedder, config } = deps;
+  const { llm, embedder, config, vault } = deps;
   const chunker = deps.chunker ?? createChunker({ countTokens: embedder.countTokens });
+
+  // OKF vault projection runs AFTER the graph transaction commits and is
+  // log-and-continue: failing the request post-commit would report a false
+  // failure, and scripts/okf-sync.ts is the repair path.
+  async function vaultProject(item: Research): Promise<void> {
+    if (!vault) return;
+    try {
+      await vault.write(frontmatterFor('research', item), item.content ?? item.summary);
+    } catch (err) {
+      console.error('[okf] vault write failed', { id: item.id, err });
+    }
+  }
+
+  async function vaultTombstone(item: Research, at: Date): Promise<void> {
+    if (!vault) return;
+    try {
+      await vault.tombstone(
+        { id: item.id, kind: 'research', projectId: item.projectId },
+        at,
+        'soft_delete',
+      );
+    } catch (err) {
+      console.error('[okf] vault tombstone failed', { id: item.id, err });
+    }
+  }
   const embedderLimit = Math.min(
     embedder.maxInputTokens,
     config.embedderMaxInputTokens ?? embedder.maxInputTokens,
@@ -143,19 +171,21 @@ export function createResearchService(deps: Deps) {
       ...(input.userId !== undefined && { userId: input.userId }),
     };
 
-    return write(async (tx) => {
-      const created = await ResearchRepository.create(tx, research);
-      await ResearchChunkRepository.createForResearch(tx, { researchId: created.id, chunks });
+    const created = await write(async (tx) => {
+      const item = await ResearchRepository.create(tx, research);
+      await ResearchChunkRepository.createForResearch(tx, { researchId: item.id, chunks });
       await AuditService.record({
         tx,
         kind: 'create',
-        targetId: created.id,
+        targetId: item.id,
         targetKind: 'research',
         actor: input.actor,
-        payload: { projectId: created.projectId, source: created.source, chunkCount: chunks.length },
+        payload: { projectId: item.projectId, source: item.source, chunkCount: chunks.length },
       });
-      return created;
+      return item;
     });
+    await vaultProject(created);
+    return created;
   }
 
   async function update(id: string, input: UpdateResearchInput): Promise<Research> {
@@ -190,7 +220,7 @@ export function createResearchService(deps: Deps) {
       ['title', 'content', 'summary', 'tags', 'sourceUri', 'expiresAt'] as const
     ).filter((k) => input[k] !== undefined);
 
-    return write(async (tx) => {
+    const updated = await write(async (tx) => {
       await AuditService.revise({
         tx,
         before,
@@ -199,7 +229,7 @@ export function createResearchService(deps: Deps) {
         actor: input.actor,
         payload: { changes, contentChanged, ...(newChunks && { chunkCount: newChunks.length }) },
       });
-      const updated = await ResearchRepository.update(tx, id, {
+      const item = await ResearchRepository.update(tx, id, {
         title: input.title,
         content: contentChanged ? input.content : undefined,
         summary,
@@ -210,13 +240,15 @@ export function createResearchService(deps: Deps) {
         expiresAt: input.expiresAt,
         updatedAt: new Date(),
       });
-      if (!updated) throw notFound(`research ${id}`);
+      if (!item) throw notFound(`research ${id}`);
       if (newChunks) {
         await ResearchChunkRepository.deleteForResearch(tx, id);
         await ResearchChunkRepository.createForResearch(tx, { researchId: id, chunks: newChunks });
       }
-      return updated;
+      return item;
     });
+    await vaultProject(updated);
+    return updated;
   }
 
   async function get(id: string): Promise<Research | null> {
@@ -228,8 +260,11 @@ export function createResearchService(deps: Deps) {
   }
 
   async function softDelete(id: string, actor?: string): Promise<void> {
+    // Pre-read for the vault tombstone ref (needs projectId for the path).
+    const existing = await read((tx) => ResearchRepository.get(tx, id));
+    const at = new Date();
     await write(async (tx) => {
-      await ResearchRepository.softDelete(tx, id, new Date());
+      await ResearchRepository.softDelete(tx, id, at);
       // Chunks are derived data (reproducible from on-node content) — hard
       // delete so deleted research can never resurface through chunk recall.
       await ResearchChunkRepository.deleteForResearch(tx, id);
@@ -241,6 +276,7 @@ export function createResearchService(deps: Deps) {
         actor,
       });
     });
+    if (existing) await vaultTombstone(existing, at);
   }
 
   return { create, update, get, list, softDelete };
