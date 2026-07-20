@@ -29,6 +29,7 @@ GET    /health                      { ok, neo4j, embedModel, lastDream }
 # v1.2 — knowledge / procedural / research / working-state / audit
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
 GET    /knowledge/documents/:id     fetch one document
+PUT    /knowledge/documents/:id     update (auto :ArchivedRevision snapshot; re-chunks on content change)
 GET    /knowledge/documents         list (scope-filtered: projectId, userId, limit)
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
 

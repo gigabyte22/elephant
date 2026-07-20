@@ -71,6 +71,7 @@ export interface UpdateKnowledgeDocumentInput {
   tags?: string[];
   expiresAt?: Date | null;
   actor?: string;
+  reason?: string;
 }
 
 export function createKnowledgeIngestionService(deps: Deps) {
@@ -218,7 +219,21 @@ export function createKnowledgeIngestionService(deps: Deps) {
       embedding = (await embedder.embedBatch([input.summary]))[0] ?? [];
     }
 
+    const changes = (['title', 'content', 'summary', 'tags', 'expiresAt'] as const).filter(
+      (k) => input[k] !== undefined,
+    );
+
     const updated = await write(async (tx) => {
+      // Snapshot the pre-update state per the SPEC audit contract — revise()
+      // creates the :ArchivedRevision and emits the 'update' AuditEvent.
+      await AuditService.revise({
+        tx,
+        before: existing,
+        kind: 'knowledge_document',
+        reason: input.reason ?? 'manual update',
+        actor: input.actor,
+        payload: { changes, contentChanged: chunks !== undefined, chunkCount: chunks?.length },
+      });
       const doc = await KnowledgeDocumentRepository.update(tx, id, {
         title: input.title,
         content: input.content,
@@ -235,14 +250,6 @@ export function createKnowledgeIngestionService(deps: Deps) {
         await KnowledgeChunkRepository.deleteBodyChunks(tx, id);
         await KnowledgeChunkRepository.createForDocument(tx, { documentId: id, chunks });
       }
-      await AuditService.record({
-        tx,
-        kind: 'update',
-        targetId: id,
-        targetKind: 'knowledge_document',
-        actor: input.actor,
-        payload: { contentChanged: chunks !== undefined, chunkCount: chunks?.length },
-      });
       return doc;
     });
     await projectToVault(vault, 'knowledge_document', updated);
