@@ -40,6 +40,7 @@ DELETE /procedures/:id              soft-delete
 
 POST   /research                    project-scoped research artifact (projectId required)
 GET    /research/:id                fetch one (includes full `content` body)
+PUT    /research/:id                update (auto :ArchivedRevision snapshot; projectId/userId immutable)
 GET    /research?projectId=…        list (projectId required; rows include `content`)
 DELETE /research/:id                soft-delete
 
