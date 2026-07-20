@@ -38,8 +38,9 @@ const UpdateBody = z
     tags: z.array(z.string().min(1)).optional(),
     expiresAt: z.coerce.date().nullable().optional(),
     actor: z.string().optional(),
+    reason: z.string().optional(),
   })
-  .refine((b) => Object.keys(b).some((k) => k !== 'actor'), {
+  .refine((b) => Object.keys(b).some((k) => k !== 'actor' && k !== 'reason'), {
     message: 'at least one field to update is required',
   });
 
