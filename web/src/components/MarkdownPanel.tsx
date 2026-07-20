@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { NarrativeKind } from '../../api/types.ts';
-import { useNarrativeMarkdown } from '../../hooks/useNarrativeMarkdown.ts';
-import { useScope } from '../../hooks/useScope.ts';
-import { DetailPanel } from '../DetailPanel.tsx';
-import { SegBtnGroup } from '../SegButtons.tsx';
+import type { NarrativeKind } from '../api/types.ts';
+import { useNarrativeMarkdown } from '../hooks/useNarrativeMarkdown.ts';
+import { useScope } from '../hooks/useScope.ts';
+import { DetailPanel } from './DetailPanel.tsx';
+import { SegBtnGroup } from './SegButtons.tsx';
 
 // "Open as markdown" for a research / knowledge node. Shows exactly what the
 // OKF vault would write for this node — the endpoint reuses the vault's own
@@ -16,6 +16,27 @@ import { SegBtnGroup } from '../SegButtons.tsx';
 const VIEWS = ['rendered', 'source'] as const;
 type View = (typeof VIEWS)[number];
 
+type CopyState = 'idle' | 'copied' | 'failed';
+const COPY_LABEL: Record<CopyState, string> = {
+  idle: 'copy',
+  copied: 'copied',
+  failed: 'copy failed',
+};
+
+// Strip the YAML frontmatter for the rendered view. Handing it to
+// react-markdown turns it into prose — the `---` fences read as rules and the
+// keys collapse into one paragraph, with `tags:` becoming a bullet list. It is
+// machine metadata; the source view shows it verbatim for anyone who wants it.
+//
+// Mirrors the split in parseVaultDoc without needing a YAML parser: the body
+// is everything past the closing fence.
+function stripFrontmatter(md: string): string {
+  if (!md.startsWith('---\n')) return md;
+  const end = md.indexOf('\n---\n', 4);
+  if (end < 0) return md;
+  return md.slice(end + 5).replace(/^\n+/, '');
+}
+
 interface Props {
   onClose: () => void;
   kind: NarrativeKind;
@@ -24,7 +45,11 @@ interface Props {
 
 export function MarkdownPanel({ onClose, kind, id }: Props) {
   const [view, setView] = useState<View>('rendered');
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<CopyState>('idle');
+  // Cleared on unmount so closing the panel mid-flash doesn't set state on a
+  // component that is gone.
+  const resetTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(resetTimer.current), []);
   const scope = useScope();
   const { data, isLoading, error } = useNarrativeMarkdown({
     kind,
@@ -32,11 +57,19 @@ export function MarkdownPanel({ onClose, kind, id }: Props) {
     projectId: scope.projectId,
   });
 
+  // writeText rejects without transient user activation, in insecure contexts,
+  // and when permission is denied. Unhandled, that leaves the button silently
+  // doing nothing — so failure gets its own label rather than no feedback.
   const copy = async () => {
     if (!data) return;
-    await navigator.clipboard?.writeText(data.markdown);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(data.markdown);
+      setCopyState('copied');
+    } catch {
+      setCopyState('failed');
+    }
+    window.clearTimeout(resetTimer.current);
+    resetTimer.current = window.setTimeout(() => setCopyState('idle'), 1500);
   };
 
   const download = () => {
@@ -62,7 +95,7 @@ export function MarkdownPanel({ onClose, kind, id }: Props) {
       <div className="flex items-center gap-3 pb-5">
         <SegBtnGroup value={view} options={VIEWS} onChange={setView} render={(v) => v} />
         <div className="ml-auto flex items-center gap-3">
-          <PanelAction onClick={copy} disabled={!data} label={copied ? 'copied' : 'copy'} />
+          <PanelAction onClick={copy} disabled={!data} label={COPY_LABEL[copyState]} />
           <PanelAction onClick={download} disabled={!data} label="download" />
         </div>
       </div>
@@ -77,7 +110,9 @@ export function MarkdownPanel({ onClose, kind, id }: Props) {
           </pre>
         ) : (
           <div className="markdown-body text-sm leading-relaxed text-ink-200">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.markdown}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {stripFrontmatter(data.markdown)}
+            </ReactMarkdown>
           </div>
         ))}
     </DetailPanel>

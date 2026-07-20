@@ -50,7 +50,7 @@ export function Timeline() {
   return (
     <div className="mx-auto max-w-7xl pb-20">
       <PageHeading
-        rank={5}
+        rank={6}
         title="timeline"
         right={
           <span className="label-key">

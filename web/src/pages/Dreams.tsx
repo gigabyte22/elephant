@@ -53,7 +53,7 @@ export function Dreams() {
   return (
     <div className="mx-auto max-w-7xl pb-20">
       <PageHeading
-        rank={6}
+        rank={7}
         title="dream runs"
         right={
           <div className="flex flex-wrap items-baseline gap-x-7 gap-y-2">

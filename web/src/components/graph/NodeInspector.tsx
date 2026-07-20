@@ -15,7 +15,7 @@ import { styleForKind } from '../../lib/kindStyle.ts';
 // Lazy so react-markdown stays out of the initial bundle — the panel is only
 // opened on demand, for two of the graph's many node kinds.
 const MarkdownPanel = lazy(() =>
-  import('./MarkdownPanel.tsx').then((m) => ({ default: m.MarkdownPanel })),
+  import('../MarkdownPanel.tsx').then((m) => ({ default: m.MarkdownPanel })),
 );
 
 // The narrative kinds retain a full body on-node, so they're the ones worth

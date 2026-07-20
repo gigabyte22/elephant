@@ -174,6 +174,11 @@
     and list styling, so restore just enough to make a research body readable
     without pulling in a typography plugin.
   */
+  .markdown-body {
+    /* Content hashes and bare URLs are unbreakable tokens — without this they
+       push the panel into horizontal overflow. */
+    overflow-wrap: anywhere;
+  }
   .markdown-body > * + * {
     @apply mt-4;
   }

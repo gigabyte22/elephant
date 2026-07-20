@@ -4,6 +4,7 @@ import { AuthError } from './api/client.ts';
 import { AuthGate } from './components/AuthGate.tsx';
 import { AppShell } from './components/shell/AppShell.tsx';
 import { Audit } from './pages/Audit.tsx';
+import { Documents } from './pages/Documents.tsx';
 import { Dreams } from './pages/Dreams.tsx';
 import { Entities } from './pages/Entities.tsx';
 import { Facts } from './pages/Facts.tsx';
@@ -42,6 +43,7 @@ export function App() {
               <Route path="/graph" component={GraphExplorer} />
               <Route path="/facts" component={Facts} />
               <Route path="/entities" component={Entities} />
+              <Route path="/documents" component={Documents} />
               <Route path="/timeline" component={Timeline} />
               <Route path="/dreams" component={Dreams} />
               <Route path="/health" component={MemoryHealth} />

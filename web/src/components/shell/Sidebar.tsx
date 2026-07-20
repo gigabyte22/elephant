@@ -17,6 +17,7 @@ const NAV: NavRow[] = [
   { href: '/graph', label: 'graph', hint: 'GR' },
   { href: '/facts', label: 'facts', hint: 'FT' },
   { href: '/entities', label: 'entities', hint: 'EN' },
+  { href: '/documents', label: 'documents', hint: 'DO' },
   { href: '/timeline', label: 'timeline', hint: 'TL' },
   { href: '/dreams', label: 'dreams', hint: 'DR' },
   { href: '/health', label: 'health', hint: 'HL' },

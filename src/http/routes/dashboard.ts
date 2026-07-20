@@ -17,6 +17,8 @@ import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
 import {
   ScopeQuerySchema,
+  WireDocumentSortEnum,
+  WireDocumentsSchema,
   WireDreamRunListSchema,
   WireEntityTypesSchema,
   WireEpisodeOriginsSchema,
@@ -25,6 +27,7 @@ import {
   WireGraphNeighborhoodSchema,
   WireGraphOverviewSchema,
   WireGraphSearchSchema,
+  WireNarrativeKindEnum,
   WireNarrativeMarkdownSchema,
   WireRetentionSchema,
   WireStatsSchema,
@@ -169,6 +172,28 @@ export function registerDashboardRoutes(app: App, container: Container): void {
     },
     handler: async (req) => {
       const data = await container.dashboard.episodeOrigins(req.query);
+      return { ok: true as const, data };
+    },
+  });
+
+  // The documents ledger — the index for the narrative kinds. Without it
+  // research is only reachable by stumbling onto it in the graph.
+  app.route({
+    method: 'GET',
+    url: '/dashboard/api/documents',
+    schema: {
+      querystring: ScopeQuerySchema.extend({
+        kind: WireNarrativeKindEnum.optional(),
+        q: z.string().max(200).optional(),
+        sort: WireDocumentSortEnum.default('recent'),
+        limit: z.coerce.number().int().positive().max(200).default(50),
+        offset: z.coerce.number().int().nonnegative().default(0),
+      }),
+      response: { 200: okEnvelope(WireDocumentsSchema) },
+    },
+    handler: async (req) => {
+      const { kind, q, sort, limit, offset, ...scope } = req.query;
+      const data = await container.dashboard.documents({ kind, q, sort, limit, offset, scope });
       return { ok: true as const, data };
     },
   });

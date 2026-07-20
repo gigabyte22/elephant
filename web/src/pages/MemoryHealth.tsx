@@ -41,7 +41,7 @@ export function MemoryHealth() {
   return (
     <div className="mx-auto max-w-7xl pb-20">
       <PageHeading
-        rank={7}
+        rank={8}
         title="memory health"
         right={
           data ? (

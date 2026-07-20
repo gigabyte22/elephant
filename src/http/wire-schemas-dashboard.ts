@@ -175,6 +175,33 @@ export const WireRetentionSchema = z.object({
 
 // --- Graph (search + neighborhood) -----------------------------------------
 
+// The narrative kinds, listed for the documents ledger. `hasContent` is false
+// for pre-retention rows whose body was never kept.
+export const WireDocumentSortEnum = z.enum(['recent', 'created', 'title']);
+export const WireNarrativeKindEnum = z.enum(['research', 'knowledge_document']);
+
+export const WireDocumentItemSchema = z.object({
+  id: z.string(),
+  kind: WireNarrativeKindEnum,
+  title: z.string(),
+  summary: z.string(),
+  source: z.string(),
+  tags: z.array(z.string()),
+  projectId: z.string().optional(),
+  userId: z.string().optional(),
+  hasContent: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  expiresAt: z.string().optional(),
+});
+
+export const WireDocumentsSchema = z.object({
+  sort: WireDocumentSortEnum,
+  total: z.number(),
+  offset: z.number(),
+  items: z.array(WireDocumentItemSchema),
+});
+
 export const WireGraphSearchResultSchema = z.object({
   id: z.string(),
   kind: z.string(), // 'fact' | 'entity' | 'chunk' | 'knowledge_chunk' | 'procedure' | …
