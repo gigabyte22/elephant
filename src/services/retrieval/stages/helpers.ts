@@ -13,7 +13,6 @@ import type {
   CandidateSource,
   ChunkCandidate,
   FactCandidate,
-  KnowledgeChunkCandidate,
   PipelineState,
   ProcedureCandidate,
   RetrievalContext,
@@ -62,22 +61,39 @@ export function upsertChunkHits(
 }
 
 // v1.2 — same upsert shape for the new fused-source categories. Each stage
-// only differs in the repo it calls and the source tag it stamps; keeping the
-// map bookkeeping here mirrors the chunk/fact helpers above.
-export function upsertKnowledgeChunkHits(
-  state: PipelineState,
-  hits: ReadonlyArray<KnowledgeChunk & { score: number }>,
-  source: Extract<CandidateSource, 'knowledge_chunk_vector' | 'knowledge_chunk_fulltext'>,
+// only differs in the candidate map it fills and the source tag it stamps;
+// this generic covers every chunk-shaped map (knowledgeChunks, researchChunks).
+export function upsertFusedChunkHits<C extends { id: string }>(
+  map: Map<
+    string,
+    {
+      chunk: C;
+      sources: Array<{ source: CandidateSource; rank: number; rawScore?: number }>;
+      fusedScore?: number;
+      blendedScore?: number;
+      expansionReason: CandidateSource;
+    }
+  >,
+  hits: ReadonlyArray<C & { score: number }>,
+  source: CandidateSource,
 ): void {
   hits.forEach((chunk, i) => {
-    const entry: KnowledgeChunkCandidate = state.knowledgeChunks.get(chunk.id) ?? {
+    const entry = map.get(chunk.id) ?? {
       chunk,
       sources: [],
       expansionReason: source,
     };
     entry.sources.push({ source, rank: i, rawScore: chunk.score });
-    state.knowledgeChunks.set(chunk.id, entry);
+    map.set(chunk.id, entry);
   });
+}
+
+export function upsertKnowledgeChunkHits(
+  state: PipelineState,
+  hits: ReadonlyArray<KnowledgeChunk & { score: number }>,
+  source: Extract<CandidateSource, 'knowledge_chunk_vector' | 'knowledge_chunk_fulltext'>,
+): void {
+  upsertFusedChunkHits(state.knowledgeChunks, hits, source);
 }
 
 export function upsertProcedureHits(
