@@ -125,6 +125,55 @@ describe('OKF vault projection', () => {
     expect(doc.body).toBe('a shared knowledge note');
   });
 
+  test('okf-sync restores a deleted vault file and tombstones lapsed research', async () => {
+    await clearDb();
+    const { syncVault } = await import('../../scripts/okf-sync.ts');
+
+    const keptContent = 'body that will be restored by sync';
+    const kept = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'Kept', source: 'manual', content: keptContent, projectId: PROJECT },
+    });
+    const keptId = kept.json().data.id as string;
+    const lapsed = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'Lapsed', source: 'manual', content: 'will expire', projectId: PROJECT },
+    });
+    const lapsedId = lapsed.json().data.id as string;
+
+    // Simulate the crash gap: remove kept's vault file; lapse the other row.
+    const keptPath = join(root, 'projects', PROJECT, 'research', `${keptId}.md`);
+    await rm(keptPath);
+    await txWrite(async (tx) => {
+      await tx.run(`MATCH (r:Research {id: $id}) SET r.expiresAt = datetime() - duration('PT1H')`, {
+        id: lapsedId,
+      });
+    });
+
+    const stats = await syncVault(root);
+    expect(stats.written).toBeGreaterThanOrEqual(1);
+    expect(stats.tombstoned).toBe(1);
+
+    const restored = parseVaultDoc(await readFile(keptPath, 'utf8'))!;
+    expect(restored.body).toBe(keptContent);
+    const trash = parseVaultDoc(
+      await readFile(
+        join(root, '_trash', 'projects', PROJECT, 'research', `${lapsedId}.md`),
+        'utf8',
+      ),
+    )!;
+    expect(trash.meta.deleteReason).toBe('expired');
+    expect(trash.body).toBe('will expire');
+
+    // Idempotent: a second pass writes nothing new.
+    const again = await syncVault(root);
+    expect(again.written).toBe(0);
+  });
+
   test('vault failure is log-and-continue: request succeeds, graph state is intact', async () => {
     await clearDb();
     failVault = true;

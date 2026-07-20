@@ -27,6 +27,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "rebuild:facts": "tsx scripts/rebuild-facts.ts",
+    "okf:sync": "tsx scripts/okf-sync.ts",
     "sync:vendored-client": "tsx scripts/sync-vendored-client.ts"
   },
   "dependencies": {
