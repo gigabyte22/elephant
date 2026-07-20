@@ -22,6 +22,7 @@ import type {
   Preference,
   Procedure,
   Research,
+  ResearchChunk,
   WorkingStateEntry,
 } from './types.ts';
 
@@ -158,6 +159,14 @@ export interface WireProcedure extends WireScope {
 
 export interface WireResearch extends WireKnowledgeDocument {
   projectId: string; // required for research
+}
+
+export interface WireResearchChunk extends WireScope {
+  id: string;
+  researchId: string;
+  position: number;
+  text: string;
+  createdAt: string;
 }
 
 export interface WireIntention extends WireScope {
@@ -348,6 +357,17 @@ export function toWireKnowledgeChunk(c: KnowledgeChunk): WireKnowledgeChunk {
   return {
     id: c.id,
     documentId: c.documentId,
+    position: c.position,
+    text: c.text,
+    createdAt: c.createdAt.toISOString(),
+    ...pickScope(c),
+  };
+}
+
+export function toWireResearchChunk(c: ResearchChunk): WireResearchChunk {
+  return {
+    id: c.id,
+    researchId: c.researchId,
     position: c.position,
     text: c.text,
     createdAt: c.createdAt.toISOString(),

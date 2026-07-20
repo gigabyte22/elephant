@@ -15,6 +15,7 @@ export function TopKStage(): RetrievalStage {
       state.knowledgeChunks = slice(state.knowledgeChunks, ctx.limit, (c) => c.blendedScore ?? 0);
       state.procedures = slice(state.procedures, ctx.limit, (c) => c.blendedScore ?? 0);
       state.research = slice(state.research, ctx.limit, (c) => c.blendedScore ?? 0);
+      state.researchChunks = slice(state.researchChunks, ctx.limit, (c) => c.blendedScore ?? 0);
       return state;
     },
   };

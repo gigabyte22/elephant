@@ -29,6 +29,11 @@ export function RrfFusionStage(): RetrievalStage {
         ctx.config.rrfK,
       );
       fuseInto(state.procedures, ['procedure_vector', 'procedure_fulltext'], ctx.config.rrfK);
+      fuseInto(
+        state.researchChunks,
+        ['research_chunk_vector', 'research_chunk_fulltext'],
+        ctx.config.rrfK,
+      );
 
       // --- Preferences / Insights / Research / Intentions (single-source) ---
       for (const p of state.preferences.values()) p.fusedScore = p.rawScore;

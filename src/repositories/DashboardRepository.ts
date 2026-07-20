@@ -73,6 +73,7 @@ const TIMELINE_SOURCES: Record<MemoryKind, { label: string; ts: string }> = {
   knowledge_chunk: { label: 'KnowledgeChunk', ts: 'createdAt' },
   procedure: { label: 'Procedure', ts: 'createdAt' },
   research: { label: 'Research', ts: 'createdAt' },
+  research_chunk: { label: 'ResearchChunk', ts: 'createdAt' },
   intention: { label: 'Intention', ts: 'createdAt' },
 };
 

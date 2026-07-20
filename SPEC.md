@@ -279,3 +279,46 @@ HTTP surface changes.
 - `POST /dream` returns `409 Conflict` if another run is in progress (includes the running jobId).
 - `GET /health` now exposes `embedder.maxInputTokens`, `llm.maxContextTokens`, `dream.running`, `dream.runningJobId`, `dream.lastRunDurationMs`, `dream.backlogEstimate`.
 - Body-limit rejections map to `413 Payload Too Large` with a descriptive message.
+## OKF vault — readable/portable projection of narrative memory
+
+Research and KnowledgeDocument (the narrative kinds — full `content` retained
+on-node) are additionally materialized as markdown files with YAML
+frontmatter (`okfVersion: 1`) when `OKF_ENABLED=true`:
+
+```text
+{OKF_DIR}/
+  projects/{projectId}/research/{id}.md
+  projects/{projectId}/documents/{id}.md   # knowledge docs with projectId
+  shared/documents/{id}.md                 # knowledge docs without scope
+  _trash/<same relative path>              # tombstones (deletedAt/deleteReason)
+```
+
+Contract:
+- **One write API.** Clients never write the vault; services project into it
+  AFTER the graph transaction commits. The graph remains the source of truth
+  and the recall authority — the vault is derived output.
+- **Log-and-continue.** A vault write/tombstone failure never fails the
+  request (the graph already committed). `pnpm okf:sync` is the repair path:
+  hash-gated (frontmatter `contentHash` + `updatedAt` vs node), idempotent,
+  batched; it also tombstones naturally-lapsed research (`deleteReason:
+  expired`) since expiry is enforced on read and no reaper exists.
+- **Frontmatter = identity + provenance** (id, kind, title, scope, source,
+  tags, timestamps, contentHash, summary); **body = the retained content**
+  (summary + "body not retained" note for pre-retention rows).
+- **Path safety.** `projectId` is an arbitrary string: segments are
+  sanitized to `[A-Za-z0-9._-]` and suffixed with a short hash of the
+  original whenever sanitization changed anything (blocks traversal,
+  keeps collisions distinct). Ids are validated UUIDs.
+- **Deletion wins over portability.** Soft-delete (and lapsed expiry via
+  sync) moves the file to `_trash/` — the live vault never resurrects
+  deleted research.
+- Research updates route through `revise()` (`:ArchivedRevision` snapshot,
+  no `:SUPERSEDES` clone; `projectId`/`userId` immutable). Research bodies
+  chunk into `:ResearchChunk` (own vector + fulltext indexes) under the same
+  no-silent-truncation rules as knowledge chunks; chunk searches join the
+  parent and filter on `expiresAt` so lapsed research cannot resurface.
+
+| Var | Default | Purpose |
+|---|---|---|
+| OKF_ENABLED | false | Enable vault materialization |
+| OKF_DIR | ./.okf-vault | Vault root directory |

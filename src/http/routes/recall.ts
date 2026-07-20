@@ -10,6 +10,7 @@ import {
   toWirePreference,
   toWireProcedure,
   toWireResearch,
+  toWireResearchChunk,
 } from '../../models/wire.ts';
 import type { App } from '../types.ts';
 import {
@@ -23,6 +24,7 @@ import {
   WirePreferenceWithScoreSchema,
   WireProcedureSchema,
   WireRecallTraceSchema,
+  WireResearchChunkSchema,
   WireResearchSchema,
   okEnvelope,
   queryBool,
@@ -89,6 +91,7 @@ const ResponseShape = okEnvelope(
     knowledgeChunks: z.array(WireKnowledgeChunkSchema.extend({ score: z.number() })).optional(),
     procedures: z.array(WireProcedureSchema.extend({ score: z.number() })).optional(),
     research: z.array(WireResearchSchema.extend({ score: z.number() })).optional(),
+    researchChunks: z.array(WireResearchChunkSchema.extend({ score: z.number() })).optional(),
     intentions: z.array(WireIntentionSchema.extend({ score: z.number() })).optional(),
     trace: WireRecallTraceSchema.optional(),
   }),
@@ -153,6 +156,12 @@ export function registerRecallRoute(app: App, container: Container): void {
             research: result.research.map((r) => ({
               ...toWireResearch(r),
               score: r.score,
+            })),
+          }),
+          ...(result.researchChunks && {
+            researchChunks: result.researchChunks.map((c) => ({
+              ...toWireResearchChunk(c),
+              score: c.score,
             })),
           }),
           ...(result.intentions && {

@@ -137,6 +137,14 @@ function projectResult(
     }));
   }
 
+  if (ctx.query.includeResearch && state.researchChunks.size > 0) {
+    result.researchChunks = sortAndMap(state.researchChunks, (c) => ({
+      ...c.chunk,
+      score: c.blendedScore ?? 0,
+      expansionReason: c.expansionReason,
+    }));
+  }
+
   if (ctx.query.includeIntentions && state.intentions.size > 0) {
     result.intentions = sortAndMap(state.intentions, (c) => ({
       ...c.intention,
@@ -156,6 +164,7 @@ function projectResult(
         knowledgeChunks: state.knowledgeChunks.size,
         procedures: state.procedures.size,
         research: state.research.size,
+        researchChunks: state.researchChunks.size,
       },
     };
   }

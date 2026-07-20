@@ -27,6 +27,7 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "rebuild:facts": "tsx scripts/rebuild-facts.ts",
+    "okf:sync": "tsx scripts/okf-sync.ts",
     "sync:vendored-client": "tsx scripts/sync-vendored-client.ts"
   },
   "dependencies": {
@@ -42,6 +43,7 @@
     "openai": "^4.65.0",
     "pdf-parse": "^2.4.5",
     "uuid": "^11.0.0",
+    "yaml": "^2.9.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

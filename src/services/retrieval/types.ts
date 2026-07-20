@@ -13,6 +13,7 @@ import type {
   Preference,
   Procedure,
   Research,
+  ResearchChunk,
   ScopeMode,
 } from '../../models/types.ts';
 import type { RetrievalConfig } from './config.ts';
@@ -29,6 +30,8 @@ export type CandidateSource =
   | 'procedure_vector'
   | 'procedure_fulltext'
   | 'research_vector'
+  | 'research_chunk_vector'
+  | 'research_chunk_fulltext'
   | 'intention_vector'
   | 'entity_sibling'
   | 'entity_ppr'
@@ -128,13 +131,17 @@ export interface InsightCandidate {
   blendedScore?: number;
 }
 
-export interface KnowledgeChunkCandidate {
-  chunk: KnowledgeChunk;
+// Shared shape for chunk-shaped fused candidates (knowledge + research):
+// multi-source hits blended into a single ranked entry.
+export interface FusedChunkCandidate<C> {
+  chunk: C;
   sources: RankedSource[];
   fusedScore?: number;
   blendedScore?: number;
   expansionReason: CandidateSource;
 }
+
+export type KnowledgeChunkCandidate = FusedChunkCandidate<KnowledgeChunk>;
 
 export interface ProcedureCandidate {
   procedure: Procedure;
@@ -150,6 +157,8 @@ export interface ResearchCandidate {
   fusedScore?: number;
   blendedScore?: number;
 }
+
+export type ResearchChunkCandidate = FusedChunkCandidate<ResearchChunk>;
 
 export interface IntentionCandidate {
   intention: Intention;
@@ -167,6 +176,7 @@ export interface PipelineState {
   knowledgeChunks: Map<string, KnowledgeChunkCandidate>;
   procedures: Map<string, ProcedureCandidate>;
   research: Map<string, ResearchCandidate>;
+  researchChunks: Map<string, ResearchChunkCandidate>;
   intentions: Map<string, IntentionCandidate>;
 }
 
@@ -180,6 +190,7 @@ export function emptyState(): PipelineState {
     knowledgeChunks: new Map(),
     procedures: new Map(),
     research: new Map(),
+    researchChunks: new Map(),
     intentions: new Map(),
   };
 }
@@ -209,6 +220,7 @@ export interface RecallResult {
   knowledgeChunks?: Array<KnowledgeChunk & { score: number; expansionReason: CandidateSource }>;
   procedures?: Array<Procedure & { score: number; expansionReason: CandidateSource }>;
   research?: Array<Research & { score: number }>;
+  researchChunks?: Array<ResearchChunk & { score: number; expansionReason: CandidateSource }>;
   intentions?: Array<Intention & { score: number }>;
   trace?: {
     stageTimingsMs: Record<string, number>;
@@ -221,6 +233,7 @@ export interface RecallResult {
       knowledgeChunks: number;
       procedures: number;
       research: number;
+      researchChunks: number;
     };
   };
 }

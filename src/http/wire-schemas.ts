@@ -62,6 +62,8 @@ export const WireFactWithScoreSchema = WireFactSchema.extend({
       'procedure_vector',
       'procedure_fulltext',
       'research_vector',
+      'research_chunk_vector',
+      'research_chunk_fulltext',
       'intention_vector',
       'entity_sibling',
       'entity_ppr',
@@ -110,6 +112,7 @@ export const WireRecallTraceSchema = z.object({
     knowledgeChunks: z.number().int().nonnegative(),
     procedures: z.number().int().nonnegative(),
     research: z.number().int().nonnegative(),
+    researchChunks: z.number().int().nonnegative(),
   }),
 });
 
@@ -212,6 +215,15 @@ export const WireResearchSchema = WireKnowledgeDocumentSchema.extend({
   projectId: z.string(),
 });
 
+export const WireResearchChunkSchema = z.object({
+  id: z.string().uuid(),
+  researchId: z.string().uuid(),
+  position: z.number().int().nonnegative(),
+  text: z.string(),
+  createdAt: z.string(),
+  ...ScopeFields,
+});
+
 export const WireIntentionSchema = z.object({
   id: z.string().uuid(),
   content: z.string(),
@@ -245,6 +257,7 @@ export const WireMemoryKindSchema = z.enum([
   'knowledge_chunk',
   'procedure',
   'research',
+  'research_chunk',
   'intention',
 ]);
 

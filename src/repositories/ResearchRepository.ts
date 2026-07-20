@@ -74,6 +74,70 @@ export const ResearchRepository = {
     return row ? toResearch(row.get('r')) : null;
   },
 
+  async update(
+    tx: ManagedTransaction,
+    id: string,
+    input: {
+      title?: string;
+      content?: string;
+      summary?: string;
+      embedding?: number[];
+      contentHash?: string;
+      tags?: string[];
+      sourceUri?: string;
+      expiresAt?: Date | null;
+      updatedAt: Date;
+    },
+  ): Promise<Research | null> {
+    const sets: string[] = ['r.updatedAt = datetime($updatedAt)'];
+    const params: Record<string, unknown> = {
+      id,
+      updatedAt: dateParam(input.updatedAt),
+    };
+    if (input.title !== undefined) {
+      sets.push('r.title = $title');
+      params.title = input.title;
+    }
+    if (input.content !== undefined) {
+      sets.push('r.content = $content');
+      params.content = input.content;
+    }
+    if (input.summary !== undefined) {
+      sets.push('r.summary = $summary');
+      params.summary = input.summary;
+    }
+    if (input.contentHash !== undefined) {
+      sets.push('r.contentHash = $contentHash');
+      params.contentHash = input.contentHash;
+    }
+    if (input.embedding !== undefined) {
+      sets.push('r.embedding = $embedding');
+      params.embedding = input.embedding;
+    }
+    if (input.tags !== undefined) {
+      sets.push('r.tags = $tags');
+      params.tags = input.tags;
+    }
+    if (input.sourceUri !== undefined) {
+      sets.push('r.sourceUri = $sourceUri');
+      params.sourceUri = input.sourceUri;
+    }
+    if (input.expiresAt !== undefined) {
+      sets.push(
+        'r.expiresAt = CASE WHEN $expiresAt IS NULL THEN NULL ELSE datetime($expiresAt) END',
+      );
+      params.expiresAt = nullableDateParam(input.expiresAt);
+    }
+    const result = await tx.run(
+      `MATCH (r:Research {id: $id})
+       SET ${sets.join(', ')}
+       RETURN r {.*} AS r`,
+      params,
+    );
+    const row = result.records[0];
+    return row ? toResearch(row.get('r')) : null;
+  },
+
   async list(
     tx: ManagedTransaction,
     input: { scope?: RetrievalScope; limit?: number },

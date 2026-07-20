@@ -8,6 +8,8 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { ExtractionService } from '../adapters/extraction/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import type { BlobStore } from '../adapters/storage/types.ts';
+import { projectToVault, tombstoneInVault } from '../adapters/vault/project.ts';
+import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound, payloadTooLarge } from '../http/errors.ts';
 import type {
@@ -29,6 +31,7 @@ interface Deps {
   chunker?: Chunker;
   blobStore?: BlobStore;
   extraction?: ExtractionService;
+  vault?: VaultWriter;
   config: {
     chunkTargetTokens: number;
     chunkOverlapTokens: number;
@@ -68,10 +71,11 @@ export interface UpdateKnowledgeDocumentInput {
   tags?: string[];
   expiresAt?: Date | null;
   actor?: string;
+  reason?: string;
 }
 
 export function createKnowledgeIngestionService(deps: Deps) {
-  const { llm, embedder, config } = deps;
+  const { llm, embedder, config, vault } = deps;
   const chunker = deps.chunker ?? createChunker({ countTokens: (t) => embedder.countTokens(t) });
 
   const embedderLimit = Math.min(
@@ -149,22 +153,24 @@ export function createKnowledgeIngestionService(deps: Deps) {
       ...(input.scope ?? {}),
     }));
 
-    return write(async (tx) => {
-      const created = await KnowledgeDocumentRepository.create(tx, document);
+    const created = await write(async (tx) => {
+      const doc = await KnowledgeDocumentRepository.create(tx, document);
       await KnowledgeChunkRepository.createForDocument(tx, {
-        documentId: created.id,
+        documentId: doc.id,
         chunks,
       });
       await AuditService.record({
         tx,
         kind: 'create',
-        targetId: created.id,
+        targetId: doc.id,
         targetKind: 'knowledge_document',
         actor: input.actor,
-        payload: { source: created.source, chunkCount: chunks.length },
+        payload: { source: doc.source, chunkCount: chunks.length },
       });
-      return created;
+      return doc;
     });
+    await projectToVault(vault, 'knowledge_document', created);
+    return created;
   }
 
   async function update(
@@ -213,8 +219,22 @@ export function createKnowledgeIngestionService(deps: Deps) {
       embedding = (await embedder.embedBatch([input.summary]))[0] ?? [];
     }
 
-    return write(async (tx) => {
-      const updated = await KnowledgeDocumentRepository.update(tx, id, {
+    const changes = (['title', 'content', 'summary', 'tags', 'expiresAt'] as const).filter(
+      (k) => input[k] !== undefined,
+    );
+
+    const updated = await write(async (tx) => {
+      // Snapshot the pre-update state per the SPEC audit contract — revise()
+      // creates the :ArchivedRevision and emits the 'update' AuditEvent.
+      await AuditService.revise({
+        tx,
+        before: existing,
+        kind: 'knowledge_document',
+        reason: input.reason ?? 'manual update',
+        actor: input.actor,
+        payload: { changes, contentChanged: chunks !== undefined, chunkCount: chunks?.length },
+      });
+      const doc = await KnowledgeDocumentRepository.update(tx, id, {
         title: input.title,
         content: input.content,
         summary,
@@ -224,22 +244,16 @@ export function createKnowledgeIngestionService(deps: Deps) {
         expiresAt: input.expiresAt,
         updatedAt: now,
       });
-      if (!updated) throw notFound(`knowledge document ${id}`);
+      if (!doc) throw notFound(`knowledge document ${id}`);
       if (chunks) {
         // Replace only the note-body chunks; attachment-derived chunks persist.
         await KnowledgeChunkRepository.deleteBodyChunks(tx, id);
         await KnowledgeChunkRepository.createForDocument(tx, { documentId: id, chunks });
       }
-      await AuditService.record({
-        tx,
-        kind: 'update',
-        targetId: id,
-        targetKind: 'knowledge_document',
-        actor: input.actor,
-        payload: { contentChanged: chunks !== undefined, chunkCount: chunks?.length },
-      });
-      return updated;
+      return doc;
     });
+    await projectToVault(vault, 'knowledge_document', updated);
+    return updated;
   }
 
   // Chunk + embed arbitrary text into KnowledgeChunks for a document. Used for
@@ -424,8 +438,12 @@ export function createKnowledgeIngestionService(deps: Deps) {
   }
 
   async function softDelete(id: string, opts: { actor?: string } = {}): Promise<void> {
+    // Pre-read for the vault tombstone: the ref needs the document's scope
+    // to resolve its vault path.
+    const existing = await read((tx) => KnowledgeDocumentRepository.get(tx, id));
+    const at = new Date();
     await write(async (tx) => {
-      await KnowledgeDocumentRepository.softDelete(tx, id, new Date());
+      await KnowledgeDocumentRepository.softDelete(tx, id, at);
       await AuditService.record({
         tx,
         kind: 'soft_delete',
@@ -434,6 +452,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
         actor: opts.actor,
       });
     });
+    if (existing) await tombstoneInVault(vault, 'knowledge_document', existing, at);
   }
 
   return {

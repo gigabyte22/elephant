@@ -29,6 +29,7 @@ GET    /health                      { ok, neo4j, embedModel, lastDream }
 # v1.2 — knowledge / procedural / research / working-state / audit
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
 GET    /knowledge/documents/:id     fetch one document
+PUT    /knowledge/documents/:id     update (auto :ArchivedRevision snapshot; re-chunks on content change)
 GET    /knowledge/documents         list (scope-filtered: projectId, userId, limit)
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
 
@@ -40,6 +41,7 @@ DELETE /procedures/:id              soft-delete
 
 POST   /research                    project-scoped research artifact (projectId required)
 GET    /research/:id                fetch one (includes full `content` body)
+PUT    /research/:id                update (auto :ArchivedRevision snapshot; projectId/userId immutable)
 GET    /research?projectId=…        list (projectId required; rows include `content`)
 DELETE /research/:id                soft-delete
 
@@ -82,8 +84,11 @@ GET /recall?
   &includeProcedures=true
   &includeResearch=true
 Returns ranked Fact[] + optional relatedEntities[] for GraphRAG expansion,
-plus v1.2 categories (knowledgeChunks[], procedures[], research[]) when
-explicitly opted into via includeKnowledge / includeProcedures / includeResearch.
+plus v1.2 categories (knowledgeChunks[], procedures[], research[],
+researchChunks[]) when explicitly opted into via includeKnowledge /
+includeProcedures / includeResearch. Research bodies are chunked into
+:ResearchChunk nodes (own vector + fulltext indexes, RRF-fused) so recall
+matches chunk-level content, not just the summary embedding.
 
 2. Orchestrator-side tools
 Keep the existing memory_save / memory_recall / memory_forget names so existing soul prompts still work — just reimplement them against the service. Add new ones for the richer surface.
