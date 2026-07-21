@@ -13,3 +13,31 @@ export function approxTokens(text: string, charsPerToken: number = APPROX_CHARS_
   if (!text) return 0;
   return Math.ceil(text.length / charsPerToken);
 }
+
+type CountTokens = (text: string) => Promise<number>;
+
+// Longest prefix of `text` whose token count fits budgetTokens. Binary search
+// on prefix length — O(log n) countTokens calls — assuming token count is
+// monotone in prefix length (true for approxTokens and BPE/WordPiece
+// tokenizers). Backs off to the previous whitespace boundary so the prefix
+// doesn't end mid-word, unless that would give back more than ~8 tokens of
+// budget (e.g. one enormous unbroken token).
+export async function fitToTokenBudget(
+  text: string,
+  budgetTokens: number,
+  countTokens: CountTokens,
+): Promise<string> {
+  if (budgetTokens <= 0 || !text) return '';
+  if ((await countTokens(text)) <= budgetTokens) return text;
+  let lo = 0; // longest prefix length known to fit (empty = 0 tokens)
+  let hi = text.length; // shortest prefix length known not to fit
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if ((await countTokens(text.slice(0, mid))) <= budgetTokens) lo = mid;
+    else hi = mid;
+  }
+  const cut = text.slice(0, lo);
+  const ws = cut.search(/\s+\S*$/);
+  if (ws > 0 && ws > lo - 8 * APPROX_CHARS_PER_TOKEN) return cut.slice(0, ws).trimEnd();
+  return cut;
+}
