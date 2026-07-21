@@ -1,7 +1,9 @@
 1. Service HTTP surface
 Base: http://127.0.0.1:18790 (or whatever port — loopback-only by convention).
 
-All responses { ok: true, data } | { ok: false, error }. All writes idempotent via client-supplied id.
+All responses { ok: true, data } | { ok: false, error } — with exactly one
+deliberate exception, `GET /knowledge/attachments/:blobId`, which streams raw
+bytes. All writes idempotent via client-supplied id.
 
 
 POST   /episodes                    ingest raw conversation turn → returns episodeId
@@ -24,7 +26,16 @@ GET    /observations?sessionId=…    session-scoped recall
 
 POST   /dream                       trigger dream cycle (async, returns jobId)
 GET    /dream/:jobId                poll status
-GET    /health                      { ok, neo4j, embedModel, lastDream }
+GET    /health                      liveness + config readback (no auth required)
+  → data: {
+      neo4j: boolean,
+      llm: { name, maxContextTokens },
+      embedder: { name, dim, maxInputTokens },
+      schemaVectorDim: number | null,   // read back from SHOW VECTOR INDEX;
+                                        // compare to embedder.dim to catch a
+                                        // migrate/EMBED_DIM mismatch
+      dream: { lastRun, lastRunDurationMs, running, runningJobId, backlogEstimate }
+    }
 
 # v1.2 — knowledge / procedural / research / working-state / audit
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
@@ -45,6 +56,25 @@ PUT    /research/:id                update (auto :ArchivedRevision snapshot; pro
 GET    /research?projectId=…        list (projectId required; rows include `content`)
 DELETE /research/:id                soft-delete
 
+POST   /intentions                  record a forward-looking commitment
+                                    (needs dueAt OR triggerHint; service-enforced)
+GET    /intentions/due?before=…     open commitments past/near their dueAt.
+                                    For boot-time reconciliation, NOT polling —
+                                    elephant never fires intentions, the caller
+                                    owns the clock.
+GET    /intentions/:id              fetch one
+GET    /intentions?status=…         list (pending|completed|cancelled|expired)
+POST   /intentions/:id/complete     terminal: sets validTo
+POST   /intentions/:id/cancel       terminal: sets validTo
+POST   /intentions/:id/fired        record a firing without closing it
+
+POST   /knowledge/documents/:id/attachments              upload a binary attachment
+DELETE /knowledge/documents/:id/attachments/:attachmentId
+GET    /knowledge/attachments/:blobId                    stream the raw blob.
+                                    NOTE: the ONLY route that does not return the
+                                    {ok,data} envelope — it streams bytes with
+                                    Content-Type / Content-Disposition.
+
 POST   /state                       set working-state value (scope, key, value, ttlSec?)
 GET    /state/:key?agentId=…        read a key
 DELETE /state/:key?agentId=…        delete
@@ -58,31 +88,42 @@ GET /recall?
   q=<text>              # embedded server-side
   &agentId=<id>         # optional, scope axis (boost by default)
   &sessionId=<id>       # optional, biases toward session context
-  &agentScope=boost|filter|none
-  &sessionScope=boost|filter|none
-  # v1.2: cross-cutting scope axes (same boost/filter/none semantics)
+  &agentScope=boost|filter|strict|none
+  &sessionScope=boost|filter|strict|none
+  # v1.2: cross-cutting scope axes (same semantics)
   &projectId=<id>
   &userId=<id>
-  &projectScope=boost|filter|none
-  &userScope=boost|filter|none
+  &projectScope=boost|filter|strict|none
+  &userScope=boost|filter|strict|none
+  # Scope modes: 'boost' (default when a value is given) multiplies score;
+  # 'filter' excludes only CROSS-scope items — a null scope is a shared global
+  # and still matches; 'strict' additionally excludes nulls, so a sandboxed
+  # reader sees only items carrying its own scope value; 'none' ignores the axis.
   # v1.2: restrict to a subset of memory categories (comma-separated).
   # Valid kinds: episode,chunk,fact,preference,insight,observation,
-  # knowledge_document,knowledge_chunk,procedure,research.
+  # knowledge_document,knowledge_chunk,procedure,research,research_chunk,intention.
   &kinds=fact,knowledge_chunk,procedure
   &from=<iso>&to=<iso>  # temporal window
   &minImportance=0.3
   &minConfidence=0.5
-  &limit=20
+  &limit=20             # max 100
   &includeSuperseded=false
   &entityId=<id>        # constrain to subgraph
   # Per-category opt-ins. Defaults: chunks=on-request, prefs/insights=on,
-  # knowledge/procedures/research=off (must opt in to pay vector cost).
+  # knowledge/procedures/research/intentions=off (must opt in to pay vector cost).
   &includeChunks=true
   &includePreferences=true
   &includeInsights=true
   &includeKnowledge=true
   &includeProcedures=true
   &includeResearch=true
+  &includeIntentions=true
+  # Retrieval tuning. Each overrides its env default for this request only.
+  &rerank=true          # listwise LLM rerank (default: RETRIEVAL_ENABLE_RERANK)
+  &ppr=true             # personalized PageRank (default: RETRIEVAL_ENABLE_PPR;
+                        # no-ops unless the GDS projection exists)
+  &chunkNeighborRadius=1
+  &debug=true           # adds `trace` (per-stage timings + fusion detail)
 Returns ranked Fact[] + optional relatedEntities[] for GraphRAG expansion,
 plus v1.2 categories (knowledgeChunks[], procedures[], research[],
 researchChunks[]) when explicitly opted into via includeKnowledge /
@@ -121,6 +162,8 @@ Keep the existing memory_save / memory_recall / memory_forget names so existing 
       fact: { type: 'string' },
       category: { type: 'string' },
       importance: { type: 'number', description: '0-1, default 0.5' },
+      // Maps to the route's `entityNames` field — names, not ids;
+      // POST /facts upserts entities by name.
       entities: { type: 'array', items: { type: 'string' },
                   description: 'Named entities this fact is about' },
     },
@@ -144,8 +187,11 @@ New tools:
 memory_timeline          // bi-temporal: "what did I believe about X on 2026-03-01?"
   params: { entity?: string, query?: string, at: string /* ISO */ }
 
-memory_entity            // fetch entity + its fact subgraph
-  params: { name?: string, id?: string, depth?: number /* default 1 */ }
+memory_entity            // fetch entity + its facts, or fuzzy-search by name
+  params: { name?: string, id?: string }
+  // No `depth` — GET /entities/:id returns { entity, facts[] }, one hop.
+  // Multi-hop expansion is a recall-time concern (entity sibling expansion),
+  // not an entity-fetch parameter.
 
 memory_preference_get    // read a preference
   params: { key: string }
@@ -166,7 +212,8 @@ Skip exposing /dream as a tool — run it via croner on a schedule; expose only 
 
 export type MemoryKind =
   | 'episode' | 'chunk' | 'fact' | 'preference' | 'insight' | 'observation'
-  | 'knowledge_document' | 'knowledge_chunk' | 'procedure' | 'research';
+  | 'knowledge_document' | 'knowledge_chunk' | 'procedure' | 'research'
+  | 'research_chunk' | 'intention';
 
 export interface Scope { projectId?: string; userId?: string }
 
@@ -185,12 +232,20 @@ export interface Fact extends Scope {
 }
 
 export interface RecallResult {
-  facts: Array<Fact & { score: number }>;
+  // `expansionReason` records why a fact is present when it wasn't a direct
+  // vector/full-text hit: 'sibling' | 'chunk_derived' | 'ppr' | 'rerank'.
+  facts: Array<Fact & { score: number; expansionReason?: string }>;
   entities?: Array<{ id: string; name: string; type: string }>;
+  chunks?: Array<Chunk>;
+  preferences?: Array<Preference & { score: number }>;
+  insights?: Array<Insight & { score: number }>;
   // v1.2 — surfaced when caller opts in via include* flags.
   knowledgeChunks?: Array<KnowledgeChunk & { score: number }>;
   procedures?: Array<Procedure & { score: number }>;
   research?: Array<Research & { score: number }>;
+  researchChunks?: Array<ResearchChunk & { score: number }>;
+  intentions?: Array<Intention & { score: number }>;
+  trace?: RecallTrace;   // only when &debug=true
 }
 
 export interface Preference extends Scope {
