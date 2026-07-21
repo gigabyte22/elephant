@@ -30,9 +30,10 @@ Categories supported in v1.2 (existing + new):
 - **Insights** — `:Insight` (existing, promoted from high-importance facts during dreaming).
 - **Knowledge** — `:KnowledgeDocument` + `:KnowledgeChunk` (new). Shared / RAG documents.
 - **Procedural** — `:Procedure` (new). Skills, workflows, agent how-to. Versioned via `:SUPERSEDES` chains.
-- **Research** — `:Research` (new). Project-scoped research artifacts; same shape as KnowledgeDocument but `projectId` is required. The full `content` body is retained on the node (like KnowledgeDocument) — `contentHash` + `summary` are derived from it, never a replacement for it.
+- **Research** — `:Research` + `:ResearchChunk` (new). Project-scoped research artifacts; same shape as KnowledgeDocument but `projectId` is required. The full `content` body is retained on the node (like KnowledgeDocument) — `contentHash` + `summary` are derived from it, never a replacement for it. Bodies chunk into `:ResearchChunk` with their own vector + fulltext indexes (see the OKF vault section), kept separate from `:KnowledgeChunk` because a shared vector index cannot pre-filter by kind and would shrink effective top-K for both.
+- **Prospective** — `:Intention`. A durable record of a forward-looking commitment ("notify before the registration expires"). Requires either `dueAt` or a free-text `triggerHint`. Bi-temporal like `:Fact`: `validTo` is set on reaching a terminal status (`completed` / `cancelled` / `expired`). **Elephant never fires intentions** — it is pull-only, and an external orchestrator owns the clock; `GET /intentions/due` exists for boot-time reconciliation, not continuous polling.
 
-Cross-cutting scope axes on every memory item: `projectId`, `userId`, plus the existing `agentId` / `sessionId`. Each axis runs in retrieval mode `boost` (default), `filter` (hard match), or `none`.
+Cross-cutting scope axes on every memory item: `projectId`, `userId`, plus the existing `agentId` / `sessionId`. Each axis runs in retrieval mode `boost` (default when a value is supplied), `filter` (hard match, but a null scope is a shared global and still matches), `strict` (like `filter`, and also excludes nulls), or `none`.
 
 Audit / revision history: every mutating write to a Fact / Preference /
 Procedure / KnowledgeDocument / Research routes through a shared `revise()`
@@ -54,7 +55,8 @@ Layer 1: Ephemeral / Conversation History → Episode nodes (raw transcript + su
 Layer 2: Working / Session → Observation nodes (short-lived facts) + WorkingState (pluggable, Neo4j default / Redis opt-in)
 Layer 3: Long-Term + Preferences → Fact (reified) + Preference nodes
 Layer 4: Knowledge Graph + Wisdom → Entity, Insight nodes + temporal relationships
-Layer 5 (v1.2): Shared / Procedural / Research → KnowledgeDocument + KnowledgeChunk + Procedure + Research
+Layer 5 (v1.2): Shared / Procedural / Research → KnowledgeDocument + KnowledgeChunk + Procedure + Research + ResearchChunk
+Layer 6: Prospective → Intention nodes (forward-looking commitments; pull-only, never self-firing)
 
 Temporal & Supersede handled via:
 
