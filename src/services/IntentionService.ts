@@ -11,6 +11,7 @@ import type { Intention, IntentionStatus, Scope } from '../models/types.ts';
 import { IntentionRepository } from '../repositories/IntentionRepository.ts';
 import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
+import { fitToTokenBudget } from '../utils/tokens.ts';
 import { AuditService } from './AuditService.ts';
 
 interface Deps {
@@ -62,15 +63,6 @@ export function createIntentionService(deps: Deps) {
     config.embedderMaxInputTokens ?? embedder.maxInputTokens,
   );
 
-  async function ensureFits(text: string): Promise<void> {
-    const tokens = await embedder.countTokens(text);
-    if (tokens > embedderLimit) {
-      throw badRequest(
-        `intention content exceeds embedder limit of ${embedderLimit} tokens (got ~${tokens})`,
-      );
-    }
-  }
-
   async function create(input: CreateIntentionInput): Promise<Intention> {
     const dueAt = input.dueAt ?? null;
     const triggerHint = input.triggerHint ?? null;
@@ -81,8 +73,18 @@ export function createIntentionService(deps: Deps) {
       throw badRequest('intention requires at least one of dueAt, triggerHint, or schedule');
     }
 
-    await ensureFits(input.content);
-    const embedding = await embedder.embed(input.content);
+    // Embed the longest content prefix that fits the embedder limit; the full
+    // content is stored unchanged. Content is the intention's only retrieval
+    // field, and a bounded prefix is still a valid signal — no reject path.
+    const embedText = await fitToTokenBudget(input.content, embedderLimit, (t) =>
+      embedder.countTokens(t),
+    );
+    if (embedText !== input.content) {
+      console.warn(
+        `[intentions] embed text truncated to ~${embedderLimit} tokens; full content stored`,
+      );
+    }
+    const embedding = await embedder.embed(embedText);
 
     const now = new Date();
     const scope = input.scope ?? {};

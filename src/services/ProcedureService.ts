@@ -9,6 +9,7 @@ import type { Procedure, Scope } from '../models/types.ts';
 import { ProcedureRepository } from '../repositories/ProcedureRepository.ts';
 import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
+import { fitToTokenBudget } from '../utils/tokens.ts';
 import { AuditService } from './AuditService.ts';
 
 interface Deps {
@@ -46,18 +47,31 @@ export function createProcedureService(deps: Deps) {
     config.embedderMaxInputTokens ?? embedder.maxInputTokens,
   );
 
-  async function ensureFits(text: string): Promise<void> {
-    const tokens = await embedder.countTokens(text);
-    if (tokens > embedderLimit) {
+  // whenToUse is the retrieval signal and is never truncated: if it alone
+  // exceeds the limit the trigger description is genuinely broken → 400.
+  // Otherwise embed whenToUse plus as much of content as fits the budget;
+  // the full content is stored on the node unchanged. Fitting the combined
+  // string (rather than budgeting the remainder) sidesteps tokenizer
+  // non-additivity — the monotone prefix search always keeps whenToUse whole.
+  async function buildEmbedText(name: string, whenToUse: string, content: string): Promise<string> {
+    const whenTokens = await embedder.countTokens(whenToUse);
+    if (whenTokens > embedderLimit) {
       throw badRequest(
-        `procedure body exceeds embedder limit of ${embedderLimit} tokens (got ~${tokens})`,
+        `procedure whenToUse exceeds embedder limit of ${embedderLimit} tokens (got ~${whenTokens})`,
       );
     }
+    const full = procedureEmbedText(whenToUse, content);
+    const fitted = await fitToTokenBudget(full, embedderLimit, (t) => embedder.countTokens(t));
+    if (fitted !== full) {
+      console.warn(
+        `[procedures] "${name}": embed text truncated to ~${embedderLimit} tokens; full content stored`,
+      );
+    }
+    return fitted;
   }
 
   async function create(input: CreateProcedureInput): Promise<Procedure> {
-    const embedText = procedureEmbedText(input.whenToUse, input.content);
-    await ensureFits(embedText);
+    const embedText = await buildEmbedText(input.name, input.whenToUse, input.content);
     const embedding = await embedder.embed(embedText);
 
     const now = new Date();
@@ -101,11 +115,11 @@ export function createProcedureService(deps: Deps) {
 
     let nextEmbedding: number[] | undefined;
     if (willChangeBody) {
-      const embedText = procedureEmbedText(
+      const embedText = await buildEmbedText(
+        before.name,
         input.whenToUse ?? before.whenToUse,
         input.content ?? before.content,
       );
-      await ensureFits(embedText);
       nextEmbedding = await embedder.embed(embedText);
     }
 
