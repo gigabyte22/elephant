@@ -10,6 +10,7 @@ import { type Container, bootstrap, shutdown } from '../../src/index.ts';
 import type { ExtractedFact } from '../../src/models/types.ts';
 import { ChunkRepository } from '../../src/repositories/ChunkRepository.ts';
 import { DreamInProgressError } from '../../src/services/DreamingService.ts';
+import { approxTokens } from '../../src/utils/tokens.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
@@ -22,15 +23,25 @@ const TEST_EMBEDDER_MAX_TOKENS = 100;
 
 // Summarize spy so we can assert "did / didn't call summarize".
 let summarizeCalls: Array<{ text: string; targetTokens?: number }> = [];
+// Embed spy so we can assert what text was actually embedded (the fake
+// adapter has no built-in call recording).
+let embedCalls: string[] = [];
 
 let container: Container;
 let app: Awaited<ReturnType<typeof buildHttpServer>>;
 
 beforeAll(async () => {
-  const embedder = createFakeEmbeddingAdapter({
+  const baseEmbedder = createFakeEmbeddingAdapter({
     dim: EMBED_DIM,
     maxInputTokens: TEST_EMBEDDER_MAX_TOKENS,
   });
+  const embedder = {
+    ...baseEmbedder,
+    embed: (text: string) => {
+      embedCalls.push(text);
+      return baseEmbedder.embed(text);
+    },
+  };
   const llm = createFakeLLMAdapter({
     extract: ({ episode }): ExtractedFact[] => {
       // Extract one fact per distinct keyword seen in the input.
@@ -65,6 +76,7 @@ async function clearDb(): Promise<void> {
     await tx.run('MATCH (n) DETACH DELETE n');
   });
   summarizeCalls = [];
+  embedCalls = [];
 }
 
 describe('chunking + size-limit contract', () => {
@@ -191,6 +203,98 @@ describe('chunking + size-limit contract', () => {
       payload: { facts },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('oversized bodies embed a bounded prefix', () => {
+  test('long procedure create succeeds, stores full content, embeds bounded text', async () => {
+    await clearDb();
+    const whenToUse = 'Use when the user asks for the weekly metrics report.';
+    const content = 'step one. gather the numbers and compile them carefully. '.repeat(50);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/procedures',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { name: 'weekly-report', content, whenToUse },
+    });
+    expect(res.statusCode).toBe(200);
+    const { id } = res.json().data;
+
+    // Stored content is the full body, untruncated.
+    const got = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
+    expect(got.statusCode).toBe(200);
+    expect(got.json().data.content).toBe(content);
+    expect(got.json().data.whenToUse).toBe(whenToUse);
+
+    // The embedded text is whenToUse + a content prefix, within the limit.
+    const embedded = embedCalls.at(-1)!;
+    expect(embedded.startsWith(`${whenToUse}\n\n`)).toBe(true);
+    expect(approxTokens(embedded)).toBeLessThanOrEqual(TEST_EMBEDDER_MAX_TOKENS);
+  });
+
+  test('whenToUse alone over embedder limit → 400', async () => {
+    await clearDb();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/procedures',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { name: 'broken-trigger', content: 'short body', whenToUse: 'word '.repeat(200) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/whenToUse exceeds embedder limit/i);
+  });
+
+  test('update with oversized content succeeds and re-embeds bounded text', async () => {
+    await clearDb();
+    const whenToUse = 'Use when deploying the service.';
+    const create = await app.inject({
+      method: 'POST',
+      url: '/procedures',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { name: 'deploy', content: 'run the deploy script', whenToUse },
+    });
+    expect(create.statusCode).toBe(200);
+    const { id } = create.json().data;
+
+    const bigContent = 'check the logs, then roll forward or back as needed. '.repeat(60);
+    const update = await app.inject({
+      method: 'PUT',
+      url: `/procedures/${id}`,
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { content: bigContent, reason: 'expanded runbook' },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json().data.version).toBe(2);
+
+    const got = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
+    expect(got.json().data.content).toBe(bigContent);
+
+    const embedded = embedCalls.at(-1)!;
+    expect(embedded.startsWith(`${whenToUse}\n\n`)).toBe(true);
+    expect(approxTokens(embedded)).toBeLessThanOrEqual(TEST_EMBEDDER_MAX_TOKENS);
+  });
+
+  test('long intention create succeeds, stores full content, embeds bounded prefix', async () => {
+    await clearDb();
+    const content = 'remember to follow up on the quarterly budget review with finance. '.repeat(
+      40,
+    );
+    const res = await app.inject({
+      method: 'POST',
+      url: '/intentions',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { content, triggerHint: 'budget review' },
+    });
+    expect(res.statusCode).toBe(200);
+    const { id } = res.json().data;
+
+    const got = await app.inject({ method: 'GET', url: `/intentions/${id}`, headers: auth });
+    expect(got.statusCode).toBe(200);
+    expect(got.json().data.content).toBe(content);
+
+    const embedded = embedCalls.at(-1)!;
+    expect(content.startsWith(embedded)).toBe(true);
+    expect(approxTokens(embedded)).toBeLessThanOrEqual(TEST_EMBEDDER_MAX_TOKENS);
   });
 });
 
