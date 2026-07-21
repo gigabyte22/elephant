@@ -108,13 +108,16 @@ Full request/response shapes are in [EXPECTED.md](EXPECTED.md).
 ## Dashboard
 
 <p align="center">
-  <img src="docs/elephant-overview-seeded.png" alt="Overview" width="720" />
+  <img src="docs/elephant-overview.png" alt="Overview" width="720" />
 </p>
 
-| | |
-|---|---|
-| ![Graph explorer](docs/elephant-graph-loaded.png) | ![Timeline](docs/elephant-timeline.png) |
-| ![Dreams](docs/elephant-dreams.png) | ![Audit log](docs/elephant-audit.png) |
+| Memory health | Timeline | Dream runs |
+|---|---|---|
+| ![Memory health](docs/elephant-health.png) | ![Timeline](docs/elephant-timeline.png) | ![Dream runs](docs/elephant-dreams.png) |
+
+The health page plots the decay model directly: retention distribution against
+the prune floor, and every active fact scattered by retention vs. idle days —
+so you can see what's about to be forgotten before it is.
 
 ## Deployment
 
