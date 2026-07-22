@@ -9,6 +9,7 @@
 import type {
   RecallQuery,
   RecallResult,
+  WireArchivedRevision,
   WireAuditEvent,
   WireFact,
   WireHealth,
@@ -71,6 +72,8 @@ export class ElephantClient {
       timestamp?: Date;
       projectId?: string;
       userId?: string;
+      origin?: 'user' | 'cron' | 'event' | 'system' | 'ingest';
+      isolated?: boolean;
     },
     opts?: RequestOpts,
   ): Promise<{ episodeId: string }> {
@@ -304,6 +307,7 @@ export class ElephantClient {
       summary?: string;
       tags?: string[];
       expiresAt?: Date | null;
+      reason?: string;
       actor?: string;
     },
     opts?: RequestOpts,
@@ -445,8 +449,30 @@ export class ElephantClient {
   ): Promise<WireResearch> {
     return this.request('POST', '/research', input, opts);
   }
-  getResearch(id: string, opts?: RequestOpts): Promise<WireResearch> {
-    return this.request('GET', `/research/${seg(id)}`, undefined, opts);
+  /** `projectId` scopes the read: a cross-project id 404s rather than 403s. */
+  getResearch(
+    id: string,
+    query: { projectId?: string } = {},
+    opts?: RequestOpts,
+  ): Promise<WireResearch> {
+    return this.request('GET', `/research/${seg(id)}?${qs(query)}`, undefined, opts);
+  }
+  updateResearch(
+    id: string,
+    patch: {
+      title?: string;
+      content?: string;
+      summary?: string;
+      tags?: string[];
+      sourceUri?: string;
+      expiresAt?: Date | null;
+      reason?: string;
+      actor?: string;
+    },
+    query: { projectId?: string } = {},
+    opts?: RequestOpts,
+  ): Promise<WireResearch> {
+    return this.request('PUT', `/research/${seg(id)}?${qs(query)}`, patch, opts);
   }
   listResearch(
     query: { projectId: string; userId?: string; limit?: number },
@@ -508,7 +534,7 @@ export class ElephantClient {
     limit = 100,
     opts?: RequestOpts,
   ): Promise<{
-    revisions: Array<{ archivedAt: string; reason?: string; payload: unknown }>;
+    revisions: WireArchivedRevision[];
     events: WireAuditEvent[];
   }> {
     return this.request('GET', `/audit/${seg(targetId)}?${qs({ limit })}`, undefined, opts);

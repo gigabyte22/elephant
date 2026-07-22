@@ -197,7 +197,7 @@ export interface WireAuditEvent {
 
 // ── Recall request shape ──────────────────────────────────────────────────
 
-export type ScopeMode = 'boost' | 'filter' | 'none';
+export type ScopeMode = 'boost' | 'filter' | 'none' | 'strict';
 
 export interface RecallQuery {
   q: string;
@@ -212,7 +212,7 @@ export interface RecallQuery {
   kinds?: Array<
     | 'episode' | 'chunk' | 'fact' | 'preference' | 'insight'
     | 'observation' | 'knowledge_document' | 'knowledge_chunk'
-    | 'procedure' | 'research'
+    | 'procedure' | 'research' | 'research_chunk' | 'intention'
   >;
   from?: Date;
   to?: Date;
@@ -227,7 +227,9 @@ export interface RecallQuery {
   includeKnowledge?: boolean;
   includeProcedures?: boolean;
   includeResearch?: boolean;
+  includeIntentions?: boolean;
   rerank?: boolean;
+  ppr?: boolean;          // personalized PageRank; no-ops without a GDS projection
   debug?: boolean;
   chunkNeighborRadius?: 1 | 2 | 3;
 }
@@ -241,6 +243,8 @@ export interface RecallResult {
   knowledgeChunks?: Array<{ id: string; documentId: string; position: number; text: string; createdAt: string; score: number }>;
   procedures?: Array<WireProcedure & { score: number }>;
   research?: Array<WireResearch & { score: number }>;
+  researchChunks?: Array<{ id: string; researchId: string; position: number; text: string; createdAt: string; score: number }>;
+  intentions?: Array<WireIntention & { score: number }>;
   trace?: { stageTimingsMs: Record<string, number>; rerankUsed: boolean; candidatesSeen: Record<string, number> };
 }
 
@@ -424,7 +428,21 @@ export class ElephantClient {
     expiresAt?: Date | null;
     actor?: string;
   }): Promise<WireResearch> { return this.post('/research', input); }
-  getResearch(id: string): Promise<WireResearch> { return this.get(`/research/${id}`); }
+  // `projectId` scopes the read — a cross-project id 404s rather than 403s.
+  getResearch(id: string, projectId?: string): Promise<WireResearch> {
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+    return this.get(`/research/${id}${q}`);
+  }
+  updateResearch(id: string, patch: Partial<{
+    title: string;
+    content: string;
+    summary: string;
+    tags: string[];
+    sourceUri: string;
+    expiresAt: Date | null;
+    reason: string;
+    actor: string;
+  }>): Promise<WireResearch> { return this.request('PUT', `/research/${id}`, patch); }
   listResearch(opts: { projectId: string; userId?: string; limit?: number }): Promise<WireResearch[]> {
     const params = new URLSearchParams({ projectId: opts.projectId });
     if (opts.userId) params.set('userId', opts.userId);

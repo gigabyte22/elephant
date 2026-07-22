@@ -54,6 +54,9 @@ importers:
       '@biomejs/biome':
         specifier: ^1.9.0
         version: 1.9.4
+      '@elephant/client':
+        specifier: workspace:*
+        version: link:packages/client
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17

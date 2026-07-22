@@ -46,7 +46,7 @@
   "tools": [
     {
       "name": "memory_recall",
-      "description": "Recall facts, preferences, insights, and procedures from long-term memory"
+      "description": "Recall facts, preferences, insights, procedures, knowledge, research, and intentions from long-term memory"
     },
     { "name": "memory_save", "description": "Save a durable fact to long-term memory" },
     { "name": "memory_forget", "description": "Soft-delete a fact by id or query" },
@@ -57,7 +57,36 @@
     { "name": "memory_entity", "description": "Look up an entity and its fact subgraph" },
     { "name": "memory_preference_get", "description": "Read a user preference" },
     { "name": "memory_preference_set", "description": "Set a user preference (auto-supersedes)" },
-    { "name": "memory_observe", "description": "Write a short-lived session observation" }
+    { "name": "memory_observe", "description": "Write a short-lived session observation" },
+    { "name": "memory_knowledge_save", "description": "Ingest a knowledge document" },
+    { "name": "memory_knowledge_get", "description": "Fetch a knowledge document by id" },
+    { "name": "memory_knowledge_list", "description": "List knowledge documents in scope" },
+    { "name": "memory_knowledge_update", "description": "Revise a knowledge document" },
+    { "name": "memory_knowledge_delete", "description": "Soft-delete a knowledge document" },
+    {
+      "name": "memory_research_save",
+      "description": "Store a research document (requires projectId)"
+    },
+    { "name": "memory_research_get", "description": "Fetch a research document by id" },
+    { "name": "memory_research_list", "description": "List research documents for the project" },
+    { "name": "memory_research_update", "description": "Revise a research document" },
+    { "name": "memory_research_delete", "description": "Soft-delete a research document" },
+    { "name": "memory_procedure_save", "description": "Store a reusable procedure" },
+    { "name": "memory_procedure_get", "description": "Fetch a procedure by id or name" },
+    { "name": "memory_procedure_list", "description": "List procedures in scope" },
+    { "name": "memory_procedure_update", "description": "Revise a procedure or its success rate" },
+    { "name": "memory_procedure_delete", "description": "Soft-delete a procedure" },
+    { "name": "memory_intention_create", "description": "Record something to do later" },
+    { "name": "memory_intention_list", "description": "List intentions in scope" },
+    { "name": "memory_intention_due", "description": "List intentions that are due" },
+    { "name": "memory_intention_complete", "description": "Mark an intention done" },
+    { "name": "memory_intention_cancel", "description": "Cancel an intention" },
+    { "name": "memory_intention_fired", "description": "Record that an intention surfaced" },
+    { "name": "memory_state_set", "description": "Write a key to agent working state" },
+    { "name": "memory_state_get", "description": "Read one working-state key" },
+    { "name": "memory_state_list", "description": "List working-state entries" },
+    { "name": "memory_state_delete", "description": "Delete one working-state key" },
+    { "name": "memory_audit", "description": "Revision history and audit events for an item" }
   ],
   "cliCommands": [
     { "name": "elephant status", "description": "Elephant service health" },
@@ -65,6 +94,16 @@
     { "name": "elephant save <fact>", "description": "Save a fact" },
     { "name": "elephant forget <id>", "description": "Soft-delete a fact" },
     { "name": "elephant prefs", "description": "List active preferences" },
-    { "name": "elephant dream", "description": "Trigger a consolidation cycle" }
+    { "name": "elephant dream", "description": "Trigger a consolidation cycle" },
+    { "name": "elephant knowledge list", "description": "List knowledge documents" },
+    { "name": "elephant knowledge get <id>", "description": "Show one knowledge document" },
+    { "name": "elephant research list", "description": "List research documents" },
+    { "name": "elephant research get <id>", "description": "Show one research document" },
+    { "name": "elephant procedures list", "description": "List procedures" },
+    { "name": "elephant intentions list", "description": "List intentions" },
+    { "name": "elephant intentions due", "description": "List intentions that are due now" },
+    { "name": "elephant state list", "description": "List working-state entries" },
+    { "name": "elephant state get <key>", "description": "Read one working-state key" },
+    { "name": "elephant audit <targetId>", "description": "Revision history for a memory item" }
   ]
 }
