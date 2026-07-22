@@ -49,6 +49,15 @@ _NO_PROJECT = (
     "Set project_id in elephant.json (or use memory_knowledge_save instead)."
 )
 
+# The service rejects an intention with nothing to surface it (IntentionService
+# .create). Caught here so the model gets an actionable instruction instead of a
+# bare 400 it cannot repair. Mirrors the MCP and openclaw adapters.
+_NO_INTENTION_TRIGGER = (
+    "An intention needs something to surface it. Pass dueAt (ISO timestamp), "
+    "triggerHint (the situation that should raise it), or schedule (a cron "
+    "expression, with recurring: true)."
+)
+
 
 def _bad_uuid(value: Any, field: str) -> Optional[str]:
     """Reject a malformed id before it reaches the wire — mirrors the guard on
@@ -1007,6 +1016,8 @@ class ElephantMemoryProvider(MemoryProvider):
         # ── intentions ──
 
         if tool_name == "memory_intention_create":
+            if not any(args.get(k) for k in ("dueAt", "triggerHint", "schedule")):
+                return _NO_INTENTION_TRIGGER
             intention = client.create_intention(
                 content=args["content"],
                 scope=self._intention_scope(include_session=True),

@@ -355,16 +355,27 @@ export function registerTools(
     {
       title: 'Delete a knowledge document',
       description:
-        'Soft-delete a knowledge document (audit history preserved). Pass purge to remove it permanently.',
+        'Soft-delete a knowledge document (audit history preserved). Pass purge to additionally destroy its chunks and attachment blobs — the document node itself is still only soft-deleted.',
       inputSchema: {
         id: z.string().uuid(),
-        purge: z.boolean().optional().describe('Hard-delete instead of soft-delete'),
+        purge: z
+          .boolean()
+          .optional()
+          .describe(
+            'Also destroy chunks and attachment blobs (irreversible). The document is still soft-deleted, not hard-deleted.',
+          ),
       },
     },
     async ({ id, purge }) => {
       const { chunksDeleted } = await client.deleteKnowledge(id, purge ?? false);
+      // Nothing is ever hard-deleted: purge destroys derived data (chunks and
+      // attachment blobs) and then soft-deletes the document like the plain
+      // path does. Saying "purged the document" would tell the model the
+      // document is gone when it is still readable by id.
       return textResult(
-        `${purge ? 'Purged' : 'Soft-deleted'} knowledge document ${id} (${chunksDeleted} chunks).`,
+        purge
+          ? `Purged ${chunksDeleted} chunks and all attachments of knowledge document ${id}; the document itself is soft-deleted and still readable by id. Audit history preserved.`
+          : `Soft-deleted knowledge document ${id}. Chunks and audit history preserved.`,
       );
     },
   );
@@ -595,14 +606,27 @@ export function registerTools(
         'Remember something to do later — a one-off with a due date, or a recurring cron-scheduled item. Surfaces in recall as it comes due.',
       inputSchema: {
         content: z.string().min(1).describe('What should happen'),
-        dueAt: z.string().optional().describe('ISO timestamp the intention comes due'),
-        triggerHint: z.string().optional().describe('Situation that should surface it instead'),
+        dueAt: z
+          .string()
+          .optional()
+          .describe('ISO timestamp the intention comes due (one of dueAt/triggerHint/schedule)'),
+        triggerHint: z
+          .string()
+          .optional()
+          .describe('Situation that should surface it instead (one of dueAt/triggerHint/schedule)'),
         recurring: z.boolean().optional(),
-        schedule: z.string().optional().describe('Cron expression when recurring'),
+        schedule: z
+          .string()
+          .optional()
+          .describe('Cron expression when recurring (one of dueAt/triggerHint/schedule)'),
         importance: z.number().min(0).max(1).optional().describe('0-1, default 0.6'),
       },
     },
     async ({ content, dueAt, triggerHint, recurring, schedule, importance }) => {
+      // An intention with no due date, trigger or schedule can never surface,
+      // so elephant rejects it. The three fields are individually optional, so
+      // only this check stops a content-only call from 400ing opaquely.
+      if (!dueAt && !triggerHint && !schedule) return textResult(NO_INTENTION_TRIGGER);
       const intention = await client.createIntention({
         content,
         dueAt,
@@ -817,6 +841,9 @@ export function registerTools(
     },
   );
 }
+
+const NO_INTENTION_TRIGGER =
+  'An intention needs something to surface it. Pass dueAt (ISO timestamp), triggerHint (the situation that should raise it), or schedule (a cron expression, with recurring: true).';
 
 const NO_PROJECT =
   'Research is project-scoped and no project id is configured. Set ELEPHANT_PROJECT_ID on the MCP server and retry.';

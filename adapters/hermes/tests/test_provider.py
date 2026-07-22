@@ -413,7 +413,11 @@ def test_procedure_get_by_name_queries_the_list_route(scoped_provider, fake_http
 def test_intention_create_stamps_session_but_list_does_not(scoped_provider, fake_http):
     fake_http.respond("POST", "/intentions", {"id": FACT_ID})
     fake_http.respond("GET", "/intentions", [])
-    scoped_provider.handle_tool_call("memory_intention_create", {"content": "follow up friday"})
+    # A trigger is mandatory server-side, so every valid create carries one.
+    scoped_provider.handle_tool_call(
+        "memory_intention_create",
+        {"content": "follow up friday", "triggerHint": "when friday planning starts"},
+    )
     post = next(r for r in fake_http.requests if r["path"] == "/intentions" and r["body"])
     assert post["body"]["scope"]["sessionId"] == "session-1"
     assert post["body"]["scope"]["agentId"] == "hermes"
@@ -424,6 +428,16 @@ def test_intention_create_stamps_session_but_list_does_not(scoped_provider, fake
     assert listing["path"] == "/intentions"
     assert "sessionId" not in listing["query"]
     assert listing["query"]["agentId"] == "hermes"
+
+
+def test_intention_create_without_a_trigger_never_reaches_the_wire(provider, fake_http):
+    # IntentionService.create rejects an intention with no dueAt/triggerHint/
+    # schedule. Guarding client-side turns a dead-end 400 into an instruction
+    # the model can act on.
+    before = len(fake_http.requests)
+    out = provider.handle_tool_call("memory_intention_create", {"content": "someday"})
+    assert "dueAt" in out and "triggerHint" in out and "schedule" in out
+    assert len(fake_http.requests) == before
 
 
 def test_intention_complete_rejects_non_uuid_without_request(provider, fake_http):

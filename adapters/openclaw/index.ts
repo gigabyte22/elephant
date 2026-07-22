@@ -199,6 +199,13 @@ const DEFAULT_RECALL_LIMIT = 10;
 const NEEDS_PROJECT =
   'Research is project-scoped: set `projectId` in the memory-elephant plugin config first.';
 
+// POST /intentions rejects an intention with no way to ever surface (no due
+// time, no trigger hint, no schedule). Say so here rather than round-tripping a
+// request that can only 400 — the model gets an actionable instruction instead
+// of a raw server error.
+const NEEDS_TRIGGER =
+  'An intention needs at least one of `dueAt`, `triggerHint`, or `schedule` — otherwise nothing could ever surface it.';
+
 // ── event helpers (payload shapes vary across OpenClaw versions) ────────────
 
 function eventSessionId(event: Record<string, unknown>, fallback: string): string {
@@ -823,7 +830,7 @@ export default {
         name: 'memory_intention_create',
         label: 'Create Intention',
         description:
-          'Record something to do later — optionally with a due time, a trigger hint, or a recurring schedule.',
+          'Record something to do later. Requires at least one of dueAt, triggerHint, or schedule so the intention can resurface.',
         parameters: Type.Object({
           content: Type.String({ description: 'What should happen' }),
           dueAt: Type.Optional(Type.String({ description: 'ISO timestamp' })),
@@ -845,6 +852,7 @@ export default {
             importance?: number;
           },
         ) {
+          if (!params.dueAt && !params.triggerHint && !params.schedule) return text(NEEDS_TRIGGER);
           const intention = await client.createIntention({
             ...params,
             scope,
