@@ -203,6 +203,25 @@ memory_observe           // working memory (session-scoped, TTL)
   params: { note: string, sessionId?: string /* from ctx */ }
 Skip exposing /dream as a tool — run it via croner on a schedule; expose only a CLI/admin command for manual trigger.
 
+v1.2 tools. The eight above cover facts/entities/preferences/observations only;
+the knowledge, research, procedure, intention and working-state surfaces need
+their own tools or an orchestrator simply cannot reach them. Adapters expose
+these under a shared naming scheme — `memory_<resource>_<verb>` — so the MCP,
+OpenClaw and hermes surfaces stay one-for-one:
+
+memory_knowledge_save/_get/_list/_update/_delete   // /knowledge/documents
+memory_research_save/_get/_list/_update/_delete    // /research (projectId required)
+memory_procedure_save/_get/_list/_update/_delete   // /procedures
+memory_intention_create/_list/_due/_complete/_cancel/_fired  // /intentions
+memory_state_set/_get/_list/_delete                // /state (not a memory item)
+memory_audit                                       // /audit/:targetId
+
+Recall opt-ins are the other half of coverage: `includeKnowledge`,
+`includeResearch` and `includeIntentions` default OFF server-side to avoid
+paying the vector cost, so an adapter that never sets them makes those
+categories unreachable no matter how many write tools it exposes. Adapters
+set all three on every recall call site.
+
 3. Shared types (put in src/shared/memory-types.ts)
 
 // v1.2: every memory item carries optional projectId / userId scope props.
