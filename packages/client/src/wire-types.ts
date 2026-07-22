@@ -136,12 +136,32 @@ export interface WireWorkingStateEntry {
 
 export interface WireAuditEvent {
   id: string;
-  kind: 'create' | 'update' | 'supersede' | 'soft_delete' | 'prune' | 'promote' | 'archive';
+  kind:
+    | 'create'
+    | 'update'
+    | 'supersede'
+    | 'soft_delete'
+    | 'prune'
+    | 'promote'
+    | 'archive'
+    | 'merge';
+  /** Not guaranteed to be a UUID — the append-only log may carry legacy id strings. */
   targetId: string;
-  targetKind: string;
+  targetKind: RecallKind;
   payload: unknown;
   at: string;
   actor?: string;
+}
+
+export interface WireArchivedRevision {
+  id: string;
+  originalId: string;
+  originalKind: RecallKind;
+  /** Parsed JSON when the stored snapshot is valid JSON, else the raw string. */
+  snapshot: unknown;
+  archivedAt: string;
+  reason: string;
+  archivedBy?: string;
 }
 
 export interface WireHealth {
@@ -172,7 +192,9 @@ export type RecallKind =
   | 'knowledge_document'
   | 'knowledge_chunk'
   | 'procedure'
-  | 'research';
+  | 'research'
+  | 'research_chunk'
+  | 'intention';
 
 export interface RecallQuery {
   q: string;
@@ -198,35 +220,35 @@ export interface RecallQuery {
   includeKnowledge?: boolean;
   includeProcedures?: boolean;
   includeResearch?: boolean;
+  includeIntentions?: boolean;
   rerank?: boolean;
+  /** Personalized PageRank. No-ops server-side unless the GDS projection exists. */
+  ppr?: boolean;
   debug?: boolean;
   chunkNeighborRadius?: 1 | 2 | 3;
+}
+
+/** Fields common to every chunk kind. Each kind adds its own parent id
+ *  (`episodeId` / `documentId` / `researchId`); only the knowledge and research
+ *  chunks carry scope. */
+export interface WireChunkBase {
+  id: string;
+  position: number;
+  text: string;
+  createdAt: string;
 }
 
 export interface RecallResult {
   facts: WireFactWithScore[];
   entities?: Array<{ id: string; name: string; type: string }>;
-  chunks?: Array<{
-    id: string;
-    episodeId: string;
-    position: number;
-    text: string;
-    createdAt: string;
-    score: number;
-  }>;
+  chunks?: Array<WireChunkBase & { episodeId: string; score: number }>;
   preferences?: Array<WirePreference & { score: number }>;
   insights?: Array<WireInsight & { score: number }>;
-  knowledgeChunks?: Array<{
-    id: string;
-    documentId: string;
-    title?: string;
-    position: number;
-    text: string;
-    createdAt: string;
-    score: number;
-  }>;
+  knowledgeChunks?: Array<WireScope & WireChunkBase & { documentId: string; score: number }>;
   procedures?: Array<WireProcedure & { score: number }>;
   research?: Array<WireResearch & { score: number }>;
+  researchChunks?: Array<WireScope & WireChunkBase & { researchId: string; score: number }>;
+  intentions?: Array<WireIntention & { score: number }>;
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;
