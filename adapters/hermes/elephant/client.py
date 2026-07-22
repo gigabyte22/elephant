@@ -28,6 +28,15 @@ def _seg(value: str) -> str:
     return urllib.parse.quote(str(value), safe="")
 
 
+def _drop_none(fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Omit unset fields from a request body. No field on the fact body is
+    nullable server-side — ``z.optional()`` accepts a missing key but rejects an
+    explicit ``null``, so an unset category/projectId would 400 the whole write.
+    Only use this where ``null`` carries no meaning of its own (it *does* on
+    e.g. ``expiresAt``/``dueAt``, where it means "clear this")."""
+    return {key: value for key, value in fields.items() if value is not None}
+
+
 def _qs(params: Dict[str, Any]) -> str:
     clean: Dict[str, str] = {}
     for key, value in params.items():
@@ -115,7 +124,17 @@ class ElephantClient:
         return self._request("GET", "/health", timeout_sec=timeout_sec, retries=0)
 
     def save_fact(self, **fields: Any) -> Dict[str, Any]:
-        return self._request("POST", "/facts", fields)
+        return self._request("POST", "/facts", _drop_none(fields))
+
+    def save_facts(self, facts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return self._request("POST", "/facts/batch", {"facts": [_drop_none(f) for f in facts]})
+
+    def supersede_fact(self, old_id: str, new_fact_id: str, reason: str) -> Dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/facts/{_seg(old_id)}/supersede",
+            {"newFactId": new_fact_id, "reason": reason},
+        )
 
     def delete_fact(self, fact_id: str) -> Dict[str, Any]:
         return self._request("DELETE", f"/facts/{_seg(fact_id)}")
@@ -129,8 +148,9 @@ class ElephantClient:
     def search_entities(self, name: str, limit: int = 10) -> Dict[str, Any]:
         return self._request("GET", f"/entities?{_qs({'name': name, 'limit': limit})}")
 
-    def get_entity(self, entity_id: str) -> Dict[str, Any]:
-        return self._request("GET", f"/entities/{_seg(entity_id)}?includeSuperseded=false")
+    def get_entity(self, entity_id: str, *, include_superseded: bool = False) -> Dict[str, Any]:
+        query = _qs({"includeSuperseded": include_superseded})
+        return self._request("GET", f"/entities/{_seg(entity_id)}?{query}")
 
     def list_preferences(self) -> Dict[str, Any]:
         return self._request("GET", "/preferences")
@@ -155,11 +175,127 @@ class ElephantClient:
             {"agentId": agent_id, "sessionId": session_id, "content": content},
         )
 
+    def list_observations(self, session_id: str, limit: int = 100) -> Dict[str, Any]:
+        return self._request("GET", f"/observations?{_qs({'sessionId': session_id, 'limit': limit})}")
+
     def ingest_episode(self, **fields: Any) -> Dict[str, Any]:
         return self._request("POST", "/episodes", fields)
 
     def trigger_dream(self) -> Dict[str, Any]:
         return self._request("POST", "/dream", {})
+
+    def dream_status(self, job_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/dream/{_seg(job_id)}")
+
+    # ─ knowledge documents ──────────────────────────────────────────────────
+
+    def ingest_knowledge(self, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", "/knowledge/documents", fields)
+
+    def get_knowledge(self, doc_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/knowledge/documents/{_seg(doc_id)}")
+
+    def list_knowledge(self, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/knowledge/documents?{_qs(params)}")
+
+    def update_knowledge(self, doc_id: str, **fields: Any) -> Dict[str, Any]:
+        return self._request("PUT", f"/knowledge/documents/{_seg(doc_id)}", fields)
+
+    def delete_knowledge(self, doc_id: str, purge: bool = False) -> Dict[str, Any]:
+        # `purge` is a literal 'true'/'false' string enum server-side, not the
+        # permissive bool parsing the other query flags use — send it verbatim.
+        query = _qs({"purge": "true" if purge else "false"})
+        return self._request("DELETE", f"/knowledge/documents/{_seg(doc_id)}?{query}")
+
+    # ─ research ─────────────────────────────────────────────────────────────
+
+    def create_research(self, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", "/research", fields)
+
+    def get_research(self, research_id: str, project_id: Optional[str] = None) -> Dict[str, Any]:
+        return self._request("GET", f"/research/{_seg(research_id)}?{_qs({'projectId': project_id})}")
+
+    def list_research(self, project_id: str, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/research?{_qs({'projectId': project_id, **params})}")
+
+    def update_research(
+        self, research_id: str, project_id: Optional[str] = None, **fields: Any
+    ) -> Dict[str, Any]:
+        query = _qs({"projectId": project_id})
+        return self._request("PUT", f"/research/{_seg(research_id)}?{query}", fields)
+
+    def delete_research(self, research_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/research/{_seg(research_id)}")
+
+    # ─ procedures ───────────────────────────────────────────────────────────
+
+    def create_procedure(self, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", "/procedures", fields)
+
+    def get_procedure(self, procedure_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/procedures/{_seg(procedure_id)}")
+
+    def get_procedure_by_name(self, name: str, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/procedures?{_qs({'name': name, 'projectId': project_id})}")
+
+    def list_procedures(self, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/procedures?{_qs(params)}")
+
+    def update_procedure(self, procedure_id: str, **fields: Any) -> Dict[str, Any]:
+        return self._request("PUT", f"/procedures/{_seg(procedure_id)}", fields)
+
+    def delete_procedure(self, procedure_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/procedures/{_seg(procedure_id)}")
+
+    # ─ intentions ───────────────────────────────────────────────────────────
+
+    def create_intention(self, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", "/intentions", fields)
+
+    def get_intention(self, intention_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/intentions/{_seg(intention_id)}")
+
+    def list_intentions(self, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/intentions?{_qs(params)}")
+
+    def list_due_intentions(self, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/intentions/due?{_qs(params)}")
+
+    def complete_intention(self, intention_id: str, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", f"/intentions/{_seg(intention_id)}/complete", fields)
+
+    def cancel_intention(self, intention_id: str, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", f"/intentions/{_seg(intention_id)}/cancel", fields)
+
+    def mark_intention_fired(self, intention_id: str, **fields: Any) -> Dict[str, Any]:
+        return self._request("POST", f"/intentions/{_seg(intention_id)}/fired", fields)
+
+    # ─ working state ────────────────────────────────────────────────────────
+
+    def set_state(
+        self, scope: Dict[str, Any], key: str, value: Any, ttl_sec: Optional[int] = None
+    ) -> Dict[str, Any]:
+        body: Dict[str, Any] = {"scope": scope, "key": key, "value": value}
+        if ttl_sec is not None:
+            body["ttlSec"] = ttl_sec
+        return self._request("POST", "/state", body)
+
+    def get_state(self, key: str, **scope: Any) -> Dict[str, Any]:
+        return self._request("GET", f"/state/{_seg(key)}?{_qs(scope)}")
+
+    def list_state(self, **scope: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/state?{_qs(scope)}")
+
+    def delete_state(self, key: str, **scope: Any) -> Dict[str, Any]:
+        return self._request("DELETE", f"/state/{_seg(key)}?{_qs(scope)}")
+
+    # ─ audit ────────────────────────────────────────────────────────────────
+
+    def audit(self, target_id: str, limit: int = 100) -> Dict[str, Any]:
+        return self._request("GET", f"/audit/{_seg(target_id)}?{_qs({'limit': limit})}")
+
+    def audit_list(self, **params: Any) -> List[Dict[str, Any]]:
+        return self._request("GET", f"/audit?{_qs(params)}")
 
 
 __all__: List[str] = ["ElephantClient", "ElephantError"]

@@ -53,21 +53,53 @@ function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
 }
 
 describe('tool registration', () => {
-  test('exposes the eight elephant tools', async () => {
+  test('exposes the full elephant tool surface', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'memory_audit',
       'memory_entity',
       'memory_forget',
+      'memory_intention_cancel',
+      'memory_intention_complete',
+      'memory_intention_create',
+      'memory_intention_due',
+      'memory_intention_fired',
+      'memory_intention_list',
+      'memory_knowledge_delete',
+      'memory_knowledge_get',
+      'memory_knowledge_list',
+      'memory_knowledge_save',
+      'memory_knowledge_update',
       'memory_observe',
       'memory_preference_get',
       'memory_preference_set',
+      'memory_procedure_delete',
+      'memory_procedure_get',
+      'memory_procedure_list',
+      'memory_procedure_save',
+      'memory_procedure_update',
       'memory_recall',
+      'memory_research_delete',
+      'memory_research_get',
+      'memory_research_list',
+      'memory_research_save',
+      'memory_research_update',
       'memory_save',
+      'memory_state_delete',
+      'memory_state_get',
+      'memory_state_list',
+      'memory_state_set',
       'memory_timeline',
     ]);
     const recall = tools.find((t) => t.name === 'memory_recall');
     expect(recall?.annotations?.readOnlyHint).toBe(true);
+  });
+
+  // /dream stays off the tool surface on purpose — consolidation is cron-driven.
+  test('does not expose a dream tool', async () => {
+    const { tools } = await client.listTools();
+    expect(tools.some((t) => t.name.includes('dream'))).toBe(false);
   });
 });
 
@@ -142,6 +174,211 @@ describe('memory_recall', () => {
     expect(url.searchParams.get('limit')).toBe('5');
     // No projectId configured → the axis is forced to none.
     expect(url.searchParams.get('projectScope')).toBe('none');
+  });
+
+  test('opts into every v1.2 category', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: { facts: [] } }));
+    await client.callTool({ name: 'memory_recall', arguments: { query: 'anything' } });
+    const url = new URL(fetchMock.mock.calls[0]![0] as string);
+    for (const flag of [
+      'includePreferences',
+      'includeInsights',
+      'includeProcedures',
+      'includeKnowledge',
+      'includeResearch',
+      'includeIntentions',
+    ]) {
+      expect(url.searchParams.get(flag)).toBe('true');
+    }
+  });
+
+  test('renders knowledge, research and intention sections', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          facts: [],
+          knowledgeChunks: [
+            {
+              id: 'kc1',
+              documentId: 'kd1',
+              position: 0,
+              text: 'chunk text',
+              createdAt: '2026-01-01T00:00:00Z',
+              score: 0.5,
+            },
+          ],
+          research: [
+            {
+              id: 'r1',
+              title: 'Vector indexes',
+              summary: 'how they work',
+              tags: [],
+              source: 'web',
+              projectId: 'p1',
+              expiresAt: null,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              score: 0.6,
+            },
+          ],
+          researchChunks: [
+            {
+              id: 'rc1',
+              researchId: 'r1',
+              position: 0,
+              text: 'excerpt text',
+              createdAt: '2026-01-01T00:00:00Z',
+              score: 0.4,
+            },
+          ],
+          intentions: [
+            {
+              id: 'i1',
+              content: 'ship the adapter',
+              status: 'pending',
+              dueAt: '2026-08-01T09:00:00Z',
+              triggerHint: null,
+              recurring: false,
+              schedule: null,
+              fireCount: 0,
+              lastFiredAt: null,
+              validFrom: '2026-01-01T00:00:00Z',
+              validTo: null,
+              createdAt: '2026-01-01T00:00:00Z',
+              completedAt: null,
+              importance: 0.6,
+              score: 0.7,
+            },
+          ],
+        },
+      }),
+    );
+    const text = textOf(
+      await client.callTool({ name: 'memory_recall', arguments: { query: 'anything' } }),
+    );
+    expect(text).toContain('Knowledge:\n- [kd1] chunk text');
+    expect(text).toContain('Research:\n- [r1] Vector indexes: how they work');
+    expect(text).toContain('Research excerpts:\n- [r1] excerpt text');
+    expect(text).toContain('Intentions:\n- [i1] (pending, due 2026-08-01 09:00) ship the adapter');
+  });
+});
+
+describe('research', () => {
+  test('save refuses without a configured project id, no request made', async () => {
+    const result = await client.callTool({
+      name: 'memory_research_save',
+      arguments: { title: 't', source: 'web', content: 'c' },
+    });
+    expect(textOf(result)).toContain('no project id is configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test('list refuses without a configured project id', async () => {
+    const result = await client.callTool({ name: 'memory_research_list', arguments: {} });
+    expect(textOf(result)).toContain('no project id is configured');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('working state', () => {
+  test('set posts the agent scope', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: { ok: true } }));
+    await client.callTool({
+      name: 'memory_state_set',
+      arguments: { key: 'branch', value: 'feat/mcp', ttlSec: 60 },
+    });
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('http://elephant.test/state');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      scope: { agentId: 'claude-code', sessionId: 's-test' },
+      key: 'branch',
+      value: 'feat/mcp',
+      ttlSec: 60,
+    });
+  });
+
+  test('get returns a friendly message on 404', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: false, error: 'not found' }, 404));
+    const result = await client.callTool({
+      name: 'memory_state_get',
+      arguments: { key: 'missing' },
+    });
+    expect(textOf(result)).toBe('State "missing" is not set.');
+  });
+});
+
+describe('procedures', () => {
+  const PROC_ID = '9a1c1c1e-0f2b-4a3d-8c5e-1b2a3c4d5e6f';
+  const proc = {
+    id: PROC_ID,
+    name: 'deploy',
+    version: 2,
+    content: 'step one',
+    whenToUse: 'shipping',
+    successRate: 0.75,
+    invocationCount: 4,
+    lastSuccessAt: null,
+    expiresAt: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  };
+
+  test('get by id takes precedence over name', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: proc }));
+    const result = await client.callTool({
+      name: 'memory_procedure_get',
+      arguments: { id: PROC_ID, name: 'ignored' },
+    });
+    expect(fetchMock.mock.calls[0]![0]).toBe(`http://elephant.test/procedures/${PROC_ID}`);
+    expect(textOf(result)).toContain('deploy (v2)');
+  });
+
+  test('get by name falls back to the list route', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, data: [proc] }));
+    await client.callTool({ name: 'memory_procedure_get', arguments: { name: 'deploy' } });
+    const url = new URL(fetchMock.mock.calls[0]![0] as string);
+    expect(url.pathname).toBe('/procedures');
+    expect(url.searchParams.get('name')).toBe('deploy');
+  });
+});
+
+describe('memory_audit', () => {
+  test('renders events and revisions', async () => {
+    const TARGET = '11111111-2222-4333-8444-555555555555';
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        data: {
+          events: [
+            {
+              id: 'a1',
+              kind: 'update',
+              targetId: TARGET,
+              targetKind: 'fact',
+              payload: {},
+              at: '2026-02-01T00:00:00Z',
+              actor: 'claude-code',
+            },
+          ],
+          revisions: [
+            {
+              id: 'v1',
+              originalId: TARGET,
+              originalKind: 'fact',
+              snapshot: {},
+              archivedAt: '2026-02-01T00:00:00Z',
+              reason: 'corrected',
+            },
+          ],
+        },
+      }),
+    );
+    const text = textOf(
+      await client.callTool({ name: 'memory_audit', arguments: { targetId: TARGET } }),
+    );
+    expect(text).toContain('update (fact) by claude-code');
+    expect(text).toContain('corrected');
   });
 });
 

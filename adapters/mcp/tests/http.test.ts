@@ -41,16 +41,11 @@ afterAll(async () => {
   httpServer?.close();
 });
 
-test('initializes and lists the eight tools over streamable HTTP', async () => {
+// Transport smoke test — the exact tool roster is asserted in tools.test.ts.
+test('initializes and lists tools over streamable HTTP', async () => {
   const { tools } = await client.listTools();
-  expect(tools.map((t) => t.name).sort()).toEqual([
-    'memory_entity',
-    'memory_forget',
-    'memory_observe',
-    'memory_preference_get',
-    'memory_preference_set',
-    'memory_recall',
-    'memory_save',
-    'memory_timeline',
-  ]);
+  const names = tools.map((t) => t.name);
+  expect(names).toContain('memory_recall');
+  expect(names).toContain('memory_save');
+  expect(names.length).toBeGreaterThan(8);
 });
