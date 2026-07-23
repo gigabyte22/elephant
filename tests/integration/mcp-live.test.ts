@@ -328,11 +328,11 @@ describe('procedure tools against a live server', () => {
     expect(text).toContain(`[${procId}] ${name} (v1): when the ocelotd daemon misbehaves`);
   });
 
-  // Server behaviour worth pinning: a body-changing update writes the new body
-  // onto the original node AND creates a superseding clone, returning the
-  // clone's id. So the id in the response is not the id that was sent.
+  // A body-changing update supersedes into a new node: the old node keeps its
+  // old body and is retired, a NEW node at v+1 carries the new body and is the
+  // only live one. The returned id is the new node's — not the id that was sent.
   // (`ProcedureService.update` → `willChangeBody` branch.)
-  test('memory_procedure_update bumps the version and returns the superseding id', async () => {
+  test('memory_procedure_update supersedes into a new live v2 and retires the old', async () => {
     const text = await tools.call('memory_procedure_update', {
       id: procId,
       content: 'Step one: restart the ocelotd daemon.',
@@ -343,13 +343,24 @@ describe('procedure tools against a live server', () => {
     supersedingId = text.match(/[0-9a-f-]{36}/)![0]!;
     expect(supersedingId).not.toBe(procId);
 
-    // Both ids resolve, both at v2, both carrying the new body.
-    for (const id of [procId, supersedingId]) {
-      const fetched = await tools.call('memory_procedure_get', { id });
-      expect(fetched, id).toContain(`${name} (v2) [${id}]`);
-      expect(fetched, id).toContain('restart the ocelotd daemon');
-      expect(fetched, id).toContain('success: 0.50');
-    }
+    // The superseding node is v2 with the new body, and is live.
+    const fresh = await tools.call('memory_procedure_get', { id: supersedingId });
+    expect(fresh).toContain(`${name} (v2) [${supersedingId}]`);
+    expect(fresh).toContain('restart the ocelotd daemon');
+    expect(fresh).toContain('success: 0.50');
+    expect((await client.getProcedure(supersedingId)).expiresAt).toBeNull();
+
+    // The old node keeps its v1 body and is now retired (expiresAt stamped) —
+    // still resolvable by id, but no longer surfaced by list/recall.
+    const old = await tools.call('memory_procedure_get', { id: procId });
+    expect(old).toContain(`${name} (v1) [${procId}]`);
+    expect(old).toContain('check the ocelotd daemon');
+    expect((await client.getProcedure(procId)).expiresAt).not.toBeNull();
+
+    // Only the superseding node appears in the listing; the retired original is gone.
+    const listed = await tools.call('memory_procedure_list', { limit: 50 });
+    expect(listed).toContain(supersedingId);
+    expect(listed).not.toContain(procId);
   });
 
   test('memory_procedure_delete soft-deletes it', async () => {
@@ -362,14 +373,12 @@ describe('procedure tools against a live server', () => {
       expect(proc.expiresAt, id).not.toBeNull();
       expect(Date.parse(proc.expiresAt!)).toBeLessThanOrEqual(Date.now() + 1000);
     }
-    // KNOWN SERVER DEFECT, pinned rather than hidden: `ProcedureRepository.list`
-    // has no expiry predicate, so soft-deleted procedures keep coming back in
-    // the list — exactly the bug `ResearchRepository.list` carries a dated
-    // comment about having fixed (2026-07-20) for Research. When that predicate
-    // is added to procedures, flip these two assertions.
+    // `ProcedureRepository.list` now carries the expiry predicate (the same one
+    // `ResearchRepository.list` got on 2026-07-20), so soft-deleted procedures
+    // drop out of the listing.
     const listed = await tools.call('memory_procedure_list', { limit: 50 });
-    expect(listed).toContain(procId);
-    expect(listed).toContain(supersedingId);
+    expect(listed).not.toContain(procId);
+    expect(listed).not.toContain(supersedingId);
   });
 });
 

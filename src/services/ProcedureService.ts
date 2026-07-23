@@ -141,31 +141,28 @@ export function createProcedureService(deps: Deps) {
         payload: { changes },
       });
 
-      const updated = await ProcedureRepository.update(tx, id, {
-        content: input.content,
-        whenToUse: input.whenToUse,
-        embedding: nextEmbedding,
-        version: willChangeBody ? before.version + 1 : before.version,
-        successRate: input.successRate,
-        invocationCount: input.invocationCount,
-        lastSuccessAt: input.lastSuccessAt,
-        expiresAt: input.expiresAt,
-        updatedAt: now,
-      });
-      if (!updated) throw notFound(`procedure ${id} disappeared during update`);
-
-      // When the body itself changed, also link old → new via :SUPERSEDES so
-      // version chains are query-able the same way Facts/Preferences are.
+      // Body change → two-node supersession, matching Facts/Preferences: keep
+      // the old node's body intact and retire it, and create a NEW node at v+1
+      // carrying the new body. Only the new node stays live; the version chain
+      // is walkable via :SUPERSEDES (and audit). The old node is NOT mutated —
+      // overwriting it plus cloning was the duplication bug this fixes.
       if (willChangeBody) {
-        const newCopyId = newId();
         const supersedingClone: Procedure = {
-          ...updated,
-          id: newCopyId,
-          version: updated.version,
+          ...before,
+          id: newId(),
+          version: before.version + 1,
+          content: input.content ?? before.content,
+          whenToUse: input.whenToUse ?? before.whenToUse,
+          embedding: nextEmbedding ?? before.embedding,
+          successRate: input.successRate ?? before.successRate,
+          invocationCount: input.invocationCount ?? before.invocationCount,
+          lastSuccessAt: input.lastSuccessAt ?? before.lastSuccessAt,
+          expiresAt: input.expiresAt ?? before.expiresAt,
           createdAt: now,
           updatedAt: now,
         };
         const created = await ProcedureRepository.create(tx, supersedingClone);
+        // supersede() also retires the old node (sets its expiresAt).
         await ProcedureRepository.supersede(tx, {
           oldId: id,
           newId: created.id,
@@ -178,11 +175,20 @@ export function createProcedureService(deps: Deps) {
           targetId: created.id,
           targetKind: 'procedure',
           actor: input.actor,
-          payload: { supersedes: id, newVersion: updated.version },
+          payload: { supersedes: id, newVersion: created.version },
         });
         return created;
       }
 
+      // Non-body edits (telemetry / expiresAt) stay in-place on the same id.
+      const updated = await ProcedureRepository.update(tx, id, {
+        successRate: input.successRate,
+        invocationCount: input.invocationCount,
+        lastSuccessAt: input.lastSuccessAt,
+        expiresAt: input.expiresAt,
+        updatedAt: now,
+      });
+      if (!updated) throw notFound(`procedure ${id} disappeared during update`);
       return updated;
     });
   }
