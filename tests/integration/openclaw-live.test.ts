@@ -349,8 +349,9 @@ describe('memory_procedure_* round-trip', () => {
   });
 
   // Documented server behaviour, surprising enough to pin: a body-changing
-  // procedure update creates a *superseding clone*, so the update returns an id
-  // the caller never sent. Callers must re-read the id from the response.
+  // procedure update supersedes into a NEW node (retiring the old), so the
+  // update returns an id the caller never sent. Callers must re-read the id
+  // from the response.
   test('a body-changing update bumps the version and returns a NEW id', async () => {
     const out = await call('memory_procedure_update', {
       id: procId,
@@ -362,8 +363,12 @@ describe('memory_procedure_* round-trip', () => {
     expect(out).toContain(`${name} (v2)`);
     supersedingId = idFrom(out);
     expect(supersedingId).not.toBe(procId);
-    // Both ids resolve; the clone carries the new body.
+    // The new node carries the new body and is the only one still listed; the
+    // old node is retired and drops out of the listing.
     expect(await call('memory_procedure_get', { id: supersedingId })).toContain('2. test');
+    const listed = await call('memory_procedure_list', { limit: 50 });
+    expect(listed).toContain(supersedingId);
+    expect(listed).not.toContain(procId);
   });
 
   test('a metadata-only update revises in place', async () => {

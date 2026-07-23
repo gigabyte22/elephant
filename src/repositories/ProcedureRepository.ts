@@ -162,9 +162,14 @@ export const ProcedureRepository = {
   ): Promise<Procedure[]> {
     const limit = input.limit ?? 50;
     const { clause, params } = scopeWhereClause('p', input.scope);
+    // Procedures soft-delete (and naturally expire) via `expiresAt` — mirror the
+    // predicate ResearchRepository.list carries (2026-07-20). Without it,
+    // soft-deleted/expired procedures keep coming straight back on read.
+    const live = 'p.expiresAt IS NULL OR p.expiresAt > datetime()';
+    const where = clause ? `${clause} AND (${live})` : `WHERE ${live}`;
     const result = await tx.run(
       `MATCH (p:Procedure)
-       ${clause}
+       ${where}
        RETURN p {.*} AS p
        ORDER BY p.updatedAt DESC
        LIMIT toInteger($limit)`,
@@ -187,6 +192,7 @@ export const ProcedureRepository = {
     const result = await tx.run(
       `CALL db.index.vector.queryNodes('procedure_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore ${clause}
+         AND (node.expiresAt IS NULL OR node.expiresAt > datetime())
        RETURN node {.*} AS p, score
        ORDER BY score DESC`,
       { vec: input.embedding, limit: input.limit, minScore, ...params },
@@ -205,6 +211,7 @@ export const ProcedureRepository = {
     const result = await tx.run(
       `CALL db.index.fulltext.queryNodes('procedure_fulltext', $q) YIELD node, score
        WHERE node:Procedure ${clause}
+         AND (node.expiresAt IS NULL OR node.expiresAt > datetime())
        RETURN node {.*} AS p, score
        ORDER BY score DESC
        LIMIT toInteger($limit)`,
@@ -221,9 +228,14 @@ export const ProcedureRepository = {
     input: { oldId: string; newId: string; reason: string; at: Date },
   ): Promise<void> {
     await tx.run(
+      // Retire the superseded node as part of the same write, mirroring
+      // FactRepository.supersede (which sets oldF.validTo). Procedures have no
+      // validTo; their retirement marker is expiresAt. This is what keeps the
+      // old body around for lineage/audit while dropping it from live reads.
       `MATCH (oldP:Procedure {id: $oldId}), (newP:Procedure {id: $newId})
        MERGE (newP)-[r:SUPERSEDES]->(oldP)
-       SET r.reason = $reason, r.supersededAt = datetime($at)`,
+       SET r.reason = $reason, r.supersededAt = datetime($at)
+       SET oldP.expiresAt = datetime($at)`,
       { oldId: input.oldId, newId: input.newId, reason: input.reason, at: dateParam(input.at) },
     );
   },

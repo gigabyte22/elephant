@@ -16,6 +16,7 @@
     "serve": "tsx scripts/serve.ts",
     "migrate": "tsx scripts/migrate.ts",
     "backfill:entity-norm": "tsx scripts/backfill-entity-norm.ts",
+    "backfill:procedure-dedup": "tsx scripts/backfill-procedure-dedup.ts",
     "wipe": "tsx scripts/wipe.ts",
     "dream": "tsx scripts/dream.ts",
     "dev": "tsx watch scripts/serve.ts",
