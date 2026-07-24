@@ -48,5 +48,8 @@ export const chartTooltipProps = {
     fontSize: 11,
     color: '#E6E1ED',
   },
+  // Scatter tooltip payload entries carry no series color, and recharts'
+  // DefaultTooltipContent falls back to #000 — invisible on the dark panel.
+  itemStyle: { color: '#E6E1ED' },
   labelStyle: { color: '#A4A0B5' },
 } as const;
