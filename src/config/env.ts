@@ -158,6 +158,11 @@ const EnvSchema = z
     RETRIEVAL_RERANK_TOP_K: z.coerce.number().int().positive().default(20),
     RETRIEVAL_RERANK_KEEP_K: z.coerce.number().int().positive().default(10),
     RETRIEVAL_OVERFETCH_MULTIPLIER: z.coerce.number().int().positive().default(3),
+    // Extra overfetch applied on top of the base multiplier when recall asks for a
+    // historical `asOf`. Neo4j vector search takes the top-K nearest and only then
+    // applies our valid-time predicate, so for a past date most of the K are
+    // currently-valid facts that get filtered out. Widening K is the only lever.
+    RETRIEVAL_ASOF_OVERFETCH_MULTIPLIER: z.coerce.number().int().positive().default(4),
     RETRIEVAL_RRF_K: z.coerce.number().int().positive().default(60),
     RETRIEVAL_WEIGHT_RRF: z.coerce.number().min(0).max(1).default(0.5),
     RETRIEVAL_WEIGHT_IMPORTANCE: z.coerce.number().min(0).max(1).default(0.2),

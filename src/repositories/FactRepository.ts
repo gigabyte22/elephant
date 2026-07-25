@@ -1,6 +1,7 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Fact } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
+import { validAtClause } from '../utils/temporal.ts';
 import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
 
 function toFact(node: Record<string, unknown>, extras: { entityIds?: string[] } = {}): Fact {
@@ -242,6 +243,10 @@ export const FactRepository = {
       limit: number;
       minScore?: number;
       includeSuperseded?: boolean;
+      // When set, keep only facts whose valid-time interval covers this instant
+      // (validFrom ≤ asOf < validTo|∞). Preferred over bare validTo IS NULL so
+      // future-dated validFrom and historical as-of queries are correct.
+      asOf?: Date | null;
       // When provided, confine the search to a single scope bucket: a project's
       // own facts (projectId === value) or the unscoped "personal" bucket
       // (projectId === null). Used by dreaming so one project's facts can't
@@ -258,6 +263,7 @@ export const FactRepository = {
   ): Promise<Array<Fact & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const includeSuperseded = input.includeSuperseded ?? false;
+    const asOf = input.asOf ?? null;
     const hasScope = input.scope !== undefined;
     const projectId = input.scope?.projectId ?? null;
     const userId = input.scope?.userId ?? null;
@@ -273,15 +279,23 @@ export const FactRepository = {
           : 'AND node.projectId = $projectId';
     }
     const result = await tx.run(
+      // The asOf interval supersedes the simple validTo IS NULL live filter.
       `CALL db.index.vector.queryNodes('fact_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore
-       ${includeSuperseded ? '' : 'AND node.validTo IS NULL'}
+       ${validAtClause('node', { asOf, includeSuperseded })}
        ${scopeClause}
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(node)
        WITH node, score, collect(e.id) AS entityIds
        RETURN node {.*} AS f, entityIds, score
        ORDER BY score DESC`,
-      { vec: input.embedding, limit: input.limit, minScore, projectId, userId },
+      {
+        vec: input.embedding,
+        limit: input.limit,
+        minScore,
+        projectId,
+        userId,
+        asOf: nullableDateParam(asOf),
+      },
     );
     return result.records.map((r) => ({
       ...toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),
@@ -291,18 +305,20 @@ export const FactRepository = {
 
   async fullTextSearch(
     tx: ManagedTransaction,
-    input: { query: string; limit: number; includeSuperseded?: boolean },
+    input: { query: string; limit: number; includeSuperseded?: boolean; asOf?: Date | null },
   ): Promise<Array<Fact & { score: number }>> {
     const includeSuperseded = input.includeSuperseded ?? false;
+    const asOf = input.asOf ?? null;
     const result = await tx.run(
       `CALL db.index.fulltext.queryNodes('fact_fulltext', $q) YIELD node, score
-       WHERE node:Fact ${includeSuperseded ? '' : 'AND node.validTo IS NULL'}
+       WHERE node:Fact
+       ${validAtClause('node', { asOf, includeSuperseded })}
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(node)
        WITH node, score, collect(e.id) AS entityIds
        RETURN node {.*} AS f, entityIds, score
        ORDER BY score DESC
        LIMIT toInteger($limit)`,
-      { q: input.query, limit: input.limit },
+      { q: input.query, limit: input.limit, asOf: nullableDateParam(asOf) },
     );
     return result.records.map((r) => ({
       ...toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),

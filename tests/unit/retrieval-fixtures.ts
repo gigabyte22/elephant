@@ -2,10 +2,12 @@
 // mirrors src/services/retrieval/config.ts's dev defaults closely enough that
 // per-test overrides stay small.
 
-import type { Fact } from '../../src/models/types.ts';
+import type { Fact, Observation, Preference } from '../../src/models/types.ts';
 import type {
   FactCandidate,
+  ObservationCandidate,
   PipelineState,
+  PreferenceCandidate,
   RetrievalContext,
 } from '../../src/services/retrieval/types.ts';
 
@@ -64,9 +66,53 @@ export function makeCtx(
       boosts: { ownAgent: 1.15, sameSession: 1.05 },
       refCountTickMode: 'off',
       overfetchMultiplier: 3,
+      asOfOverfetchMultiplier: 4,
       ...overrides.config,
     },
   };
+}
+
+export function makeObservation(partial: Partial<Observation> & { id: string }): Observation {
+  return {
+    id: partial.id,
+    agentId: partial.agentId ?? 'alpha',
+    sessionId: partial.sessionId ?? 's1',
+    content: partial.content ?? `observation ${partial.id}`,
+    recordedAt: partial.recordedAt ?? new Date('2026-03-01'),
+    expiresAt: partial.expiresAt ?? new Date('2026-12-01'),
+    embedding: partial.embedding ?? [],
+    projectId: partial.projectId,
+    userId: partial.userId,
+  };
+}
+
+export function makeObservationCandidate(
+  partial: Partial<Observation> & { id: string },
+  rawScore = 0.5,
+): ObservationCandidate {
+  return { observation: makeObservation(partial), rawScore };
+}
+
+export function makePreference(partial: Partial<Preference> & { id: string }): Preference {
+  return {
+    id: partial.id,
+    key: partial.key ?? `key-${partial.id}`,
+    value: partial.value ?? 'v',
+    confidence: partial.confidence ?? 0.9,
+    validFrom: partial.validFrom ?? new Date('2026-01-01'),
+    validTo: partial.validTo ?? null,
+    recordedAt: partial.recordedAt ?? new Date('2026-01-01'),
+    embedding: partial.embedding ?? [],
+    projectId: partial.projectId,
+    userId: partial.userId,
+  };
+}
+
+export function makePreferenceCandidate(
+  partial: Partial<Preference> & { id: string },
+  rawScore = 0.5,
+): PreferenceCandidate {
+  return { preference: makePreference(partial), rawScore };
 }
 
 export function makeState(
@@ -84,5 +130,6 @@ export function makeState(
     research: extras.research ?? new Map(),
     researchChunks: extras.researchChunks ?? new Map(),
     intentions: extras.intentions ?? new Map(),
+    observations: extras.observations ?? new Map(),
   };
 }

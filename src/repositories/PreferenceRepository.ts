@@ -1,7 +1,8 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Preference, Scope } from '../models/types.ts';
 import { newId } from '../utils/ids.ts';
-import { dateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
+import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
+import { validAtClause } from '../utils/temporal.ts';
 import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
 
 function toPreference(node: Record<string, unknown>): Preference {
@@ -122,17 +123,22 @@ export const PreferenceRepository = {
       limit: number;
       minScore?: number;
       includeSuperseded?: boolean;
+      // Same valid-time as-of contract as FactRepository.listSimilar: keep only
+      // the preference version whose interval covers this instant, so a
+      // historical recall doesn't mix today's values in with older facts.
+      asOf?: Date | null;
     },
   ): Promise<Array<Preference & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const includeSuperseded = input.includeSuperseded ?? false;
+    const asOf = input.asOf ?? null;
     const result = await tx.run(
       `CALL db.index.vector.queryNodes('preference_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore
-       ${includeSuperseded ? '' : 'AND node.validTo IS NULL'}
+       ${validAtClause('node', { asOf, includeSuperseded })}
        RETURN node {.*} AS p, score
        ORDER BY score DESC`,
-      { vec: input.embedding, limit: input.limit, minScore },
+      { vec: input.embedding, limit: input.limit, minScore, asOf: nullableDateParam(asOf) },
     );
     return result.records.map((r) => ({
       ...toPreference(r.get('p')),

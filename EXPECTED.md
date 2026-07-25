@@ -15,6 +15,10 @@ POST   /facts/:id/supersede         explicit supersede (reason, newFactId)
 DELETE /facts/:id                   soft-delete (sets validTo=now, transaction time)
 
 GET    /recall                      hybrid retrieve — query params below
+                                    // asOf?: valid-time filter for facts + preferences
+                                    //   (default now unless includeSuperseded). Ranked, so
+                                    //   /timeline stays authoritative for exhaustive snapshots.
+                                    // includeObservations=1 + sessionId: session working memory in hybrid recall
 GET    /timeline                    valid-time as-of: facts/prefs whose valid interval covers `at`
                                     // (merge members collapsed when a survivor covers `at`)
 GET    /entities/:id                entity + its facts subgraph
@@ -106,14 +110,16 @@ GET /recall?
   # Valid kinds: episode,chunk,fact,preference,insight,observation,
   # knowledge_document,knowledge_chunk,procedure,research,research_chunk,intention.
   &kinds=fact,knowledge_chunk,procedure
-  &from=<iso>&to=<iso>  # temporal window
+  &from=<iso>&to=<iso>  # optional range: fact valid interval must overlap [from,to]
+  &asOf=<iso>           # valid-time as-of for facts AND preferences
+                        # (default: now when not includeSuperseded)
   &minImportance=0.3
   &minConfidence=0.5
   &limit=20             # max 100
   &includeSuperseded=false
   &entityId=<id>        # constrain to subgraph
   # Per-category opt-ins. Defaults: chunks=on-request, prefs/insights=on,
-  # knowledge/procedures/research/intentions=off (must opt in to pay vector cost).
+  # knowledge/procedures/research/intentions/observations=off (must opt in).
   &includeChunks=true
   &includePreferences=true
   &includeInsights=true
@@ -121,6 +127,10 @@ GET /recall?
   &includeProcedures=true
   &includeResearch=true
   &includeIntentions=true
+  &includeObservations=true  # requires sessionId; never cross-session.
+                        # 400 without sessionId, and 400 if `kinds` is given
+                        # without 'observation' — both would otherwise return an
+                        # empty list indistinguishable from "no matches".
   # Retrieval tuning. Each overrides its env default for this request only.
   &rerank=true          # listwise LLM rerank (default: RETRIEVAL_ENABLE_RERANK)
   &ppr=true             # personalized PageRank (default: RETRIEVAL_ENABLE_PPR;
@@ -129,8 +139,7 @@ GET /recall?
   &debug=true           # adds `trace` (per-stage timings + fusion detail)
 Returns ranked Fact[] + optional relatedEntities[] for GraphRAG expansion,
 plus v1.2 categories (knowledgeChunks[], procedures[], research[],
-researchChunks[]) when explicitly opted into via includeKnowledge /
-includeProcedures / includeResearch. Research bodies are chunked into
+researchChunks[], observations[]) when opted in. Research bodies are chunked into
 :ResearchChunk nodes (own vector + fulltext indexes, RRF-fused) so recall
 matches chunk-level content, not just the summary embedding.
 

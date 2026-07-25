@@ -7,11 +7,13 @@ import {
   toWireInsight,
   toWireIntention,
   toWireKnowledgeChunk,
+  toWireObservation,
   toWirePreference,
   toWireProcedure,
   toWireResearch,
   toWireResearchChunk,
 } from '../../models/wire.ts';
+import { badRequest } from '../errors.ts';
 import type { App } from '../types.ts';
 import {
   WireChunkSchema,
@@ -21,6 +23,7 @@ import {
   WireIntentionSchema,
   WireKnowledgeChunkSchema,
   WireMemoryKindSchema,
+  WireObservationSchema,
   WirePreferenceWithScoreSchema,
   WireProcedureSchema,
   WireRecallTraceSchema,
@@ -60,6 +63,10 @@ const Query = z.object({
   kinds: Kinds.optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  // Valid-time as-of for fact interval filters (default: now when not
+  // includeSuperseded). Distinct from GET /timeline, which returns a full
+  // snapshot without hybrid ranking.
+  asOf: z.coerce.date().optional(),
   minImportance: z.coerce.number().min(0).max(1).optional(),
   minConfidence: z.coerce.number().min(0).max(1).optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
@@ -73,6 +80,8 @@ const Query = z.object({
   includeProcedures: queryBool,
   includeResearch: queryBool,
   includeIntentions: queryBool,
+  // Session working-memory observations (requires sessionId).
+  includeObservations: queryBool,
   rerank: queryBool,
   // Opt-in Personalized PageRank retrieval (HippoRAG-style). Requires the GDS
   // projection (built by the dream cycle when RETRIEVAL_ENABLE_PPR=1).
@@ -93,6 +102,7 @@ const ResponseShape = okEnvelope(
     research: z.array(WireResearchSchema.extend({ score: z.number() })).optional(),
     researchChunks: z.array(WireResearchChunkSchema.extend({ score: z.number() })).optional(),
     intentions: z.array(WireIntentionSchema.extend({ score: z.number() })).optional(),
+    observations: z.array(WireObservationSchema.extend({ score: z.number() })).optional(),
     trace: WireRecallTraceSchema.optional(),
   }),
 );
@@ -106,6 +116,7 @@ export function registerRecallRoute(app: App, container: Container): void {
       response: { 200: ResponseShape },
     },
     handler: async (req) => {
+      assertObservationsReachable(req.query);
       const result = await container.retrieval.recall(req.query);
       return {
         ok: true as const,
@@ -170,9 +181,29 @@ export function registerRecallRoute(app: App, container: Container): void {
               score: i.score,
             })),
           }),
+          ...(result.observations && {
+            observations: result.observations.map((o) => ({
+              ...toWireObservation(o),
+              score: o.score,
+            })),
+          }),
           ...(result.trace && { trace: result.trace }),
         },
       };
     },
   });
+}
+
+// Observation recall has two ways to silently return nothing: it is hard-scoped
+// to one session at the source, and `kinds` is a hard filter applied to every
+// category. Both are easy to hit by accident and indistinguishable from "this
+// session has no matching observations", so reject rather than answer empty.
+function assertObservationsReachable(q: z.infer<typeof Query>): void {
+  if (!q.includeObservations) return;
+  if (!q.sessionId) {
+    throw badRequest('includeObservations requires sessionId — observations are session-scoped');
+  }
+  if (q.kinds && q.kinds.length > 0 && !q.kinds.includes('observation')) {
+    throw badRequest("includeObservations requires 'observation' in kinds, which is a hard filter");
+  }
 }

@@ -152,6 +152,13 @@ function projectResult(
     }));
   }
 
+  if (ctx.query.includeObservations && state.observations.size > 0) {
+    result.observations = sortAndMap(state.observations, (c) => ({
+      ...c.observation,
+      score: c.blendedScore ?? 0,
+    }));
+  }
+
   if (withTrace || ctx.query.debug) {
     result.trace = {
       stageTimingsMs: ctx.stageTimingsMs,
@@ -165,6 +172,8 @@ function projectResult(
         procedures: state.procedures.size,
         research: state.research.size,
         researchChunks: state.researchChunks.size,
+        intentions: state.intentions.size,
+        observations: state.observations.size,
       },
     };
   }

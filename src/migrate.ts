@@ -15,6 +15,7 @@ const VECTOR_INDEX_LABELS = [
   'Insight',
   'Episode',
   'Chunk',
+  'Observation',
   'KnowledgeDocument',
   'KnowledgeChunk',
   'Procedure',

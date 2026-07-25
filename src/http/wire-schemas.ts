@@ -57,6 +57,7 @@ export const WireFactWithScoreSchema = WireFactSchema.extend({
       'chunk_fulltext',
       'preference_vector',
       'insight_vector',
+      'observation_vector',
       'knowledge_chunk_vector',
       'knowledge_chunk_fulltext',
       'procedure_vector',
@@ -113,6 +114,8 @@ export const WireRecallTraceSchema = z.object({
     procedures: z.number().int().nonnegative(),
     research: z.number().int().nonnegative(),
     researchChunks: z.number().int().nonnegative(),
+    intentions: z.number().int().nonnegative(),
+    observations: z.number().int().nonnegative(),
   }),
 });
 
@@ -139,6 +142,9 @@ export const WireObservationSchema = z.object({
   content: z.string(),
   recordedAt: z.string(),
   expiresAt: z.string(),
+  // toWireObservation has always emitted these via pickScope; without them
+  // declared here zod stripped them off every response.
+  ...ScopeFields,
 });
 
 export const WireDreamRunSchema = z.object({
