@@ -128,7 +128,10 @@ export const FactRepository = {
       oldId: string;
       newId: string;
       reason: string;
-      at: Date;
+      // Event/valid-time end of the old claim (when the world changed).
+      validTo: Date;
+      // Transaction/decision time on the :SUPERSEDES edge (when we decided).
+      supersededAt: Date;
       // Optional adjustment to the *new* (superseding) fact's confidence, as
       // decided by the LLM supersede check. Positive when contradicting prior
       // memory strengthens our certainty in the new claim, negative when it
@@ -140,8 +143,8 @@ export const FactRepository = {
     const result = await tx.run(
       `MATCH (oldF:Fact {id: $oldId}), (newF:Fact {id: $newId})
        MERGE (newF)-[r:SUPERSEDES]->(oldF)
-       SET r.reason = $reason, r.supersededAt = datetime($at)
-       SET oldF.validTo = datetime($at)
+       SET r.reason = $reason, r.supersededAt = datetime($supersededAt)
+       SET oldF.validTo = datetime($validTo)
        SET newF.supersedesFactId = $oldId
        SET newF.confidence = CASE
          WHEN $confidenceDelta IS NULL THEN newF.confidence
@@ -154,7 +157,8 @@ export const FactRepository = {
         oldId: input.oldId,
         newId: input.newId,
         reason: input.reason,
-        at: dateParam(input.at),
+        validTo: dateParam(input.validTo),
+        supersededAt: dateParam(input.supersededAt),
         confidenceDelta: input.confidenceDelta ?? null,
       },
     );
@@ -168,9 +172,19 @@ export const FactRepository = {
   // The new fact inherits the members' pooled access telemetry (summed
   // referenceCount, latest lastReferencedAt) so decay-based retention carries
   // over instead of resetting.
+  //
+  // Members are retired at transaction time (memberValidTo), not event time —
+  // they were never "false earlier"; snapshotAt collapses them when a survivor
+  // merge covers the as-of instant.
   async mergeFrom(
     tx: ManagedTransaction,
-    input: { newFact: Fact; memberIds: string[]; reason: string; at: Date },
+    input: {
+      newFact: Fact;
+      memberIds: string[];
+      reason: string;
+      memberValidTo: Date;
+      supersededAt: Date;
+    },
   ): Promise<Fact> {
     const created = await FactRepository.create(tx, input.newFact);
 
@@ -179,13 +193,14 @@ export const FactRepository = {
        UNWIND $memberIds AS mid
        MATCH (oldF:Fact {id: mid})
        MERGE (newF)-[r:SUPERSEDES]->(oldF)
-       SET r.reason = $reason, r.supersededAt = datetime($at)
-       SET oldF.validTo = datetime($at)`,
+       SET r.reason = $reason, r.supersededAt = datetime($supersededAt)
+       SET oldF.validTo = datetime($memberValidTo)`,
       {
         newId: input.newFact.id,
         memberIds: input.memberIds,
         reason: input.reason,
-        at: dateParam(input.at),
+        memberValidTo: dateParam(input.memberValidTo),
+        supersededAt: dateParam(input.supersededAt),
       },
     );
 
@@ -299,10 +314,20 @@ export const FactRepository = {
     tx: ManagedTransaction,
     input: { at: Date; entityId?: string; limit?: number },
   ): Promise<Fact[]> {
+    // Valid-time as-of, plus consolidation collapse: a fragment that was merged
+    // into a survivor must not double-count when the survivor also covers `at`.
+    // Contradiction supersedes are handled by event-time validTo on the old row.
     const result = await tx.run(
       `${input.entityId ? 'MATCH (e:Entity {id: $entityId})-[:HAS_FACT]->(f:Fact)' : 'MATCH (f:Fact)'}
        WHERE f.validFrom <= datetime($at)
          AND (f.validTo IS NULL OR f.validTo > datetime($at))
+         AND NOT EXISTS {
+           MATCH (survivor:Fact)
+           WHERE survivor.mergedFromFactIds IS NOT NULL
+             AND f.id IN survivor.mergedFromFactIds
+             AND survivor.validFrom <= datetime($at)
+             AND (survivor.validTo IS NULL OR survivor.validTo > datetime($at))
+         }
        OPTIONAL MATCH (ent:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(ent.id) AS entityIds
        RETURN f {.*} AS f, entityIds

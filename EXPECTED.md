@@ -8,12 +8,15 @@ bytes. All writes idempotent via client-supplied id.
 
 POST   /episodes                    ingest raw conversation turn → returns episodeId
 POST   /facts                       save one fact (explicit, from user or agent)
+                                    // optional validFrom; if omitted + sourceEpisodeId → episode.timestamp
 POST   /facts/batch                 save many (for dreaming pipeline)
 POST   /facts/:id/supersede         explicit supersede (reason, newFactId)
-DELETE /facts/:id                   soft-delete (sets validTo=now)
+                                    // old.validTo = max(old.validFrom, new.validFrom); edge supersededAt = now
+DELETE /facts/:id                   soft-delete (sets validTo=now, transaction time)
 
 GET    /recall                      hybrid retrieve — query params below
-GET    /timeline                    bi-temporal: what was valid at time T?
+GET    /timeline                    valid-time as-of: facts/prefs whose valid interval covers `at`
+                                    // (merge members collapsed when a survivor covers `at`)
 GET    /entities/:id                entity + its facts subgraph
 GET    /entities?name=…             fuzzy entity lookup
 
@@ -184,7 +187,7 @@ Keep the existing memory_save / memory_recall / memory_forget names so existing 
 New tools:
 
 
-memory_timeline          // bi-temporal: "what did I believe about X on 2026-03-01?"
+memory_timeline          // valid-time as-of: "what was valid about X on 2026-03-01?"
   params: { entity?: string, query?: string, at: string /* ISO */ }
 
 memory_entity            // fetch entity + its facts, or fuzzy-search by name
@@ -242,9 +245,9 @@ export interface Fact extends Scope {
   category?: string;
   confidence: number;        // 0-1
   importance: number;        // 0-1
-  validFrom: string;         // ISO
-  validTo: string | null;    // null = still valid
-  recordedAt: string;
+  validFrom: string;         // ISO — event/valid time
+  validTo: string | null;    // null = still valid; event-time end on supersede
+  recordedAt: string;        // transaction time (when written)
   entities: string[];        // entity ids
   supersedes?: string;       // prior factId
   sourceEpisodeId?: string;
@@ -273,6 +276,7 @@ export interface Preference extends Scope {
   confidence: number;
   validFrom: string;
   validTo: string | null;
+  recordedAt?: string; // transaction time (additive; optional for older servers)
 }
 
 export interface KnowledgeDocument extends Scope {

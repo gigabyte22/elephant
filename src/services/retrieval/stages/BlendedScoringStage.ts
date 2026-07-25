@@ -145,7 +145,8 @@ function factBlend(
 }
 
 // Preferences have confidence but no importance/refCount — redistribute those
-// weights onto rrf so the scale stays comparable. Recency uses validFrom.
+// weights onto rrf so the scale stays comparable. Recency uses recordedAt
+// (transaction time), matching facts — not validFrom (event time).
 function preferenceBlend(
   c: PreferenceCandidate,
   now: Date,
@@ -155,7 +156,7 @@ function preferenceBlend(
 ): number {
   const rrfW = w.rrf + w.importance + w.refCount;
   const rrf = normalisedRrf(c.fusedScore, maxFused);
-  const rec = recencyScore(c.preference.validFrom, now, halfLife);
+  const rec = recencyScore(c.preference.recordedAt, now, halfLife);
   return rrfW * rrf + w.confidence * c.preference.confidence + w.recency * rec;
 }
 

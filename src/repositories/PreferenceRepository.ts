@@ -5,13 +5,17 @@ import { dateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
 
 function toPreference(node: Record<string, unknown>): Preference {
+  const validFrom = toJsDate(node.validFrom);
+  // Pre-bitemporal rows lack recordedAt; treat validFrom as txn time fallback.
+  const recordedAt = node.recordedAt != null ? toJsDate(node.recordedAt) : validFrom;
   return {
     id: node.id as string,
     key: node.key as string,
     value: node.value as string,
     confidence: node.confidence as number,
-    validFrom: toJsDate(node.validFrom),
+    validFrom,
     validTo: toJsDateOrNull(node.validTo),
+    recordedAt,
     embedding: (node.embedding as number[]) ?? [],
     ...readScope(node),
   };
@@ -40,7 +44,10 @@ export const PreferenceRepository = {
       value: string;
       confidence: number;
       embedding: number[];
-      at: Date;
+      // Event/valid-time start of this version (and end of the prior, if any).
+      validFrom: Date;
+      // Transaction time for this write.
+      recordedAt: Date;
       scope?: Scope;
     },
   ): Promise<{ next: Preference; prior: Preference | null }> {
@@ -53,14 +60,15 @@ export const PreferenceRepository = {
          value: $value,
          confidence: $confidence,
          embedding: $embedding,
-         validFrom: datetime($at),
-         validTo: NULL
+         validFrom: datetime($validFrom),
+         validTo: NULL,
+         recordedAt: datetime($recordedAt)
        })
        SET ${memoryItemSetClause('newP')}
        FOREACH (_ IN CASE WHEN oldP IS NULL THEN [] ELSE [1] END |
-         SET oldP.validTo = datetime($at)
+         SET oldP.validTo = datetime($validFrom)
          MERGE (newP)-[r:SUPERSEDES]->(oldP)
-         SET r.supersededAt = datetime($at)
+         SET r.supersededAt = datetime($recordedAt)
        )
        RETURN newP {.*} AS p, priorSnapshot`,
       {
@@ -69,7 +77,8 @@ export const PreferenceRepository = {
         value: input.value,
         confidence: input.confidence,
         embedding: input.embedding,
-        at: dateParam(input.at),
+        validFrom: dateParam(input.validFrom),
+        recordedAt: dateParam(input.recordedAt),
         ...memoryItemParams('preference', input.scope ?? {}),
       },
     );

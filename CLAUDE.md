@@ -21,6 +21,8 @@ pnpm typecheck                  # tsc --noEmit
 pnpm lint / pnpm lint:fix       # biome
 pnpm dream                      # run one dream cycle now
 pnpm okf:sync                   # backfill/repair the markdown vault
+pnpm backfill:bitemporal        # repair validFrom/validTo/recordedAt on existing graphs
+pnpm rebuild:facts              # wipe facts/insights + reset dream cursor (re-dream after)
 ```
 
 Single test: `pnpm vitest run tests/unit/decay.test.ts -t "name"`. For integration you **must** keep the config: `pnpm vitest run --config vitest.integration.config.ts tests/integration/dashboard.test.ts`.
@@ -53,7 +55,7 @@ Dates pass as ISO strings wrapped by `datetime($x)` in the Cypher (`src/utils/ne
 
 That last stage closes a loop with pruning: recall bumps `referenceCount`, and `src/utils/decay.ts` keeps frequently-recalled facts alive (Ebbinghaus retention, strength scaled by refCount and importance). Every optional path — PPR, GDS projection, rerank — degrades to a no-op on failure rather than erroring the request.
 
-**Dreaming** (`src/services/DreamingService.ts`, the densest file). Guarded by an `AsyncMutex` (concurrent trigger → 409). Uses a persistent cursor, not "last run time", so a deadline-boxed run resumes mid-backlog; the cursor advances past *failed* episodes so a poisoned one can't pin it. Per episode: extract → embed → dedup by cosine → persist → supersede-detect. Then, only if the deadline held: entity resolution, consolidation, insight promotion, prune. Sub-passes are individually try/caught — facts are already committed, so a late failure must not fail the cycle.
+**Dreaming** (`src/services/DreamingService.ts`, the densest file). Guarded by an `AsyncMutex` (concurrent trigger → 409). Uses a persistent cursor, not "last run time", so a deadline-boxed run resumes mid-backlog; the cursor advances past *failed* episodes so a poisoned one can't pin it. Per episode: extract → embed → dedup by cosine → persist → supersede-detect. Dream-created facts set **`validFrom = episode.timestamp`** (event time) and **`recordedAt = now`** (transaction time); contradiction supersede closes the old fact at event time (`max(old.validFrom, new.validFrom)`) while `:SUPERSEDES.supersededAt` is wall clock. Then, only if the deadline held: entity resolution, consolidation, insight promotion, prune. Sub-passes are individually try/caught — facts are already committed, so a late failure must not fail the cycle.
 
 **Adapters** (`src/adapters/`). Selection is a plain env switch in `factory.ts` — no registry. Interfaces per subdir in `types.ts`, implementations are `createXAdapter(config)` closures. Optional interface methods are load-bearing: `LlmRerankStage` checks `typeof llm.rerank === 'function'` and no-ops, so a local llama.cpp backend degrades gracefully. `vault` returns `undefined` unless `OKF_ENABLED` (nullable dependency, not a null object). Extraction is MIME-routed rather than a single choice.
 
@@ -64,7 +66,8 @@ That last stage closes a loop with pruning: recall bumps `referenceCount`, and `
 ## Conventions
 
 - **IDs**: `newId()` = UUIDv7 everywhere. Time-ordered and sortable, so creation order is reconstructable without a separate timestamp index.
-- **Nothing is hard-deleted.** Deletion sets `validTo = now`. Mutating writes to Fact/Preference/Procedure/KnowledgeDocument/Research route through `AuditService`, which snapshots an `:ArchivedRevision` and appends an `:AuditEvent` inside the caller's transaction.
+- **Nothing is hard-deleted.** Soft-delete / prune set `validTo = now` (system forget = transaction time). Contradiction supersede sets `validTo` to **event** time (`src/utils/temporal.ts` `eventValidTo`); consolidation merge retires members at transaction time and timeline/`snapshotAt` collapses merge members. Mutating writes to Fact/Preference/Procedure/KnowledgeDocument/Research route through `AuditService`, which snapshots an `:ArchivedRevision` and appends an `:AuditEvent` inside the caller's transaction.
+- **Bi-temporal split.** Valid time (`validFrom`/`validTo`) = when the claim held; transaction time (`recordedAt`, edge `supersededAt`) = when Elephant wrote/decided. Decay/prune/recency use transaction/access time only — never backfilled episode timestamps. Episode-linked `POST /facts` without `validFrom` resolves the episode timestamp. Spec detail: `SPEC.md` § Bi-temporal clocks.
 - **Scope** has four axes (`projectId`, `userId`, `agentId`, `sessionId`) and four modes (`boost` default when a value is given, `filter`, `strict`, `none`), applied at three layers: write (`memoryItemSetClause`), query (`scopeFilterClause` splices Cypher predicates), and scoring (`scopeBoostMultiplier` + `PostFilterStage.axisAllows`). The subtle part is in `axisAllows`: `filter` excludes only cross-scope items since a null scope means shared/global, while `strict` also excludes nulls.
 - **Two error regimes.** Request path: throw typed `HttpError`, let the handler build the envelope. Background/best-effort paths: catch, log, continue.
 - **Layering**: `src/` never imports from `scripts/`. That's why `vault/sync.ts` lives in `src/adapters/` despite a CLI being its main caller.

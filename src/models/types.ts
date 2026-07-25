@@ -190,6 +190,9 @@ export const PreferenceSchema = z
     confidence: z.number().min(0).max(1),
     validFrom: z.date(),
     validTo: z.date().nullable(),
+    // Transaction time (when Elephant wrote this version). Valid time is
+    // validFrom/validTo; live PUT uses the same instant for both axes.
+    recordedAt: z.date(),
     embedding: EmbeddingSchema,
   })
   .merge(ScopeSchema);

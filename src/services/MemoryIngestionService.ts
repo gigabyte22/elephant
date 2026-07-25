@@ -9,6 +9,7 @@ import { EntityRepository } from '../repositories/EntityRepository.ts';
 import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
 import { FactRepository } from '../repositories/FactRepository.ts';
 import { newId } from '../utils/ids.ts';
+import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
 import { type Chunker, createChunker } from './Chunker.ts';
 
@@ -246,6 +247,15 @@ export function createMemoryIngestionService(deps: Deps) {
   ): Promise<Fact> {
     const now = new Date();
 
+    // Episode-linked writes without an explicit validFrom inherit event time
+    // from the source episode so bi-temporal timeline stays correct.
+    let validFrom = input.validFrom ?? now;
+    if (!input.validFrom && input.sourceEpisodeId) {
+      const ep = await read((tx) => EpisodeRepository.get(tx, input.sourceEpisodeId!));
+      if (!ep) throw badRequest(`sourceEpisodeId ${input.sourceEpisodeId} not found`);
+      validFrom = ep.timestamp;
+    }
+
     // Unknown entities are seeded with the fact's embedding — good enough until
     // dreaming refines with proper entity-specific embeddings.
     const entityIds = await write(async (tx) => {
@@ -264,7 +274,7 @@ export function createMemoryIngestionService(deps: Deps) {
       category: input.category,
       confidence: input.confidence ?? defaults.confidence,
       importance: input.importance ?? defaults.importance,
-      validFrom: input.validFrom ?? now,
+      validFrom,
       validTo: null,
       recordedAt: now,
       embedding,
@@ -325,7 +335,19 @@ export function createMemoryIngestionService(deps: Deps) {
     tx: ManagedTransaction,
     input: { oldId: string; newId: string; reason: string; confidenceDelta?: number },
   ): Promise<void> {
-    const { newConfidence } = await FactRepository.supersede(tx, { ...input, at: new Date() });
+    const oldFact = await FactRepository.get(tx, input.oldId);
+    const newFact = await FactRepository.get(tx, input.newId);
+    if (!oldFact) throw badRequest(`fact ${input.oldId} not found`);
+    if (!newFact) throw badRequest(`fact ${input.newId} not found`);
+    const now = new Date();
+    const { newConfidence } = await FactRepository.supersede(tx, {
+      oldId: input.oldId,
+      newId: input.newId,
+      reason: input.reason,
+      validTo: eventValidTo(oldFact.validFrom, newFact.validFrom),
+      supersededAt: now,
+      confidenceDelta: input.confidenceDelta,
+    });
     await AuditService.record({
       tx,
       kind: 'supersede',

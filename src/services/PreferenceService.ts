@@ -25,12 +25,16 @@ export function createPreferenceService(deps: Deps) {
   }): Promise<Preference> {
     const embedding = await embedder.embed(`${input.key}: ${input.value}`);
     return write(async (tx) => {
+      // Live preference writes use wall clock for both axes; historical
+      // preference backfill can pass distinct validFrom/recordedAt later.
+      const now = new Date();
       const { next, prior } = await PreferenceRepository.set(tx, {
         key: input.key,
         value: input.value,
         confidence: input.confidence ?? 0.95,
         embedding,
-        at: new Date(),
+        validFrom: now,
+        recordedAt: now,
       });
 
       if (prior) {

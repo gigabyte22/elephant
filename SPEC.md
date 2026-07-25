@@ -66,6 +66,26 @@ Bi-temporal support (recordedAt vs validDuring)
 :ArchivedRevision chains for non-supersede edits (v1.2)
 :AuditEvent append-only log for all lifecycle events (v1.2)
 
+### Bi-temporal clocks (as-built)
+
+Two axes on facts (preferences gain `recordedAt` for the same split):
+
+| Axis | Fields | Meaning |
+|------|--------|---------|
+| **Valid time** | `validFrom` / `validTo` | When the claim held in the world / conversation |
+| **Transaction time** | `recordedAt`; `:SUPERSEDES.supersededAt` | When Elephant wrote or decided |
+
+**Write rules:**
+
+- Episode-derived facts/intentions: `validFrom = episode.timestamp`, `recordedAt`/`createdAt` = wall clock.
+- Direct `POST /facts` with `sourceEpisodeId` and no `validFrom` resolves the episode timestamp.
+- Contradiction supersede: `old.validTo = max(old.validFrom, new.validFrom)`; edge `supersededAt = now`.
+- Consolidation merge: members close at transaction time; `GET /timeline` / `snapshotAt` collapses merge members when a survivor covers `at`.
+- Soft-delete / prune: `validTo = now` (system forget, not world change).
+- Decay / prune / fact recency scoring use **transaction/access** time (`recordedAt` / `lastReferencedAt`), never backfilled event time.
+
+Repair existing graphs: `pnpm backfill:bitemporal -- --yes` or `pnpm rebuild:facts -- --yes` + re-dream.
+
 Dreaming = scheduled TS job that runs nightly (or on-demand).
 2. Neo4j Schema (Cypher DDL – Run Once)
 cypher// 1. Constraints
@@ -95,7 +115,7 @@ Node Labels & Properties
 
 Entity (Person, Concept, Tool, etc.): id, name, type, embedding
 Fact (reified long-term memory): id, content, confidence, importance, validFrom, validTo, recordedAt, embedding, sourceEpisodeId
-Preference (user prefs): id, key, value, confidence, validFrom, validTo, embedding
+Preference (user prefs): id, key, value, confidence, validFrom, validTo, recordedAt, embedding
 Episode (conversation turn): id, timestamp, rawTranscript, summary, embedding, sessionId
 Insight (dreamed wisdom): id, content, embedding
 Observation (working memory, TTL 7 days)
@@ -211,16 +231,20 @@ TypeScript// Example dreaming step
 async runDreamCycle() {
   const session = driver.session();
   // 1. Extract
-  // 2. For each potential fact:
+  // 2. For each potential fact (contradiction supersede):
+  //    validTo = event end (max(old.validFrom, new.validFrom));
+  //    edge supersededAt = transaction/decision time (now).
   await session.executeWrite(tx => tx.run(`
     MATCH (f:Fact) WHERE f.validTo IS NULL
     MATCH (new:Fact {id: $newId})
-    CREATE (new)-[:SUPERSEDES {reason: $reason, at: $now}]->(f)
-    SET f.validTo = $now
+    CREATE (new)-[:SUPERSEDES {reason: $reason, supersededAt: $now}]->(f)
+    SET f.validTo = $eventValidTo
   `));
 }
 PreferenceService
 Special handling for Preference nodes with explicit supersede on user confirmation.
+// Preference writes stamp recordedAt (txn time); prior.validTo = new.validFrom;
+// :SUPERSEDES.supersededAt = recordedAt.
 
 6. Size limits and chunking
 
