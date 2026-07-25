@@ -79,7 +79,7 @@ That last stage closes a loop with pruning: recall bumps `referenceCount`, and `
 
 - `EXPECTED.md` — the API contract (routes, envelope, idempotency-by-client-id). Consult when touching an endpoint; integration specs assert against it.
 - `SPEC.md` — data model: the `:MemoryItem` hybrid label scheme, node categories, scope axes, audit design, OKF vault contract. Consult when changing schema or Cypher.
-- `INTEGRATION.md` — guide for wiring an orchestrator against the service. Consult when writing a consumer or adapter.
+- `INTEGRATION.md` — guide for wiring an orchestrator against the service (includes write-tier decision tree). Consult when writing a consumer or adapter.
 - `docs/okf-evaluation.md` — as-built addendum for OKF, including work explicitly *not* built.
 
 "OKF vault" is a one-way markdown projection of research + knowledge documents. **The node content is the source of truth; the vault is derived.** Soft-deletes move files to `_trash/`. The writer uses temp-sibling + atomic rename because `protect` gives no cross-process lock against a manual `pnpm okf:sync`.

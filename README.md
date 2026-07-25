@@ -51,7 +51,8 @@ versioned **procedures** (skills with success stats), project-scoped
 
 See [SPEC.md](SPEC.md) for the full data model and [EXPECTED.md](EXPECTED.md)
 for the complete API contract. [INTEGRATION.md](INTEGRATION.md) walks through
-wiring an orchestrator against the service.
+wiring an orchestrator against the service — including a **write-tier decision
+tree** (which API for facts vs observations vs research vs state).
 
 ## Quickstart
 

@@ -49,13 +49,39 @@ Map the orchestrator's existing concerns to elephant primitives once. Everything
 | Stable beliefs about the world      | `Fact` (bi-temporal, supersedable)                         | Beliefs change; supersede preserves history; timeline answers "what was *valid* on date X" (valid time) |
 | Discovered entities                 | `Entity` (auto-upserted via `entityNames` on facts)        | Hub for graph expansion in retrieval                                                                     |
 | User preferences                    | `Preference` (versioned key/value, auto-supersede on PUT)  | First-class KV with versioning + `recordedAt`; dedicated wire shape                                      |
-| Mid-conversation observations       | `Observation` (TTL'd, default 7 days)                      | Short-lived working memory scoped to a session; surfaces in next turn's recall                           |
+| Mid-conversation observations       | `Observation` (TTL'd, default 7 days)                      | Short-lived working memory; hybrid recall via `includeObservations=1` + `sessionId`                      |
 | Live orchestration state            | `WorkingStateEntry` (TTL KV; Neo4j or Redis)               | Not a memory item — no embedding, no consolidation. For "current task id", "summary cache", etc.         |
 | Reusable instructions / playbooks   | `Procedure` (versioned, with `whenToUse` + success stats)  | Maps 1:1 to orchestrator skills; `whenToUse` is embedded so retrieval can suggest unknown procedures     |
 | External reference docs             | `KnowledgeDocument` (+ auto-`KnowledgeChunk`)              | Books, manuals, scoped by project/user, durable                                                          |
-| Web research artifacts              | `Research` (`projectId` mandatory, expirable)              | Time-bound, project-scoped; segregated from durable knowledge                                            |
+| Web research artifacts              | `Research` (`projectId` mandatory, expiring)               | Time-bound, project-scoped; segregated from durable knowledge                                            |
+| Forward commitments                 | `Intention` (pull-only)                                    | Reminders / todos; explicit write API; orchestrator owns firing                                          |
 | Promoted patterns from many facts   | `Insight` (output of dreaming)                             | Don't write directly; produced by consolidation                                                          |
 | Change history / provenance         | `AuditEvent` + `ArchivedRevision`                          | Every write produces an event; updates archive a snapshot                                                |
+
+### Which write API? (decision tree)
+
+Wrong-tier writes are silent product failures (permanent junk in facts, or important content lost to TTL). Use this table:
+
+| If you need… | Write | Lifetime | Who should write |
+|--------------|-------|----------|------------------|
+| One-sentence durable belief | `POST /facts` | Permanent (until supersede/prune) | Parent / curated |
+| User preference KV | `PUT /preferences/:key` | Versioned permanent | Parent / curated |
+| Mid-turn scratch for next turns | `POST /observations` | TTL (~7d) | Runtime every turn |
+| Full conversation for dreaming | `POST /episodes` (+ `timestamp` if historical) | Permanent raw | Runtime session end |
+| Reference manual / corpus | `POST /knowledge/documents` | Permanent | Parent / human |
+| Pipeline notebook / investigation | `POST /research` | Often expiring | Any agent in project |
+| Skill / playbook | `POST /procedures` | Versioned | Parent |
+| Remind / commitment | `POST /intentions` | Until complete/cancel | Parent / curated (not auto-written by dream) |
+| Cursor / checkpoint / machine state | `POST /state` | TTL or permanent | Any — **not prose** |
+
+**Rules of thumb**
+
+- Prefer **research** over knowledge for generated pipeline output; promote to knowledge deliberately.
+- Prefer **observation** over fact for ephemeral tool noise and mid-session notes.
+- Pass episode **`timestamp`** when backfilling historical chats (dream facts inherit it as `validFrom`).
+- Dream extracts **facts only** (plus graph hygiene / prune). Preferences and intentions stay explicit write APIs — do not expect the dreamer to set them.
+- Recall flags: pass `includeObservations=1` with `sessionId` for session working memory; pass `includeKnowledge` / `includeResearch` / `includeProcedures` only when needed (vector cost).
+- `asOf` on `/recall` filters facts by valid-time interval (default now); use `GET /timeline` for a full bi-temporal snapshot without hybrid ranking.
 
 ### Scope axes
 
