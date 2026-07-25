@@ -5,18 +5,20 @@
 import { read } from '../../../config/neo4j.ts';
 import { FactRepository } from '../../../repositories/FactRepository.ts';
 import type { RetrievalStage } from '../types.ts';
-import { overfetchLimit, upsertFactHits } from './helpers.ts';
+import { overfetchLimit, recallAsOf, upsertFactHits } from './helpers.ts';
 
 export function FactFullTextSource(): RetrievalStage {
   return {
     name: 'FactFullTextSource',
     async run(ctx, state) {
       if (!ctx.ftQuery) return state;
+      const asOf = recallAsOf(ctx);
       const hits = await read((tx) =>
         FactRepository.fullTextSearch(tx, {
           query: ctx.ftQuery,
           limit: overfetchLimit(ctx),
           includeSuperseded: ctx.query.includeSuperseded ?? false,
+          asOf,
         }),
       );
       upsertFactHits(state, hits, 'fact_fulltext');

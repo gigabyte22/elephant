@@ -2,6 +2,7 @@
 // files focused on the repository call and filter, not the map bookkeeping.
 
 import type { Chunk, Fact, Intention, Procedure, Research } from '../../../models/types.ts';
+import { effectiveRecallAsOf } from '../../../utils/temporal.ts';
 import type {
   CandidateSource,
   ChunkCandidate,
@@ -14,6 +15,30 @@ import type {
 
 export function overfetchLimit(ctx: RetrievalContext): number {
   return ctx.limit * ctx.config.overfetchMultiplier;
+}
+
+// The one valid-time instant every as-of-aware stage shares. Both the source
+// stages (which push the predicate into Cypher) and PostFilterStage (which
+// catches the expansion paths that bypass those queries) must resolve it the
+// same way, or a fact can survive one gate and not the other.
+export function recallAsOf(ctx: RetrievalContext): Date | null {
+  return effectiveRecallAsOf({
+    asOf: ctx.query.asOf,
+    now: ctx.now,
+    includeSuperseded: ctx.query.includeSuperseded,
+  });
+}
+
+// Overfetch for the vector sources that carry a valid-time predicate. Neo4j's
+// vector index can't pre-filter: `db.index.vector.queryNodes` returns the K
+// nearest overall and the WHERE runs afterwards. For a historical `asOf` almost
+// all of those K are currently-valid rows that get dropped, so a plain overfetch
+// yields a near-empty result. Widen K in that case only — an as-of of `now` (the
+// default) matches what the index already favours and needs no extra budget.
+export function asOfOverfetchLimit(ctx: RetrievalContext, asOf: Date | null): number {
+  const base = overfetchLimit(ctx);
+  if (!asOf || asOf.getTime() >= ctx.now.getTime()) return base;
+  return base * ctx.config.asOfOverfetchMultiplier;
 }
 
 // Upsert pattern shared by FactVectorSource and FactFullTextSource. Both stages

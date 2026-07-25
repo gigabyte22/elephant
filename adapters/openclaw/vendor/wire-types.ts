@@ -213,6 +213,8 @@ export interface RecallQuery {
   kinds?: RecallKind[];
   from?: Date;
   to?: Date;
+  /** Valid-time as-of for facts (default: now when not includeSuperseded). */
+  asOf?: Date;
   minImportance?: number;
   minConfidence?: number;
   limit?: number;
@@ -225,6 +227,8 @@ export interface RecallQuery {
   includeProcedures?: boolean;
   includeResearch?: boolean;
   includeIntentions?: boolean;
+  /** Session working memory; requires sessionId. */
+  includeObservations?: boolean;
   rerank?: boolean;
   /** Personalized PageRank. No-ops server-side unless the GDS projection exists. */
   ppr?: boolean;
@@ -253,6 +257,7 @@ export interface RecallResult {
   research?: Array<WireResearch & { score: number }>;
   researchChunks?: Array<WireScope & WireChunkBase & { researchId: string; score: number }>;
   intentions?: Array<WireIntention & { score: number }>;
+  observations?: Array<WireObservation & { score: number }>;
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;

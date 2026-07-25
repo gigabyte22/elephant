@@ -16,6 +16,7 @@ import type {
   InsightCandidate,
   IntentionCandidate,
   KnowledgeChunkCandidate,
+  ObservationCandidate,
   PreferenceCandidate,
   ProcedureCandidate,
   ResearchCandidate,
@@ -92,6 +93,12 @@ export function BlendedScoringStage(): RetrievalStage {
         i.blendedScore = intentionBlend(i, ctx.now, w, half, maxIntention) * boostFor(i.intention);
       }
 
+      // Observations: short TTL working memory — no importance/confidence.
+      const maxObs = maxFused(state.observations.values());
+      for (const o of state.observations.values()) {
+        o.blendedScore = observationBlend(o, ctx.now, w, half, maxObs) * boostFor(o.observation);
+      }
+
       return state;
     },
   };
@@ -158,6 +165,23 @@ function preferenceBlend(
   const rrf = normalisedRrf(c.fusedScore, maxFused);
   const rec = recencyScore(c.preference.recordedAt, now, halfLife);
   return rrfW * rrf + w.confidence * c.preference.confidence + w.recency * rec;
+}
+
+// Observations: short-TTL session notes. No confidence/importance, so those
+// weights redistribute onto rrf — same shape as insightBlend.
+//
+// Deliberately NOT recency-boosted. The most recent observations are the turns
+// still sitting in the caller's live context window; what recall uniquely adds
+// is reach into the tail that the session's token budget already evicted.
+// Weighting recency up would spend the result slots on the duplicates.
+function observationBlend(
+  c: ObservationCandidate,
+  now: Date,
+  w: ScoringWeights,
+  halfLife: number,
+  maxFused: number,
+): number {
+  return rrfPlusRecency(c.fusedScore, maxFused, c.observation.recordedAt, now, halfLife, w);
 }
 
 // Insights have only rrf + recency (via createdAt). Redistribute all other

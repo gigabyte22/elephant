@@ -316,6 +316,112 @@ describe('bi-temporal correctness', () => {
     expect(ids).not.toContain(b.id);
   });
 
+  // GET /recall?asOf is the ranked counterpart to GET /timeline. These assert
+  // the two agree on which claim held, since recall reaches it through the
+  // vector index and timeline through a plain interval scan.
+  test('recall asOf returns the claim that held then, not the current one', async () => {
+    const t1 = new Date('2024-01-01T00:00:00.000Z');
+    const t2 = new Date('2024-06-01T00:00:00.000Z');
+    const oldId = newId();
+    const newId_ = newId();
+    const seedAt = new Date();
+
+    await write(async (tx) => {
+      await FactRepository.create(tx, {
+        id: oldId,
+        content: 'favorite color is blue',
+        confidence: 0.8,
+        importance: 0.5,
+        validFrom: t1,
+        validTo: null,
+        recordedAt: seedAt,
+        embedding: vec(0.1),
+        entityIds: [],
+      });
+      await FactRepository.create(tx, {
+        id: newId_,
+        content: 'favorite color is green',
+        confidence: 0.85,
+        importance: 0.5,
+        validFrom: t2,
+        validTo: null,
+        recordedAt: seedAt,
+        embedding: vec(0.1),
+        entityIds: [],
+      });
+    });
+    await container.ingestion.supersede({ oldId, newId: newId_, reason: 'contradiction' });
+
+    const recallAt = async (asOf?: string): Promise<string[]> => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/recall?q=favorite%20color${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,
+        headers: auth,
+      });
+      expect(res.statusCode).toBe(200);
+      return (res.json().data.facts as Array<{ id: string }>).map((f) => f.id);
+    };
+
+    const historical = await recallAt('2024-03-01T00:00:00.000Z');
+    expect(historical).toContain(oldId);
+    expect(historical).not.toContain(newId_);
+
+    const current = await recallAt();
+    expect(current).toContain(newId_);
+    expect(current).not.toContain(oldId);
+
+    // …and the unranked snapshot agrees.
+    const timeline = await app.inject({
+      method: 'GET',
+      url: '/timeline?at=2024-03-01T00:00:00.000Z',
+      headers: auth,
+    });
+    expect(timeline.statusCode).toBe(200);
+    const timelineIds = (timeline.json().data.facts as Array<{ id: string }>).map((f) => f.id);
+    expect(timelineIds).toContain(oldId);
+    expect(timelineIds).not.toContain(newId_);
+  });
+
+  test('recall asOf holds preferences to the same instant as facts', async () => {
+    const first = await app.inject({
+      method: 'PUT',
+      url: '/preferences/coffee',
+      headers: auth,
+      payload: { value: 'drip', confidence: 0.9 },
+    });
+    expect(first.statusCode).toBe(200);
+    // Both versions are stamped from wall clock; separate them so the as-of
+    // instant lands unambiguously inside the first version's interval.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const betweenVersions = new Date();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = await app.inject({
+      method: 'PUT',
+      url: '/preferences/coffee',
+      headers: auth,
+      payload: { value: 'espresso', confidence: 0.9 },
+    });
+    expect(second.statusCode).toBe(200);
+
+    const values = async (asOf?: string): Promise<string[]> => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/recall?q=coffee&includePreferences=true${
+          asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''
+        }`,
+        headers: auth,
+      });
+      expect(res.statusCode).toBe(200);
+      return ((res.json().data.preferences ?? []) as Array<{ value: string }>).map((p) => p.value);
+    };
+
+    expect(await values()).toContain('espresso');
+    // A historical as-of must answer with the value that held then, not today's.
+    const historical = await values(betweenVersions.toISOString());
+    expect(historical).toContain('drip');
+    expect(historical).not.toContain('espresso');
+  });
+
   test('preference set stamps recordedAt; intention inherits episode time', async () => {
     const epTs = '2022-11-11T11:11:11.000Z';
     const episodeId = await postEpisode({

@@ -1,6 +1,7 @@
 // Slice each candidate map down to ctx.limit by
-// rerankScore ?? blendedScore DESC. Applies per-type so the four result
-// collections are independently bounded.
+// rerankScore ?? blendedScore DESC. Applies per-type so every result
+// collection is independently bounded — a map missed here escapes `limit`
+// entirely and ships at overfetch size.
 
 import type { RetrievalStage } from '../types.ts';
 
@@ -16,6 +17,8 @@ export function TopKStage(): RetrievalStage {
       state.procedures = slice(state.procedures, ctx.limit, (c) => c.blendedScore ?? 0);
       state.research = slice(state.research, ctx.limit, (c) => c.blendedScore ?? 0);
       state.researchChunks = slice(state.researchChunks, ctx.limit, (c) => c.blendedScore ?? 0);
+      state.intentions = slice(state.intentions, ctx.limit, (c) => c.blendedScore ?? 0);
+      state.observations = slice(state.observations, ctx.limit, (c) => c.blendedScore ?? 0);
       return state;
     },
   };

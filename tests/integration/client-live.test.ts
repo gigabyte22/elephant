@@ -79,7 +79,9 @@ describe('facts', () => {
     });
     expect(fact.category).toBe('testing');
     expect(fact.importance).toBeCloseTo(0.8);
-    const fetched = await client.getEntity((await client.searchEntities('Elephant')).entities[0]!.id);
+    const fetched = await client.getEntity(
+      (await client.searchEntities('Elephant')).entities[0]!.id,
+    );
     expect(fetched.entity.name).toBeTruthy();
   });
 
@@ -163,7 +165,9 @@ describe('research — including the previously unwrapped PUT', () => {
   test('getResearch forwards projectId; cross-project 404s', async () => {
     const scoped = await client.getResearch(researchId, { projectId: PROJECT });
     expect(scoped.id).toBe(researchId);
-    await expect(client.getResearch(researchId, { projectId: 'some-other-project' })).rejects.toMatchObject({ status: 404 });
+    await expect(
+      client.getResearch(researchId, { projectId: 'some-other-project' }),
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   test('list requires projectId and returns bodies', async () => {
@@ -230,7 +234,9 @@ describe('procedures, intentions, state, audit', () => {
       scope: { projectId: PROJECT, agentId: AGENT },
     });
     expect(created.status).toBe('pending');
-    expect((await client.listIntentions({ projectId: PROJECT, status: 'pending' })).length).toBeGreaterThan(0);
+    expect(
+      (await client.listIntentions({ projectId: PROJECT, status: 'pending' })).length,
+    ).toBeGreaterThan(0);
     const due = await client.listDueIntentions({
       projectId: PROJECT,
       before: new Date(Date.now() + 172_800_000).toISOString(),
@@ -256,7 +262,11 @@ describe('procedures, intentions, state, audit', () => {
     const pref = await client.putPreference(key, 'value-one', { confidence: 0.8, actor: 'spec' });
     expect(pref.value).toBe('value-one');
     expect((await client.getPreference(key)).value).toBe('value-one');
-    await client.writeObservation({ agentId: AGENT, sessionId: SESSION, content: 'an observation' });
+    await client.writeObservation({
+      agentId: AGENT,
+      sessionId: SESSION,
+      content: 'an observation',
+    });
     // Note the envelope: this route returns `{observations: [...]}`, not a bare array.
     expect((await client.listObservations(SESSION)).observations.length).toBeGreaterThan(0);
   });

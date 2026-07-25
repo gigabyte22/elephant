@@ -61,6 +61,9 @@ export interface RetrievalConfig {
   boosts: AgentScopeBoosts;
   refCountTickMode: 'async' | 'sync' | 'off';
   overfetchMultiplier: number;
+  // Additional multiplier for historical as-of queries; see
+  // RETRIEVAL_ASOF_OVERFETCH_MULTIPLIER in env.ts for why it exists.
+  asOfOverfetchMultiplier: number;
 }
 
 export function buildRetrievalConfigFromEnv(env: Env): RetrievalConfig {
@@ -101,5 +104,6 @@ export function buildRetrievalConfigFromEnv(env: Env): RetrievalConfig {
     },
     refCountTickMode: env.RETRIEVAL_REFCOUNT_TICK_MODE,
     overfetchMultiplier: env.RETRIEVAL_OVERFETCH_MULTIPLIER,
+    asOfOverfetchMultiplier: env.RETRIEVAL_ASOF_OVERFETCH_MULTIPLIER,
   };
 }

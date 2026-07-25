@@ -10,7 +10,9 @@
 // carries those props.
 
 import type { MemoryKind, ScopeMode } from '../../../models/types.ts';
+import { coversAsOf } from '../../../utils/temporal.ts';
 import type { FactCandidate, PipelineState, RecallQuery, RetrievalStage } from '../types.ts';
+import { recallAsOf } from './helpers.ts';
 
 export function PostFilterStage(): RetrievalStage {
   return {
@@ -22,6 +24,7 @@ export function PostFilterStage(): RetrievalStage {
       const fromT = q.from?.getTime();
       const toT = q.to?.getTime();
       const entityId = q.entityId;
+      const asOf = recallAsOf(ctx);
 
       const agentScope = effectiveScope(q.agentScope, q.agentId);
       const sessionScope = effectiveScope(q.sessionScope, q.sessionId);
@@ -39,6 +42,9 @@ export function PostFilterStage(): RetrievalStage {
         for (const [id, c] of state.facts.entries()) {
           if (minImp !== undefined && c.fact.importance < minImp) continue;
           if (minConf !== undefined && c.fact.confidence < minConf) continue;
+          // Valid-time as-of (default now when not includeSuperseded).
+          if (asOf && !coversAsOf(asOf, c.fact.validFrom, c.fact.validTo)) continue;
+          // Optional range window: fact interval must overlap [from, to].
           if (fromT !== undefined && c.fact.validTo && c.fact.validTo.getTime() <= fromT) continue;
           if (toT !== undefined && c.fact.validFrom.getTime() > toT) continue;
           if (entityId !== undefined && !c.fact.entityIds.includes(entityId)) continue;
@@ -66,6 +72,11 @@ export function PostFilterStage(): RetrievalStage {
         state.procedures.clear();
         state.research.clear();
         state.researchChunks.clear();
+        // Observations do carry a per-record agentId (it's required on write),
+        // so they get a row-level filter rather than the blanket drop above.
+        for (const [id, c] of state.observations) {
+          if (c.observation.agentId !== q.agentId) state.observations.delete(id);
+        }
       }
 
       const filterArgs = { q, projectScope, userScope, kinds: kindSet };
@@ -78,9 +89,20 @@ export function PostFilterStage(): RetrievalStage {
       filterByScope(state.procedures, (c) => c.procedure, 'procedure', filterArgs);
       filterByScope(state.research, (c) => c.research, 'research', filterArgs);
       filterByScope(state.researchChunks, (c) => c.chunk, 'research_chunk', filterArgs);
+      filterByScope(state.observations, (c) => c.observation, 'observation', filterArgs);
 
       // If kinds filter excludes chunk context, drop it.
       if (kindSet && !kindSet.has('chunk')) state.chunks.clear();
+
+      // Preferences are bi-temporal too: hold them to the same as-of instant as
+      // facts, or a historical recall answers with today's values.
+      if (asOf) {
+        for (const [id, c] of state.preferences) {
+          if (!coversAsOf(asOf, c.preference.validFrom, c.preference.validTo)) {
+            state.preferences.delete(id);
+          }
+        }
+      }
 
       return state;
     },

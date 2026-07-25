@@ -1,54 +1,33 @@
 import { describe, expect, test } from 'vitest';
 import type { Chunk, ResearchChunk } from '../../src/models/types.ts';
 import { RrfFusionStage } from '../../src/services/retrieval/stages/RrfFusionStage.ts';
-import type { FactCandidate, PipelineState } from '../../src/services/retrieval/types.ts';
-import { makeCtx, makeFact, makeState } from './retrieval-fixtures.ts';
+import { makeCtx, makeFact, makePreferenceCandidate, makeState } from './retrieval-fixtures.ts';
 
 describe('RrfFusionStage', () => {
   test('facts present in multiple source lists rank higher than single-source facts', async () => {
-    const state: PipelineState = {
-      facts: new Map<string, FactCandidate>([
-        [
-          'both',
-          {
-            fact: makeFact({ id: 'both' }),
-            sources: [
-              { source: 'fact_vector', rank: 0 },
-              { source: 'fact_fulltext', rank: 0 },
-            ],
-            expansionReason: 'fact_vector',
-            hasDirectHit: true,
-          },
+    const state = makeState([
+      {
+        fact: makeFact({ id: 'both' }),
+        sources: [
+          { source: 'fact_vector', rank: 0 },
+          { source: 'fact_fulltext', rank: 0 },
         ],
-        [
-          'vec-only',
-          {
-            fact: makeFact({ id: 'vec-only' }),
-            sources: [{ source: 'fact_vector', rank: 0 }],
-            expansionReason: 'fact_vector',
-            hasDirectHit: true,
-          },
-        ],
-        [
-          'ft-only',
-          {
-            fact: makeFact({ id: 'ft-only' }),
-            sources: [{ source: 'fact_fulltext', rank: 0 }],
-            expansionReason: 'fact_fulltext',
-            hasDirectHit: true,
-          },
-        ],
-      ]),
-      chunks: new Map(),
-      preferences: new Map(),
-      insights: new Map(),
-      entities: new Map(),
-      knowledgeChunks: new Map(),
-      procedures: new Map(),
-      research: new Map(),
-      researchChunks: new Map(),
-      intentions: new Map(),
-    };
+        expansionReason: 'fact_vector',
+        hasDirectHit: true,
+      },
+      {
+        fact: makeFact({ id: 'vec-only' }),
+        sources: [{ source: 'fact_vector', rank: 0 }],
+        expansionReason: 'fact_vector',
+        hasDirectHit: true,
+      },
+      {
+        fact: makeFact({ id: 'ft-only' }),
+        sources: [{ source: 'fact_fulltext', rank: 0 }],
+        expansionReason: 'fact_fulltext',
+        hasDirectHit: true,
+      },
+    ]);
     await RrfFusionStage().run(makeCtx(), state);
     expect(state.facts.get('both')!.fusedScore!).toBeGreaterThan(
       state.facts.get('vec-only')!.fusedScore!,
@@ -68,8 +47,7 @@ describe('RrfFusionStage', () => {
       embedding: [],
       createdAt: new Date(),
     });
-    const state: PipelineState = {
-      facts: new Map(),
+    const state = makeState([], {
       chunks: new Map([
         [
           'both',
@@ -91,15 +69,7 @@ describe('RrfFusionStage', () => {
           },
         ],
       ]),
-      preferences: new Map(),
-      insights: new Map(),
-      entities: new Map(),
-      knowledgeChunks: new Map(),
-      procedures: new Map(),
-      research: new Map(),
-      researchChunks: new Map(),
-      intentions: new Map(),
-    };
+    });
     await RrfFusionStage().run(makeCtx(), state);
     expect(state.chunks.get('both')!.fusedScore!).toBeGreaterThan(
       state.chunks.get('solo')!.fusedScore!,
@@ -147,26 +117,9 @@ describe('RrfFusionStage', () => {
   });
 
   test('preferences/insights: fusedScore = rawScore (single-source)', async () => {
-    const state: PipelineState = {
-      facts: new Map(),
-      chunks: new Map(),
+    const state = makeState([], {
       preferences: new Map([
-        [
-          'p1',
-          {
-            preference: {
-              id: 'p1',
-              key: 'theme',
-              value: 'dark',
-              confidence: 0.9,
-              validFrom: new Date('2026-01-01'),
-              validTo: null,
-              recordedAt: new Date('2026-01-01'),
-              embedding: [],
-            },
-            rawScore: 0.7,
-          },
-        ],
+        ['p1', makePreferenceCandidate({ id: 'p1', key: 'theme', value: 'dark' }, 0.7)],
       ]),
       insights: new Map([
         [
@@ -183,13 +136,7 @@ describe('RrfFusionStage', () => {
           },
         ],
       ]),
-      entities: new Map(),
-      knowledgeChunks: new Map(),
-      procedures: new Map(),
-      research: new Map(),
-      researchChunks: new Map(),
-      intentions: new Map(),
-    };
+    });
     await RrfFusionStage().run(makeCtx(), state);
     expect(state.preferences.get('p1')!.fusedScore).toBe(0.7);
     expect(state.insights.get('i1')!.fusedScore).toBe(0.65);

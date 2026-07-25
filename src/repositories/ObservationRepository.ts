@@ -58,6 +58,43 @@ export const ObservationRepository = {
     return result.records.map((r) => toObservation(r.get('o')));
   },
 
+  // Hybrid recall: cosine over observation_vectors, hard-scoped to one session
+  // and only unexpired rows. Session id is required so boost-mode never leaks
+  // another session's working memory.
+  async listSimilar(
+    tx: ManagedTransaction,
+    input: {
+      embedding: number[];
+      sessionId: string;
+      limit: number;
+      minScore?: number;
+      now?: Date;
+    },
+  ): Promise<Array<Observation & { score: number }>> {
+    const minScore = input.minScore ?? 0;
+    const now = input.now ?? new Date();
+    const result = await tx.run(
+      `CALL db.index.vector.queryNodes('observation_vectors', toInteger($limit), $vec)
+       YIELD node, score
+       WHERE score >= $minScore
+         AND node.sessionId = $sessionId
+         AND node.expiresAt > datetime($now)
+       RETURN node {.*} AS o, score
+       ORDER BY score DESC`,
+      {
+        vec: input.embedding,
+        limit: input.limit,
+        minScore,
+        sessionId: input.sessionId,
+        now: dateParam(now),
+      },
+    );
+    return result.records.map((r) => ({
+      ...toObservation(r.get('o')),
+      score: r.get('score') as number,
+    }));
+  },
+
   async reapExpired(tx: ManagedTransaction, now: Date): Promise<number> {
     const result = await tx.run(
       `MATCH (o:Observation)

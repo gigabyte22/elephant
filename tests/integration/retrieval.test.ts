@@ -191,6 +191,103 @@ describe('retrieval pipeline (agent-scoped, hybrid)', () => {
     expect(after).toBe(before + 1);
   });
 
+  // Session working memory. The point of surfacing observations in recall is
+  // reach into turns the caller's context window has already evicted — before
+  // the session flushes to an episode and dreaming produces chunks.
+  describe('observations', () => {
+    const observe = async (input: {
+      agentId: string;
+      sessionId: string;
+      content: string;
+    }): Promise<void> => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/observations',
+        headers: { ...auth, 'content-type': 'application/json' },
+        payload: input,
+      });
+      expect(res.statusCode).toBe(200);
+    };
+
+    const recallObservations = async (query: string): Promise<Array<{ content: string }>> => {
+      const res = await app.inject({ method: 'GET', url: `/recall?${query}`, headers: auth });
+      expect(res.statusCode).toBe(200);
+      return (res.json().data.observations ?? []) as Array<{ content: string }>;
+    };
+
+    test('includeObservations surfaces this session only', async () => {
+      await observe({
+        agentId: 'alpha',
+        sessionId: 's1',
+        content: 'we chose postgres for the job queue',
+      });
+      await observe({
+        agentId: 'alpha',
+        sessionId: 's2',
+        content: 'we chose postgres for the job queue',
+      });
+
+      const mine = await recallObservations(
+        'q=postgres%20job%20queue&includeObservations=1&sessionId=s1',
+      );
+      expect(mine.length).toBe(1);
+      expect(mine[0]!.content).toContain('postgres');
+
+      const theirs = await recallObservations(
+        'q=postgres%20job%20queue&includeObservations=1&sessionId=s3',
+      );
+      expect(theirs.length).toBe(0);
+    });
+
+    test('expired observations never surface', async () => {
+      await observe({ agentId: 'alpha', sessionId: 's1', content: 'expired working note' });
+      await txWrite(async (tx) => {
+        await tx.run('MATCH (o:Observation) SET o.expiresAt = datetime($past)', {
+          past: '2020-01-01T00:00:00.000Z',
+        });
+      });
+      const hits = await recallObservations(
+        'q=expired%20working%20note&includeObservations=1&sessionId=s1',
+      );
+      expect(hits.length).toBe(0);
+    });
+
+    test('limit bounds the observation list', async () => {
+      for (let i = 0; i < 5; i++) {
+        await observe({ agentId: 'alpha', sessionId: 's1', content: `working note number ${i}` });
+      }
+      const hits = await recallObservations(
+        'q=working%20note&includeObservations=1&sessionId=s1&limit=2',
+      );
+      expect(hits.length).toBeLessThanOrEqual(2);
+    });
+
+    // Both of these would otherwise return an empty list indistinguishable
+    // from "this session has nothing matching".
+    test('rejects unreachable observation queries rather than answering empty', async () => {
+      const noSession = await app.inject({
+        method: 'GET',
+        url: '/recall?q=anything&includeObservations=1',
+        headers: auth,
+      });
+      expect(noSession.statusCode).toBe(400);
+
+      const kindsExcluded = await app.inject({
+        method: 'GET',
+        url: '/recall?q=anything&includeObservations=1&sessionId=s1&kinds=fact',
+        headers: auth,
+      });
+      expect(kindsExcluded.statusCode).toBe(400);
+
+      const ok = await app.inject({
+        method: 'GET',
+        url: '/recall?q=anything&includeObservations=1&sessionId=s1&kinds=fact,observation',
+        headers: auth,
+      });
+      expect(ok.statusCode).toBe(200);
+    });
+  });
+
   test('Lucene regression: queries with reserved chars do not 500', async () => {
     await app.inject({
       method: 'POST',

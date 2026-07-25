@@ -20,6 +20,7 @@ import { IntentionVectorSource } from './stages/IntentionVectorSource.ts';
 import { KnowledgeChunkFullTextSource } from './stages/KnowledgeChunkFullTextSource.ts';
 import { KnowledgeChunkVectorSource } from './stages/KnowledgeChunkVectorSource.ts';
 import { LlmRerankStage } from './stages/LlmRerankStage.ts';
+import { ObservationVectorSource } from './stages/ObservationVectorSource.ts';
 import { PostFilterStage } from './stages/PostFilterStage.ts';
 import { PreferenceVectorSource } from './stages/PreferenceVectorSource.ts';
 import { ProcedureFullTextSource } from './stages/ProcedureFullTextSource.ts';
@@ -71,6 +72,8 @@ export function buildDefaultRetrievalPipeline(deps: PipelineDeps): Pipeline {
     ChunkFullTextSource(),
     PreferenceVectorSource(),
     InsightVectorSource(),
+    // Opt-in session working memory (requires sessionId).
+    ObservationVectorSource(),
     // v1.2 sources — gated by query.includeKnowledge / includeProcedures /
     // includeResearch so callers don't pay vector-index costs unless they
     // opted in.

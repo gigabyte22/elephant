@@ -10,6 +10,7 @@ import type {
   Intention,
   KnowledgeChunk,
   MemoryKind,
+  Observation,
   Preference,
   Procedure,
   Research,
@@ -25,6 +26,7 @@ export type CandidateSource =
   | 'chunk_fulltext'
   | 'preference_vector'
   | 'insight_vector'
+  | 'observation_vector'
   | 'knowledge_chunk_vector'
   | 'knowledge_chunk_fulltext'
   | 'procedure_vector'
@@ -55,10 +57,18 @@ export interface RecallQuery {
   kinds?: MemoryKind[];
   from?: Date;
   to?: Date;
+  // Valid-time as-of for fact and preference interval filters. When omitted and
+  // includeSuperseded is false, the pipeline uses `now` so recall returns only
+  // claims valid at query time. Explicit asOf enables a ranked "beliefs at T",
+  // which GET /timeline can't do — but timeline stays authoritative for an
+  // exhaustive snapshot, because recall still ranks before it filters.
+  asOf?: Date;
   minImportance?: number;
   minConfidence?: number;
   limit?: number;
   includeSuperseded?: boolean;
+  // Opt-in: vector search over unexpired session observations. Requires sessionId.
+  includeObservations?: boolean;
   entityId?: string;
   includeChunks?: boolean;
   includePreferences?: boolean;
@@ -167,6 +177,13 @@ export interface IntentionCandidate {
   blendedScore?: number;
 }
 
+export interface ObservationCandidate {
+  observation: Observation;
+  rawScore: number;
+  fusedScore?: number;
+  blendedScore?: number;
+}
+
 export interface PipelineState {
   facts: Map<string, FactCandidate>;
   chunks: Map<string, ChunkCandidate>;
@@ -178,6 +195,7 @@ export interface PipelineState {
   research: Map<string, ResearchCandidate>;
   researchChunks: Map<string, ResearchChunkCandidate>;
   intentions: Map<string, IntentionCandidate>;
+  observations: Map<string, ObservationCandidate>;
 }
 
 export function emptyState(): PipelineState {
@@ -192,6 +210,7 @@ export function emptyState(): PipelineState {
     research: new Map(),
     researchChunks: new Map(),
     intentions: new Map(),
+    observations: new Map(),
   };
 }
 
@@ -222,6 +241,7 @@ export interface RecallResult {
   research?: Array<Research & { score: number }>;
   researchChunks?: Array<ResearchChunk & { score: number; expansionReason: CandidateSource }>;
   intentions?: Array<Intention & { score: number }>;
+  observations?: Array<Observation & { score: number }>;
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;
@@ -234,6 +254,8 @@ export interface RecallResult {
       procedures: number;
       research: number;
       researchChunks: number;
+      intentions: number;
+      observations: number;
     };
   };
 }

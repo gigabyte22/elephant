@@ -20,6 +20,7 @@ const EXPECTED_INDEXES = [
   'insight_vectors',
   'episode_vectors',
   'chunk_vectors',
+  'observation_vectors',
   // Intention (prospective memory)
   'intention_id',
   'intention_due',

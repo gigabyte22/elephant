@@ -35,11 +35,12 @@ export function RrfFusionStage(): RetrievalStage {
         ctx.config.rrfK,
       );
 
-      // --- Preferences / Insights / Research / Intentions (single-source) ---
+      // --- Preferences / Insights / Research / Intentions / Observations ---
       for (const p of state.preferences.values()) p.fusedScore = p.rawScore;
       for (const i of state.insights.values()) i.fusedScore = i.rawScore;
       for (const r of state.research.values()) r.fusedScore = r.rawScore;
       for (const i of state.intentions.values()) i.fusedScore = i.rawScore;
+      for (const o of state.observations.values()) o.fusedScore = o.rawScore;
 
       return state;
     },
