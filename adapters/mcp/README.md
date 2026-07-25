@@ -8,7 +8,7 @@ Claude Desktop, …). Tools over elephant's HTTP API:
 | `memory_save` | persist a durable fact (with origin scope + audit actor) |
 | `memory_recall` | semantic recall across every category |
 | `memory_forget` | soft-delete by id; fuzzy query never bulk-deletes |
-| `memory_timeline` | bi-temporal "what was believed at time T" |
+| `memory_timeline` | valid-time as-of: what was valid at time T |
 | `memory_entity` | entity search / entity + fact subgraph |
 | `memory_preference_get` / `memory_preference_set` | versioned user preferences |
 | `memory_observe` | short-lived session-scoped working memory |

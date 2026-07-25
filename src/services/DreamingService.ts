@@ -25,6 +25,7 @@ import { clusterForConsolidation } from '../utils/consolidation.ts';
 import { cosine } from '../utils/cosine.ts';
 import { shouldPrune } from '../utils/decay.ts';
 import { newId } from '../utils/ids.ts';
+import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
 import type { GraphProjectionService } from './graph/GraphProjectionService.ts';
 
@@ -399,7 +400,11 @@ export function createDreamingService(deps: Deps) {
             category: ext.category,
             confidence: ext.confidence,
             importance: ext.importance,
-            validFrom: now,
+            // Bi-temporal split: validFrom = event time (when the conversation
+            // said this was true); recordedAt = transaction time (when we
+            // extracted it). Decay/prune key on recordedAt / lastReferencedAt,
+            // so backfilled episode timestamps must not age the fact out.
+            validFrom: ep.timestamp,
             validTo: null,
             recordedAt: now,
             embedding,
@@ -519,12 +524,18 @@ export function createDreamingService(deps: Deps) {
       }
       if (!decision) continue;
 
+      const oldFact = others.find((o) => o.id === decision.oldFactId);
+      if (!oldFact) continue;
+      const now = new Date();
+      const validTo = eventValidTo(oldFact.validFrom, fact.validFrom);
+
       await write(async (tx) => {
         const { newConfidence } = await FactRepository.supersede(tx, {
           oldId: decision.oldFactId,
           newId: fact.id,
           reason: decision.reason,
-          at: new Date(),
+          validTo,
+          supersededAt: now,
           confidenceDelta: decision.confidenceDelta,
         });
         await recordDreamerEvent(tx, run, {
@@ -789,7 +800,10 @@ export function createDreamingService(deps: Deps) {
             newFact,
             memberIds,
             reason: 'consolidation',
-            at: now,
+            // Restatement: retire members at transaction time; snapshotAt
+            // collapses them when the survivor covers the as-of instant.
+            memberValidTo: now,
+            supersededAt: now,
           });
           await recordDreamerEvent(tx, run, {
             kind: 'merge',

@@ -8,6 +8,7 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound } from '../http/errors.ts';
 import type { Intention, IntentionStatus, Scope } from '../models/types.ts';
+import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
 import { IntentionRepository } from '../repositories/IntentionRepository.ts';
 import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
@@ -87,6 +88,13 @@ export function createIntentionService(deps: Deps) {
     const embedding = await embedder.embed(embedText);
 
     const now = new Date();
+    // Event time from source episode when linked; transaction time stays now.
+    let validFrom = now;
+    if (input.sourceEpisodeId) {
+      const ep = await read((tx) => EpisodeRepository.get(tx, input.sourceEpisodeId!));
+      if (!ep) throw badRequest(`sourceEpisodeId ${input.sourceEpisodeId} not found`);
+      validFrom = ep.timestamp;
+    }
     const scope = input.scope ?? {};
     const intention: Intention = {
       id: input.id ?? newId(),
@@ -98,7 +106,7 @@ export function createIntentionService(deps: Deps) {
       schedule,
       fireCount: 0,
       lastFiredAt: null,
-      validFrom: now,
+      validFrom,
       validTo: null,
       createdAt: now,
       completedAt: null,

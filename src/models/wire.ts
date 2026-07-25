@@ -71,6 +71,8 @@ export interface WirePreference extends WireScope {
   confidence: number;
   validFrom: string;
   validTo: string | null;
+  /** Transaction time; absent only on pre-bitemporal rows until backfill. */
+  recordedAt?: string;
 }
 
 export interface WireEpisode extends WireScope {
@@ -274,6 +276,7 @@ export function toWirePreference(p: Preference): WirePreference {
     confidence: p.confidence,
     validFrom: p.validFrom.toISOString(),
     validTo: p.validTo ? p.validTo.toISOString() : null,
+    recordedAt: p.recordedAt.toISOString(),
     ...pickScope(p),
   };
 }

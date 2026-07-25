@@ -128,6 +128,8 @@ export const WirePreferenceSchema = z.object({
   confidence: z.number(),
   validFrom: z.string(),
   validTo: z.string().nullable(),
+  // Additive: clients that ignore unknown fields stay compatible.
+  recordedAt: z.string().optional(),
 });
 
 export const WireObservationSchema = z.object({

@@ -11,7 +11,7 @@ The goal is total replacement of the orchestrator's bespoke memory primitives. W
 A typical agent loop today stuffs a static markdown blob into every system prompt and calls it "memory". That gets you keyword recall at best, no temporal model, no consolidation, no cross-agent sharing, no audit trail. Elephant replaces that with:
 
 - **Semantic recall over a hybrid GraphRAG index** — vector + full-text fusion across facts, episode chunks, preferences, insights, knowledge documents, procedures, and research, with reciprocal-rank fusion and optional LLM rerank.
-- **Bi-temporal facts** — every fact has `validFrom` / `validTo` and `recordedAt`. You can ask "what did the agent believe on date X?" via [`GET /timeline`](src/http/routes/timeline.ts), and supersede outdated beliefs with full audit history.
+- **Bi-temporal facts** — every fact has **valid time** (`validFrom` / `validTo`) and **transaction time** (`recordedAt`). Episode-derived facts inherit `validFrom` from the episode timestamp; `recordedAt` is always wall-clock write time (so prune/decay never treat a backfill as ancient). Supersede closes the prior claim at event time (`max(old.validFrom, new.validFrom)`) while the `:SUPERSEDES` edge records decision time. Ask "what was valid on date X?" via [`GET /timeline`](src/http/routes/timeline.ts).
 - **Dreaming consolidation** — a scheduled cycle (default 03:00 UTC) extracts facts from raw episodes, dedupes them semantically, promotes high-importance facts into insights, and prunes stale low-importance ones.
 - **Scoped knowledge** — every memory item carries optional `agentId`, `sessionId`, `projectId`, `userId`. Queries can `boost` the agent's own memories while still recalling cross-agent knowledge, or hard-`filter` to hermetic scope.
 - **Procedures with success metrics** — versioned, reusable instructions with `whenToUse`, `successRate`, and `invocationCount`. Maps cleanly onto an orchestrator's skill / playbook system.
@@ -46,9 +46,9 @@ Map the orchestrator's existing concerns to elephant primitives once. Everything
 | Orchestrator concern                | Elephant primitive                                         | Why this and not something else                                                                          |
 | ----------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Conversation transcript             | `Episode` (auto-chunked, summarized, embedded)             | Long-form raw kept whole; chunking + embedding handled server-side; feeds dreaming                       |
-| Stable beliefs about the world      | `Fact` (bi-temporal, supersedable)                         | Beliefs change; supersede preserves history; bi-temporal answers "what did we know on date X"            |
+| Stable beliefs about the world      | `Fact` (bi-temporal, supersedable)                         | Beliefs change; supersede preserves history; timeline answers "what was *valid* on date X" (valid time) |
 | Discovered entities                 | `Entity` (auto-upserted via `entityNames` on facts)        | Hub for graph expansion in retrieval                                                                     |
-| User preferences                    | `Preference` (versioned key/value, auto-supersede on PUT)  | First-class KV with versioning; dedicated wire shape                                                     |
+| User preferences                    | `Preference` (versioned key/value, auto-supersede on PUT)  | First-class KV with versioning + `recordedAt`; dedicated wire shape                                      |
 | Mid-conversation observations       | `Observation` (TTL'd, default 7 days)                      | Short-lived working memory scoped to a session; surfaces in next turn's recall                           |
 | Live orchestration state            | `WorkingStateEntry` (TTL KV; Neo4j or Redis)               | Not a memory item — no embedding, no consolidation. For "current task id", "summary cache", etc.         |
 | Reusable instructions / playbooks   | `Procedure` (versioned, with `whenToUse` + success stats)  | Maps 1:1 to orchestrator skills; `whenToUse` is embedded so retrieval can suggest unknown procedures     |
@@ -109,9 +109,9 @@ export interface WireFact extends WireScope {
   category?: string;
   confidence: number;
   importance: number;
-  validFrom: string;
-  validTo: string | null;
-  recordedAt: string;
+  validFrom: string; // event/valid time (ISO)
+  validTo: string | null; // null = still valid; event-time end on supersede
+  recordedAt: string; // transaction time (when written)
   entities: string[];
   supersedes?: string;
   sourceEpisodeId?: string;
@@ -128,6 +128,7 @@ export interface WirePreference extends WireScope {
   confidence: number;
   validFrom: string;
   validTo: string | null;
+  recordedAt?: string; // transaction time (additive; present on new writes)
 }
 
 export interface WireObservation extends WireScope {
@@ -277,6 +278,8 @@ export class ElephantClient {
   }
 
   // ─ Episodes ──
+  // timestamp = event time for the turn (defaults to now). Dream-extracted
+  // facts inherit this as validFrom; pass historical timestamps when backfilling.
   ingestEpisode(input: {
     id?: string;
     agentId: string;
@@ -289,6 +292,8 @@ export class ElephantClient {
   }
 
   // ─ Facts ──
+  // validFrom = event time. If omitted and sourceEpisodeId is set, the service
+  // uses the episode's timestamp. recordedAt is always set server-side to now.
   saveFact(input: {
     id?: string;
     content: string;
@@ -960,7 +965,7 @@ const memorySave: Tool = {
 export default memorySave;
 ```
 
-> **Note.** `POST /facts` accepts optional `agentId`/`sessionId` (origin scope) and `actor` (audit attribution) alongside `projectId`/`userId`. When `sourceEpisodeId` is present, episode-derived origin still wins at recall; for free-form `memory_save` calls (no associated episode), pass `agentId`/`sessionId`/`actor` directly so the fact participates in agent/session scoping and the audit log shows who wrote it.
+> **Note.** `POST /facts` accepts optional `agentId`/`sessionId` (origin scope) and `actor` (audit attribution) alongside `projectId`/`userId`. When `sourceEpisodeId` is present, episode-derived origin still wins at recall, and if `validFrom` is omitted the service uses the episode's `timestamp` as event time. For free-form `memory_save` calls (no associated episode), pass `agentId`/`sessionId`/`actor` directly so the fact participates in agent/session scoping and the audit log shows who wrote it. Pass episode `timestamp` on `POST /episodes` when ingesting historical chats so dream-extracted facts get correct valid time.
 
 ### 4.3 Recall (`memory_recall` tool)
 
@@ -1064,7 +1069,7 @@ const memoryForget: Tool = {
 };
 ```
 
-The fact stays in the graph with `validTo = now` and the audit log records a `soft_delete` event — recoverable and accountable.
+The fact stays in the graph with `validTo = now` (transaction-time close — system forget, not a world-change supersede) and the audit log records a `soft_delete` event — recoverable and accountable.
 
 ### 4.5 Per-turn observations (every message)
 
@@ -1074,7 +1079,7 @@ No extra code in tools or the agent loop.
 
 ### 4.6 Per-session episode flush
 
-When a session closes, idles, or a turn count is hit, flush the full transcript as an `Episode`. Elephant chunks, summarizes (via its own LLM adapter), embeds, and stores. The next dreaming cycle extracts facts from it.
+When a session closes, idles, or a turn count is hit, flush the full transcript as an `Episode`. Elephant chunks, summarizes (via its own LLM adapter), embeds, and stores. The next dreaming cycle extracts facts from it — each fact's `validFrom` is the episode's `timestamp` (default: flush time). When backfilling or replaying historical chats, pass an explicit `timestamp` on `ingestEpisode` so timeline queries stay correct.
 
 ```ts
 // src/agents/orchestrator.ts (idle reaper / disconnect handler)

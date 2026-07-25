@@ -161,6 +161,7 @@ describe('RrfFusionStage', () => {
               confidence: 0.9,
               validFrom: new Date('2026-01-01'),
               validTo: null,
+              recordedAt: new Date('2026-01-01'),
               embedding: [],
             },
             rawScore: 0.7,

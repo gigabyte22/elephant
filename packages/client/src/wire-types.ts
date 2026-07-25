@@ -36,6 +36,8 @@ export interface WirePreference extends WireScope {
   confidence: number;
   validFrom: string;
   validTo: string | null;
+  /** Transaction time; optional for pre-bitemporal rows / older servers. */
+  recordedAt?: string;
 }
 
 export interface WireObservation extends WireScope {

@@ -35,3 +35,9 @@ consumers do **not** import service source. Pin compatibility at startup via
 when the service's wire shapes change. `adapters/openclaw/vendor/` carries a
 generated copy; regenerate it with `pnpm sync:vendored-client` after editing
 anything under `src/`.
+
+Wire notes for bi-temporal fields: facts always expose `validFrom` / `validTo`
+(event time) and `recordedAt` (transaction time). Preferences may include
+optional `recordedAt` on newer servers — treat it as additive. `saveFact`
+`validFrom` is optional; when omitted with `sourceEpisodeId`, the server uses
+the episode timestamp.

@@ -12,8 +12,11 @@ vector database, SQL store, or queue to operate.
 - **Hybrid GraphRAG recall** — vector + full-text search fused with reciprocal
   rank fusion, optional LLM reranking, and optional HippoRAG-style
   personalized PageRank over the entity graph.
-- **Bi-temporal facts** — every fact tracks `validFrom`/`validTo` and
-  `recordedAt`, and can be superseded without losing history.
+- **Bi-temporal facts** — every fact splits **valid time** (`validFrom` /
+  `validTo`: when the claim held in the world) from **transaction time**
+  (`recordedAt`: when Elephant wrote it). Supersede closes the old claim at
+  event time; decay and prune use transaction/access time so backfilled
+  episodes stay sane. `GET /timeline` is valid-time as-of.
 - **Dreaming** — a scheduled consolidation job (default: nightly) extracts
   facts from raw episodes, deduplicates semantically, promotes high-importance
   facts to insights, consolidates fragment facts about one entity into a
