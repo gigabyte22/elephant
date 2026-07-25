@@ -31,7 +31,6 @@ export function RefCountTickStage(): RetrievalStage {
       } else {
         queueMicrotask(() => {
           doTick().catch((err) => {
-            // biome-ignore lint/suspicious/noConsole: log-and-continue is deliberate
             console.warn('refcount tick failed', err);
           });
         });

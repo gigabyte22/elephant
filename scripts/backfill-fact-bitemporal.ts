@@ -30,9 +30,7 @@ async function count(cypher: string): Promise<number> {
 
 async function main(): Promise<void> {
   const env = loadEnv();
-  console.log(
-    `[backfill-bitemporal] ${env.NEO4J_URI} (db=${env.NEO4J_DATABASE}) dryRun=${dryRun}`,
-  );
+  console.log(`[backfill-bitemporal] ${env.NEO4J_URI} (db=${env.NEO4J_DATABASE}) dryRun=${dryRun}`);
 
   const needA = await count(
     `MATCH (f:Fact) WHERE f.sourceEpisodeId IS NOT NULL
@@ -47,16 +45,16 @@ async function main(): Promise<void> {
          CASE WHEN newF.validFrom >= oldF.validFrom THEN newF.validFrom ELSE oldF.validFrom END
      RETURN count(r) AS n`,
   );
-  const needC = await count(
-    `MATCH (p:Preference) WHERE p.recordedAt IS NULL RETURN count(p) AS n`,
-  );
+  const needC = await count('MATCH (p:Preference) WHERE p.recordedAt IS NULL RETURN count(p) AS n');
 
   console.log(
     `[backfill-bitemporal] candidates: passA(validFrom←episode)=${needA} passB(validTo←event)=${needB} passC(pref.recordedAt)=${needC}`,
   );
 
   if (!dryRun && !confirmed) {
-    console.error('[backfill-bitemporal] re-run with --yes to apply, or --dry-run to preview only.');
+    console.error(
+      '[backfill-bitemporal] re-run with --yes to apply, or --dry-run to preview only.',
+    );
     process.exit(2);
   }
 
