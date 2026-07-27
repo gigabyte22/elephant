@@ -31,18 +31,25 @@ function toProcedure(node: Record<string, unknown>): Procedure {
 export const ProcedureRepository = {
   async create(tx: ManagedTransaction, proc: Procedure): Promise<Procedure> {
     const result = await tx.run(
+      // Telemetry is ON CREATE only. This used to be one unconditional SET, so
+      // re-POSTing an existing procedure id silently reset version to 1,
+      // successRate to 0.5 and invocationCount to 0 — destroying the numbers
+      // that feed skill selection, on what is otherwise a safe idempotent
+      // retry. Content and scope still overwrite on match; earned history does
+      // not.
       `MERGE (p:Procedure {id: $id})
-       SET ${memoryItemSetClause('p')},
-           p.name = $name,
-           p.version = $version,
-           p.content = $content,
-           p.whenToUse = $whenToUse,
-           p.embedding = $embedding,
+       ON CREATE SET p.version = $version,
            p.successRate = $successRate,
            p.invocationCount = $invocationCount,
            p.lastSuccessAt = CASE WHEN $lastSuccessAt IS NULL THEN NULL ELSE datetime($lastSuccessAt) END,
+           p.createdAt = datetime($createdAt)
+       SET ${memoryItemSetClause('p')},
+           p.name = $name,
+           p.content = $content,
+           p.whenToUse = $whenToUse,
+           p.embedding = $embedding,
            p.expiresAt = CASE WHEN $expiresAt IS NULL THEN NULL ELSE datetime($expiresAt) END,
-           p.createdAt = datetime($createdAt),
+           p.createdAt = coalesce(p.createdAt, datetime($createdAt)),
            p.updatedAt = datetime($updatedAt)
        RETURN p {.*} AS p`,
       {
