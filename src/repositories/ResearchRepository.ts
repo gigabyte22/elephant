@@ -172,9 +172,15 @@ export const ResearchRepository = {
   ): Promise<Array<Research & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const { clause, params } = scopeAndClause('node', input.scope);
+    // Same expiry predicate as `list` above, for the same reason. The chunk
+    // path was fixed in 2026-07-20 via ResearchChunkRepository's parent
+    // liveness guard, but this node-level source was missed — so a lapsed or
+    // soft-deleted research item kept surfacing its title and summary through
+    // /recall even though its chunks were correctly suppressed.
     const result = await tx.run(
       `CALL db.index.vector.queryNodes('research_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore ${clause}
+         AND (node.expiresAt IS NULL OR node.expiresAt > datetime())
        RETURN node {.*} AS r, score
        ORDER BY score DESC`,
       { vec: input.embedding, limit: input.limit, minScore, ...params },

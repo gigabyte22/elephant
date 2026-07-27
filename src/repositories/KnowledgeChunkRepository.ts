@@ -18,6 +18,12 @@ function toKnowledgeChunk(node: Record<string, unknown>): KnowledgeChunk {
   };
 }
 
+// Knowledge documents expire and soft-delete the same way research does
+// (softDelete = set expiresAt = now), so every search must join the parent and
+// drop chunks whose document has lapsed or been deleted. Without this,
+// DELETE /knowledge/documents/:id reported {deleted:true}, the document
+// vanished from GET /knowledge/documents, and its full text kept coming back
+// in /recall forever — the chunks were only removed under ?purge=true.
 const core = createChunkRepository<KnowledgeChunk>({
   label: 'KnowledgeChunk',
   kind: 'knowledge_chunk',
@@ -27,6 +33,7 @@ const core = createChunkRepository<KnowledgeChunk>({
   vectorIndex: 'knowledgechunk_vectors',
   fulltextIndex: 'knowledge_chunk_fulltext',
   mapNode: toKnowledgeChunk,
+  parentLivenessGuard: true,
   extraChunkProps: {
     set: 'ch.attachmentId = c.attachmentId',
     params: (c) => ({ attachmentId: c.attachmentId ?? null }),
