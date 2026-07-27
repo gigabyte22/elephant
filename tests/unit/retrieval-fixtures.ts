@@ -24,6 +24,8 @@ export function makeFact(partial: Partial<Fact> & { id: string }): Fact {
     entityIds: partial.entityIds ?? [],
     referenceCount: partial.referenceCount ?? 0,
     lastReferencedAt: partial.lastReferencedAt ?? null,
+    deletedAt: partial.deletedAt ?? null,
+    prunedAt: partial.prunedAt ?? null,
     sourceEpisodeId: partial.sourceEpisodeId,
     supersedesFactId: partial.supersedesFactId,
     category: partial.category,

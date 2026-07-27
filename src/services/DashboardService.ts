@@ -79,7 +79,7 @@ export interface DashboardService {
 
 export interface StatsPayload {
   kindCounts: Array<{ kind: MemoryKind; count: number }>;
-  facts: { active: number; superseded: number; softDeleted: number };
+  facts: { active: number; superseded: number; softDeleted: number; pruned: number };
   entities: number;
   observations: { active: number; expired: number };
   supersedeEdges: number;

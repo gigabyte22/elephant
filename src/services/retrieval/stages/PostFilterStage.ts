@@ -10,7 +10,7 @@
 // carries those props.
 
 import type { MemoryKind, ScopeMode } from '../../../models/types.ts';
-import { coversAsOf } from '../../../utils/temporal.ts';
+import { coversAsOf, isRedacted } from '../../../utils/temporal.ts';
 import type { FactCandidate, PipelineState, RecallQuery, RetrievalStage } from '../types.ts';
 import { recallAsOf } from './helpers.ts';
 
@@ -40,6 +40,11 @@ export function PostFilterStage(): RetrievalStage {
       } else {
         const factsOut = new Map<string, FactCandidate>();
         for (const [id, c] of state.facts.entries()) {
+          // Redaction is absolute and the source queries already enforce it.
+          // Repeated here because the expansion stages (entity_sibling,
+          // chunk_derived, entity_ppr) build candidates through their own
+          // queries — belt and braces on the one rule that must never leak.
+          if (isRedacted(c.fact)) continue;
           if (minImp !== undefined && c.fact.importance < minImp) continue;
           if (minConf !== undefined && c.fact.confidence < minConf) continue;
           // Valid-time as-of (default now when not includeSuperseded).

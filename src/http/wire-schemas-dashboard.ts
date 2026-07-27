@@ -21,6 +21,9 @@ export const WireStatsSchema = z.object({
     active: z.number().int().nonnegative(),
     superseded: z.number().int().nonnegative(),
     softDeleted: z.number().int().nonnegative(),
+    // Split out from softDeleted: decay prune is a system forget, not a
+    // user redaction, and only the latter hides history.
+    pruned: z.number().int().nonnegative().default(0),
   }),
   entities: z.number().int().nonnegative(),
   observations: z.object({

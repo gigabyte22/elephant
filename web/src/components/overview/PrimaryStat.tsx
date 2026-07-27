@@ -74,6 +74,7 @@ export function PrimaryStat({ stats, timeline, timelineError }: Props) {
         <MetaItem label="superseded" value={stats.facts.superseded} />
         <Sep />
         <MetaItem label="soft-deleted" value={stats.facts.softDeleted} />
+        <MetaItem label="pruned" value={stats.facts.pruned} />
         <Sep />
         <MetaItem label="supersede edges" value={stats.supersedeEdges} />
       </footer>

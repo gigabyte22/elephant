@@ -139,6 +139,18 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:fact_temporal',
       cypher: 'CREATE INDEX fact_temporal IF NOT EXISTS FOR (f:Fact) ON (f.validFrom, f.validTo)',
     },
+    // Neo4j does not index NULLs, so these do NOT accelerate the `IS NULL`
+    // read guard (that is a property check on an already-materialised row).
+    // They accelerate the IS NOT NULL paths: dashboard counts, the lifecycle
+    // backfill, and any future garbage collection of redacted rows.
+    {
+      name: 'index:fact_deleted',
+      cypher: 'CREATE INDEX fact_deleted IF NOT EXISTS FOR (f:Fact) ON (f.deletedAt)',
+    },
+    {
+      name: 'index:fact_pruned',
+      cypher: 'CREATE INDEX fact_pruned IF NOT EXISTS FOR (f:Fact) ON (f.prunedAt)',
+    },
     {
       name: 'index:observation_expires',
       cypher: 'CREATE INDEX observation_expires IF NOT EXISTS FOR (o:Observation) ON (o.expiresAt)',

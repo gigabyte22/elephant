@@ -2,7 +2,7 @@ import type { ManagedTransaction } from 'neo4j-driver';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { read, write } from '../config/neo4j.ts';
-import { badRequest } from '../http/errors.ts';
+import { badRequest, conflict } from '../http/errors.ts';
 import type { Chunk, Episode, Fact } from '../models/types.ts';
 import { ChunkRepository } from '../repositories/ChunkRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
@@ -247,6 +247,17 @@ export function createMemoryIngestionService(deps: Deps) {
   ): Promise<Fact> {
     const now = new Date();
 
+    // create() MERGEs on id, and persistFact always writes validTo: null — so
+    // re-POSTing a redacted fact's id used to silently resurrect it while its
+    // inbound :SUPERSEDES edges stayed put, leaving two live facts in a
+    // supersede relationship. Undelete-by-recreate is not a feature.
+    if (input.id) {
+      const existing = await read((tx) => FactRepository.get(tx, input.id!));
+      if (existing?.deletedAt) {
+        throw conflict(`fact ${input.id} was deleted and cannot be recreated by id`);
+      }
+    }
+
     // Episode-linked writes without an explicit validFrom inherit event time
     // from the source episode so bi-temporal timeline stays correct.
     let validFrom = input.validFrom ?? now;
@@ -317,12 +328,20 @@ export function createMemoryIngestionService(deps: Deps) {
 
   async function softDelete(id: string): Promise<void> {
     await write(async (tx) => {
-      await FactRepository.softDelete(tx, id, new Date());
-      await AuditService.record({
+      // Snapshot BEFORE the mutation. This used to be a bare record(), so the
+      // pre-delete state — including the original event-time validTo — was
+      // never captured and a delete was unrecoverable from the audit trail.
+      const before = await FactRepository.get(tx, id);
+      if (!before) return;
+      const applied = await FactRepository.softDelete(tx, id, new Date());
+      // Already deleted: don't append a second soft_delete event per retry.
+      if (!applied) return;
+      await AuditService.revise({
         tx,
-        kind: 'soft_delete',
-        targetId: id,
-        targetKind: 'fact',
+        before,
+        kind: 'fact',
+        eventKind: 'soft_delete',
+        reason: 'user delete',
         actor: INGEST_ACTOR,
       });
     });
@@ -340,7 +359,7 @@ export function createMemoryIngestionService(deps: Deps) {
     if (!oldFact) throw badRequest(`fact ${input.oldId} not found`);
     if (!newFact) throw badRequest(`fact ${input.newId} not found`);
     const now = new Date();
-    const { newConfidence } = await FactRepository.supersede(tx, {
+    const { newConfidence, applied } = await FactRepository.supersede(tx, {
       oldId: input.oldId,
       newId: input.newId,
       reason: input.reason,
@@ -348,6 +367,10 @@ export function createMemoryIngestionService(deps: Deps) {
       supersededAt: now,
       confidenceDelta: input.confidenceDelta,
     });
+    // The repository refuses to supersede a redacted fact, or to re-close an
+    // interval another supersede already closed. Nothing changed, so don't
+    // claim it did in the audit log.
+    if (!applied) return;
     await AuditService.record({
       tx,
       kind: 'supersede',

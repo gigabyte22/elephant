@@ -18,6 +18,7 @@
     "backfill:entity-norm": "tsx scripts/backfill-entity-norm.ts",
     "backfill:procedure-dedup": "tsx scripts/backfill-procedure-dedup.ts",
     "backfill:bitemporal": "tsx scripts/backfill-fact-bitemporal.ts",
+    "backfill:fact-lifecycle": "tsx scripts/backfill-fact-lifecycle.ts",
     "wipe": "tsx scripts/wipe.ts",
     "dream": "tsx scripts/dream.ts",
     "dev": "tsx watch scripts/serve.ts",
