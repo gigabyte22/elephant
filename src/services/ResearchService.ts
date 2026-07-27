@@ -148,6 +148,11 @@ export function createResearchService(deps: Deps) {
 
     const created = await write(async (tx) => {
       const item = await ResearchRepository.create(tx, research);
+      // Clear any prior chunk set first. create() MERGEs on id and chunks were
+      // created with fresh UUIDs each call, so a retried POST /research used to
+      // leave a second full chunk set alongside the first — permanently, in the
+      // vector and fulltext indexes. The update path already did this.
+      await ResearchChunkRepository.deleteForResearch(tx, item.id);
       await ResearchChunkRepository.createForResearch(tx, { researchId: item.id, chunks });
       await AuditService.record({
         tx,

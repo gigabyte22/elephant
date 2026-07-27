@@ -155,6 +155,11 @@ export function createKnowledgeIngestionService(deps: Deps) {
 
     const created = await write(async (tx) => {
       const doc = await KnowledgeDocumentRepository.create(tx, document);
+      // Same re-POST hazard as research: create() MERGEs on id while chunks got
+      // fresh UUIDs, so a retry duplicated the whole chunk set. deleteBodyChunks
+      // rather than deleteForDocument so attachment-derived chunks survive a
+      // body re-ingest — the same distinction the update path draws.
+      await KnowledgeChunkRepository.deleteBodyChunks(tx, doc.id);
       await KnowledgeChunkRepository.createForDocument(tx, {
         documentId: doc.id,
         chunks,

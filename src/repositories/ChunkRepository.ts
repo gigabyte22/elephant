@@ -17,6 +17,24 @@ function toChunk(node: Record<string, unknown>): Chunk {
 }
 
 export const ChunkRepository = {
+  // Remove an episode's existing chunks. Used by re-ingest: the parent MERGEs
+  // on id, but chunks were created with fresh UUIDs every call, so a retried
+  // POST /episodes left a SECOND full chunk set — new nodes, new HAS_CHUNK
+  // edges, a second NEXT chain — permanently in the vector and fulltext
+  // indexes. Deleting first is correct regardless of how the re-POSTed body
+  // re-chunks; deterministic chunk ids would only work while the chunk COUNT
+  // stayed the same and would orphan the surplus otherwise.
+  async deleteForEpisode(tx: ManagedTransaction, episodeId: string): Promise<number> {
+    const result = await tx.run(
+      `MATCH (c:Chunk {episodeId: $episodeId})
+       WITH collect(c) AS cs, count(*) AS n
+       FOREACH (c IN cs | DETACH DELETE c)
+       RETURN n`,
+      { episodeId },
+    );
+    return (result.records[0]?.get('n') as number) ?? 0;
+  },
+
   // Create all chunks of a single Episode atomically. Also links them:
   //   (Episode)-[:HAS_CHUNK {position}]->(Chunk)
   //   (Chunk)-[:NEXT]->(Chunk)    for adjacent positions

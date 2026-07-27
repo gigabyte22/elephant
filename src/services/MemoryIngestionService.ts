@@ -200,8 +200,16 @@ export function createMemoryIngestionService(deps: Deps) {
     }));
 
     // 4. Persist Episode + Chunks + relationships atomically.
+    //
+    // Delete-then-recreate rather than plain create: EpisodeRepository.create
+    // MERGEs on id, so a client retrying a timed-out POST (the documented safe
+    // move, and what the shipped client does) previously accumulated a second
+    // full chunk set alongside the first. Those duplicates live in the vector
+    // and fulltext indexes forever, consume top-K slots, and get double-counted
+    // by RRF, with nothing to detect or repair them.
     return write(async (tx) => {
       const created = await EpisodeRepository.create(tx, episode);
+      await ChunkRepository.deleteForEpisode(tx, created.id);
       await ChunkRepository.createForEpisode(tx, { episodeId: created.id, chunks });
       return created;
     });
