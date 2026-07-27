@@ -5,6 +5,7 @@ import { toWireKnowledgeAttachment, toWireKnowledgeDocument } from '../../models
 import { KnowledgeChunkRepository } from '../../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../../repositories/KnowledgeDocumentRepository.ts';
 import { notFound } from '../errors.ts';
+import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import {
   WireKnowledgeAttachmentSchema,
@@ -86,10 +87,16 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
     url: '/knowledge/documents/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: UpdateBody,
       response: { 200: okEnvelope(WireKnowledgeDocumentSchema) },
     },
     handler: async (req) => {
+      assertInScope(
+        await read((tx) => KnowledgeDocumentRepository.get(tx, req.params.id)),
+        req.query,
+        `knowledge document ${req.params.id}`,
+      );
       const doc = await container.knowledge.update(req.params.id, req.body);
       return { ok: true as const, data: toWireKnowledgeDocument(doc) };
     },
@@ -123,14 +130,19 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
     url: '/knowledge/documents/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
-      querystring: z.object({ purge: z.enum(['true', 'false']).optional() }),
+      querystring: ScopeGuardQuery.extend({
+        purge: z.enum(['true', 'false']).optional(),
+      }),
       response: {
         200: okEnvelope(z.object({ deleted: z.literal(true), chunksDeleted: z.number() })),
       },
     },
     handler: async (req) => {
-      const existing = await read((tx) => KnowledgeDocumentRepository.get(tx, req.params.id));
-      if (!existing) throw notFound(`knowledge document ${req.params.id}`);
+      assertInScope(
+        await read((tx) => KnowledgeDocumentRepository.get(tx, req.params.id)),
+        req.query,
+        `knowledge document ${req.params.id}`,
+      );
       const purge = req.query.purge === 'true';
       let chunksDeleted = 0;
       if (purge) {
@@ -164,10 +176,16 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
     bodyLimit: Math.ceil(container.env.KNOWLEDGE_MAX_ATTACHMENT_BYTES * 1.5) + 65_536,
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: AttachmentBody,
       response: { 200: okEnvelope(WireKnowledgeAttachmentSchema) },
     },
     handler: async (req) => {
+      assertInScope(
+        await read((tx) => KnowledgeDocumentRepository.get(tx, req.params.id)),
+        req.query,
+        `knowledge document ${req.params.id}`,
+      );
       const att = await container.knowledge.addAttachment(req.params.id, req.body);
       return { ok: true as const, data: toWireKnowledgeAttachment(att) };
     },
@@ -178,9 +196,15 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
     url: '/knowledge/documents/:id/attachments/:attachmentId',
     schema: {
       params: z.object({ id: z.string().uuid(), attachmentId: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(z.object({ deleted: z.literal(true) })) },
     },
     handler: async (req) => {
+      assertInScope(
+        await read((tx) => KnowledgeDocumentRepository.get(tx, req.params.id)),
+        req.query,
+        `knowledge document ${req.params.id}`,
+      );
       await container.knowledge.deleteAttachment(req.params.attachmentId);
       return { ok: true as const, data: { deleted: true as const } };
     },

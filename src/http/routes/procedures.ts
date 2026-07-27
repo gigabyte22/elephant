@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireProcedure } from '../../models/wire.ts';
 import { notFound } from '../errors.ts';
+import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { WireProcedureSchema, okEnvelope } from '../wire-schemas.ts';
 
@@ -71,10 +72,16 @@ export function registerProceduresRoutes(app: App, container: Container): void {
     url: '/procedures/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: UpdateBody,
       response: { 200: okEnvelope(WireProcedureSchema) },
     },
     handler: async (req) => {
+      assertInScope(
+        await container.procedures.get(req.params.id),
+        req.query,
+        `procedure ${req.params.id}`,
+      );
       const updated = await container.procedures.update(req.params.id, req.body);
       return { ok: true as const, data: toWireProcedure(updated) };
     },
@@ -112,11 +119,15 @@ export function registerProceduresRoutes(app: App, container: Container): void {
     url: '/procedures/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(z.object({ deleted: z.literal(true) })) },
     },
     handler: async (req) => {
-      const existing = await container.procedures.get(req.params.id);
-      if (!existing) throw notFound(`procedure ${req.params.id}`);
+      assertInScope(
+        await container.procedures.get(req.params.id),
+        req.query,
+        `procedure ${req.params.id}`,
+      );
       await container.procedures.softDelete(req.params.id);
       return { ok: true as const, data: { deleted: true as const } };
     },
