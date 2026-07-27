@@ -147,6 +147,7 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:episode_dream_queue',
       cypher:
         'CREATE INDEX episode_dream_queue IF NOT EXISTS FOR (e:Episode) ON (e.dreamedAt, e.recordedAt)',
+    },
     // Neo4j does not index NULLs, so these do NOT accelerate the `IS NULL`
     // read guard (that is a property check on an already-materialised row).
     // They accelerate the IS NOT NULL paths: dashboard counts, the lifecycle
