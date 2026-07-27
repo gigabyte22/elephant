@@ -22,14 +22,34 @@ function toPreference(node: Record<string, unknown>): Preference {
   };
 }
 
+// A preference is identified by (key, projectId, userId), not by key alone.
+// Keying on the bare key made every preference a global singleton: a PUT from
+// one project superseded another project's value and emitted a supersede audit
+// event against it. Nulls are part of the identity — the unscoped preference is
+// its own row, not a wildcard.
+// Null-safe equality. `p.projectId = $projectId` is NULL (not true) when both
+// sides are null, so plain equality would make every UNSCOPED preference
+// invisible — nulls are part of the identity here, not a wildcard.
+const SCOPE_MATCH =
+  '(p.projectId = $projectId OR (p.projectId IS NULL AND $projectId IS NULL)) ' +
+  'AND (p.userId = $userId OR (p.userId IS NULL AND $userId IS NULL))';
+
+function scopeParams(scope: Scope = {}): { projectId: string | null; userId: string | null } {
+  return { projectId: scope.projectId ?? null, userId: scope.userId ?? null };
+}
+
 export const PreferenceRepository = {
-  async getActive(tx: ManagedTransaction, key: string): Promise<Preference | null> {
+  async getActive(
+    tx: ManagedTransaction,
+    key: string,
+    scope: Scope = {},
+  ): Promise<Preference | null> {
     const result = await tx.run(
       `MATCH (p:Preference {key: $key})
-       WHERE p.validTo IS NULL
+       WHERE p.validTo IS NULL AND ${SCOPE_MATCH}
        RETURN p {.*} AS p
        LIMIT 1`,
-      { key },
+      { key, ...scopeParams(scope) },
     );
     const record = result.records[0];
     return record ? toPreference(record.get('p')) : null;
@@ -53,7 +73,10 @@ export const PreferenceRepository = {
     },
   ): Promise<{ next: Preference; prior: Preference | null }> {
     const result = await tx.run(
-      `OPTIONAL MATCH (oldP:Preference {key: $key}) WHERE oldP.validTo IS NULL
+      `OPTIONAL MATCH (oldP:Preference {key: $key})
+       WHERE oldP.validTo IS NULL
+         AND (oldP.projectId = $projectId OR (oldP.projectId IS NULL AND $projectId IS NULL))
+         AND (oldP.userId = $userId OR (oldP.userId IS NULL AND $userId IS NULL))
        WITH oldP, oldP {.*} AS priorSnapshot
        CREATE (newP:Preference {
          id: $newId,
@@ -91,26 +114,28 @@ export const PreferenceRepository = {
     };
   },
 
-  async listActive(tx: ManagedTransaction): Promise<Preference[]> {
+  async listActive(tx: ManagedTransaction, scope: Scope = {}): Promise<Preference[]> {
     const result = await tx.run(
-      `MATCH (p:Preference) WHERE p.validTo IS NULL
+      `MATCH (p:Preference) WHERE p.validTo IS NULL AND ${SCOPE_MATCH}
        RETURN p {.*} AS p
        ORDER BY p.key`,
+      scopeParams(scope),
     );
     return result.records.map((r) => toPreference(r.get('p')));
   },
 
   async snapshotAt(
     tx: ManagedTransaction,
-    input: { key: string; at: Date },
+    input: { key: string; at: Date; scope?: Scope },
   ): Promise<Preference | null> {
     const result = await tx.run(
       `MATCH (p:Preference {key: $key})
        WHERE p.validFrom <= datetime($at)
          AND (p.validTo IS NULL OR p.validTo > datetime($at))
+         AND ${SCOPE_MATCH}
        RETURN p {.*} AS p
        LIMIT 1`,
-      { key: input.key, at: dateParam(input.at) },
+      { key: input.key, at: dateParam(input.at), ...scopeParams(input.scope) },
     );
     const record = result.records[0];
     return record ? toPreference(record.get('p')) : null;
