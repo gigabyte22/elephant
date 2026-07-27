@@ -161,15 +161,26 @@ export function createDreamingService(deps: Deps) {
     void write((tx) => DreamRunRepository.create(tx, run))
       .then(() => runCycle(run.id))
       .catch((err) => {
-        if (err instanceof DreamInProgressError) {
-          // A second trigger raced with us — leave the first run alone.
-          return;
-        }
+        // Whatever went wrong, THIS run never executed, so its row must not be
+        // left at 'running'. An abandoned row is reported as in-progress by
+        // GET /dream/:jobId forever, while /health.dream.running (which reads
+        // the in-memory runningJobId) says false — two sources of truth
+        // disagreeing with no way to tell which is stale.
+        //
+        // The DreamInProgressError case is a *lost race*: trigger()'s
+        // runningJobId guard is only set once runCycle acquires the mutex, two
+        // awaits later, so a second trigger in that window gets this far. We
+        // close out our own row and leave the winner's alone.
         const updated: DreamRun = {
           ...(jobs.get(run.id) ?? run),
           status: 'failed',
           completedAt: new Date(),
-          error: err instanceof Error ? err.message : String(err),
+          error:
+            err instanceof DreamInProgressError
+              ? `not started: run ${err.runningJobId} already in progress`
+              : err instanceof Error
+                ? err.message
+                : String(err),
         };
         jobs.set(run.id, updated);
         void write((tx) => DreamRunRepository.update(tx, run.id, updated));

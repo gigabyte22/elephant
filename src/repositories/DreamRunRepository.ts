@@ -125,6 +125,25 @@ export const DreamRunRepository = {
     return record ? toDreamRun(record.get('d')) : null;
   },
 
+  // Close out runs abandoned mid-cycle. Counters live in memory until
+  // finalise(), so a crash (or a SIGTERM, which stops the scheduler without
+  // awaiting the in-flight cycle) leaves the row at 'running' with nothing to
+  // ever transition it — GET /dream/:jobId then reports it as in-progress
+  // indefinitely. Called at boot against an age threshold rather than
+  // unconditionally, so a second instance's genuinely-running cycle survives.
+  async failStaleRunning(tx: ManagedTransaction, olderThan: Date): Promise<number> {
+    const result = await tx.run(
+      `MATCH (d:DreamRun {status: 'running'})
+       WHERE d.startedAt < datetime($olderThan)
+       SET d.status = 'failed',
+           d.completedAt = datetime(),
+           d.error = coalesce(d.error, 'abandoned: service stopped while the cycle was running')
+       RETURN count(d) AS n`,
+      { olderThan: dateParam(olderThan) },
+    );
+    return (result.records[0]?.get('n') as number) ?? 0;
+  },
+
   async getLastCompleted(tx: ManagedTransaction): Promise<DreamRun | null> {
     const result = await tx.run(
       `MATCH (d:DreamRun {status: 'completed'})
