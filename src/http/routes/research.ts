@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireResearch } from '../../models/wire.ts';
 import { notFound } from '../errors.ts';
+import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { WireResearchSchema, okEnvelope } from '../wire-schemas.ts';
 
@@ -63,14 +64,11 @@ export function registerResearchRoutes(app: App, container: Container): void {
       response: { 200: okEnvelope(WireResearchSchema) },
     },
     handler: async (req) => {
-      const research = await container.research.get(req.params.id);
-      if (!research) throw notFound(`research ${req.params.id}`);
-      // Scope check: a caller asking within a project must not read another
-      // project's record by id. Repository.get is scope-blind, so guard here.
-      // Reported as notFound rather than forbidden — existence is itself scoped.
-      if (req.query.projectId && research.projectId && research.projectId !== req.query.projectId) {
-        throw notFound(`research ${req.params.id}`);
-      }
+      const research = assertInScope(
+        await container.research.get(req.params.id),
+        req.query,
+        `research ${req.params.id}`,
+      );
       return { ok: true as const, data: toWireResearch(research) };
     },
   });
@@ -85,15 +83,11 @@ export function registerResearchRoutes(app: App, container: Container): void {
       response: { 200: okEnvelope(WireResearchSchema) },
     },
     handler: async (req) => {
-      const existing = await container.research.get(req.params.id);
-      // Same scope semantics as GET: existence is itself scoped, so a
-      // cross-project id is reported as notFound, never forbidden.
-      if (
-        !existing ||
-        (req.query.projectId && existing.projectId && existing.projectId !== req.query.projectId)
-      ) {
-        throw notFound(`research ${req.params.id}`);
-      }
+      assertInScope(
+        await container.research.get(req.params.id),
+        req.query,
+        `research ${req.params.id}`,
+      );
       const updated = await container.research.update(req.params.id, req.body);
       return { ok: true as const, data: toWireResearch(updated) };
     },
@@ -127,11 +121,17 @@ export function registerResearchRoutes(app: App, container: Container): void {
     url: '/research/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      // DELETE was the one research route without a scope guard, so a caller
+      // scoped to project A could delete project B's record by id.
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(z.object({ deleted: z.literal(true) })) },
     },
     handler: async (req) => {
-      const existing = await container.research.get(req.params.id);
-      if (!existing) throw notFound(`research ${req.params.id}`);
+      assertInScope(
+        await container.research.get(req.params.id),
+        req.query,
+        `research ${req.params.id}`,
+      );
       await container.research.softDelete(req.params.id);
       return { ok: true as const, data: { deleted: true as const } };
     },
