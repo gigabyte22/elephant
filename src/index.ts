@@ -17,7 +17,8 @@ import type { VaultWriter } from './adapters/vault/types.ts';
 import type { WorkingStateAdapter } from './adapters/working-state/types.ts';
 import type { Env } from './config/env.ts';
 import { loadEnv } from './config/env.ts';
-import { closeDriver, verifyConnectivity } from './config/neo4j.ts';
+import { closeDriver, verifyConnectivity, write } from './config/neo4j.ts';
+import { DreamRunRepository } from './repositories/DreamRunRepository.ts';
 import { type DashboardService, createDashboardService } from './services/DashboardService.ts';
 import { type DreamingService, createDreamingService } from './services/DreamingService.ts';
 import { type IntentionService, createIntentionService } from './services/IntentionService.ts';
@@ -184,7 +185,30 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
 
 export async function bootstrap(overrides?: ContainerOverrides): Promise<Container> {
   await verifyConnectivity();
-  return buildContainer(overrides);
+  const container = await buildContainer(overrides);
+  await reconcileStaleDreamRuns(container.env.DREAM_DEADLINE_MS);
+  return container;
+}
+
+// A dream cycle that died with its process leaves its DreamRun row at
+// 'running' forever. Reap those at boot, but only past a generous multiple of
+// the soft deadline: the deadline is checked between episodes, and the
+// consolidate/promote/prune passes run after it, so a healthy long run can
+// legitimately overshoot. Best-effort — a failed reap must not block startup.
+async function reconcileStaleDreamRuns(deadlineMs: number): Promise<void> {
+  const staleAfterMs = Math.max(deadlineMs * 4, 60 * 60_000);
+  try {
+    const reaped = await write((tx) =>
+      DreamRunRepository.failStaleRunning(tx, new Date(Date.now() - staleAfterMs)),
+    );
+    if (reaped > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(`[bootstrap] marked ${reaped} abandoned dream run(s) as failed`);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[bootstrap] could not reconcile stale dream runs', err);
+  }
 }
 
 export async function shutdown(): Promise<void> {

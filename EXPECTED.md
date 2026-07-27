@@ -12,7 +12,13 @@ POST   /facts                       save one fact (explicit, from user or agent)
 POST   /facts/batch                 save many (for dreaming pipeline)
 POST   /facts/:id/supersede         explicit supersede (reason, newFactId)
                                     // old.validTo = max(old.validFrom, new.validFrom); edge supersededAt = now
-DELETE /facts/:id                   soft-delete (sets validTo=now, transaction time)
+DELETE /facts/:id                   redaction: sets deletedAt=now and closes validTo
+                                    only if still open (never overwrites an
+                                    event-time validTo written by supersede).
+                                    Invisible at EVERY instant — including
+                                    includeSuperseded and any asOf. Contrast
+                                    dream prune, which sets prunedAt and stays
+                                    visible to /timeline and asOf.
 
 GET    /recall                      hybrid retrieve — query params below
                                     // asOf?: valid-time filter for facts + preferences

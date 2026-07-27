@@ -133,7 +133,10 @@ export interface KindCount {
 export interface FactCounts {
   active: number;
   superseded: number;
+  /** User redaction (DELETE /facts/:id) — hidden from every read path. */
   softDeleted: number;
+  /** Decay prune — a system forget, still visible to timeline/asOf. */
+  pruned: number;
 }
 
 export interface ObservationCounts {
@@ -215,22 +218,27 @@ export const DashboardRepository = {
     const { clause, params } = buildScopeClause('f', scope);
     const extra = clause ? `AND ${clause}` : '';
     const result = await tx.run(
+      // deletedAt/prunedAt are now authoritative, so this no longer has to
+      // infer intent from the absence of a :SUPERSEDES edge — a heuristic that
+      // could not tell a user delete from a decay prune and lumped both into
+      // `softDeleted`. `softDeleted` now means user-deleted only.
       `MATCH (f:Fact)
        WHERE 1=1 ${extra}
-       OPTIONAL MATCH (newer:Fact)-[:SUPERSEDES]->(f)
-       WITH f, newer IS NOT NULL AS isSuperseded
        RETURN
-         sum(CASE WHEN f.validTo IS NULL THEN 1 ELSE 0 END) AS active,
-         sum(CASE WHEN f.validTo IS NOT NULL AND isSuperseded THEN 1 ELSE 0 END) AS superseded,
-         sum(CASE WHEN f.validTo IS NOT NULL AND NOT isSuperseded THEN 1 ELSE 0 END) AS softDeleted`,
+         sum(CASE WHEN f.validTo IS NULL AND f.deletedAt IS NULL THEN 1 ELSE 0 END) AS active,
+         sum(CASE WHEN f.deletedAt IS NOT NULL THEN 1 ELSE 0 END) AS softDeleted,
+         sum(CASE WHEN f.deletedAt IS NULL AND f.prunedAt IS NOT NULL THEN 1 ELSE 0 END) AS pruned,
+         sum(CASE WHEN f.deletedAt IS NULL AND f.prunedAt IS NULL
+                       AND f.validTo IS NOT NULL THEN 1 ELSE 0 END) AS superseded`,
       params,
     );
     const row = result.records[0];
-    if (!row) return { active: 0, superseded: 0, softDeleted: 0 };
+    if (!row) return { active: 0, superseded: 0, softDeleted: 0, pruned: 0 };
     return {
       active: (row.get('active') as number) ?? 0,
       superseded: (row.get('superseded') as number) ?? 0,
       softDeleted: (row.get('softDeleted') as number) ?? 0,
+      pruned: (row.get('pruned') as number) ?? 0,
     };
   },
 

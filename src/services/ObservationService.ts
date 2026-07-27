@@ -17,6 +17,8 @@ export function createObservationService(deps: Deps) {
     agentId: string;
     sessionId: string;
     content: string;
+    projectId?: string;
+    userId?: string;
   }): Promise<Observation> {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlDays * 86_400_000);
@@ -29,6 +31,11 @@ export function createObservationService(deps: Deps) {
       recordedAt: now,
       expiresAt,
       embedding,
+      // Without these the node is written with projectId/userId = null, while
+      // PostFilterStage still filters observations on both axes — so a caller
+      // using projectScope=strict saw zero observations, always.
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.userId ? { userId: input.userId } : {}),
     };
     return write((tx) => ObservationRepository.create(tx, obs));
   }

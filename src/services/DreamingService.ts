@@ -172,15 +172,26 @@ export function createDreamingService(deps: Deps) {
     void write((tx) => DreamRunRepository.create(tx, run))
       .then(() => runCycle(run.id))
       .catch((err) => {
-        if (err instanceof DreamInProgressError) {
-          // A second trigger raced with us — leave the first run alone.
-          return;
-        }
+        // Whatever went wrong, THIS run never executed, so its row must not be
+        // left at 'running'. An abandoned row is reported as in-progress by
+        // GET /dream/:jobId forever, while /health.dream.running (which reads
+        // the in-memory runningJobId) says false — two sources of truth
+        // disagreeing with no way to tell which is stale.
+        //
+        // The DreamInProgressError case is a *lost race*: trigger()'s
+        // runningJobId guard is only set once runCycle acquires the mutex, two
+        // awaits later, so a second trigger in that window gets this far. We
+        // close out our own row and leave the winner's alone.
         const updated: DreamRun = {
           ...(jobs.get(run.id) ?? run),
           status: 'failed',
           completedAt: new Date(),
-          error: err instanceof Error ? err.message : String(err),
+          error:
+            err instanceof DreamInProgressError
+              ? `not started: run ${err.runningJobId} already in progress`
+              : err instanceof Error
+                ? err.message
+                : String(err),
         };
         jobs.set(run.id, updated);
         void write((tx) => DreamRunRepository.update(tx, run.id, updated));
@@ -347,11 +358,26 @@ export function createDreamingService(deps: Deps) {
     touchedEntityIds: Set<string>,
     run: DreamRun,
   ): Promise<Fact[]> {
+    // Same bucket the dedup and supersede searches use. This one feeds fact
+    // CONTENT into the extraction prompt as "already-known related facts", so
+    // an unscoped search here shipped up to 8 arbitrary facts from other
+    // projects and other users into an outbound LLM call — including for
+    // episodes whose project is explicitly `isolated`, which is the one thing
+    // that flag exists to prevent.
+    //
+    // It is also an extraction-quality bug: the prompt tells the model not to
+    // restate those facts, so a project legitimately re-learning something
+    // known elsewhere had it suppressed before scoped dedup ever ran.
     const sample = await read((tx) =>
       FactRepository.listSimilar(tx, {
         embedding: ep.embedding,
         limit: 8,
         includeSuperseded: false,
+        scope: {
+          projectId: ep.projectId ?? null,
+          includeUnscoped: config.crossScopeDedup && !ep.isolated,
+          userId: ep.userId ?? null,
+        },
       }),
     );
     const sampleForLLM = sample.map((s) => ({ id: s.id, content: s.content }));
@@ -555,8 +581,8 @@ export function createDreamingService(deps: Deps) {
       const now = new Date();
       const validTo = eventValidTo(oldFact.validFrom, fact.validFrom);
 
-      await write(async (tx) => {
-        const { newConfidence } = await FactRepository.supersede(tx, {
+      const superseded = await write(async (tx) => {
+        const { newConfidence, applied } = await FactRepository.supersede(tx, {
           oldId: decision.oldFactId,
           newId: fact.id,
           reason: decision.reason,
@@ -564,6 +590,9 @@ export function createDreamingService(deps: Deps) {
           supersededAt: now,
           confidenceDelta: decision.confidenceDelta,
         });
+        // The candidate was redacted or already closed between the search and
+        // this write. Nothing changed, so don't log or count it.
+        if (!applied) return false;
         await recordDreamerEvent(tx, run, {
           kind: 'supersede',
           targetId: decision.oldFactId,
@@ -575,7 +604,9 @@ export function createDreamingService(deps: Deps) {
             ...(newConfidence !== null ? { newConfidence } : {}),
           },
         });
+        return true;
       });
+      if (!superseded) continue;
       supersededInCycle.add(decision.oldFactId);
       run.factsSuperseded += 1;
     }
@@ -916,8 +947,14 @@ export function createDreamingService(deps: Deps) {
         },
       });
       if (!prune) continue;
-      await write(async (tx) => {
-        await FactRepository.softDelete(tx, s.id, new Date());
+      const pruned = await write(async (tx) => {
+        // prune(), not softDelete(): a pruned fact is a transaction-time
+        // system forget, so it stays visible to /timeline, asOf and
+        // includeSuperseded. Only a user DELETE redacts. Stays on record()
+        // rather than revise() deliberately — prune runs up to
+        // DREAM_PRUNE_BATCH_LIMIT times a night and is fully reversible from
+        // validTo/prunedAt, so an :ArchivedRevision each would be pure bloat.
+        if (!(await FactRepository.prune(tx, s.id, new Date()))) return false;
         await recordDreamerEvent(tx, run, {
           kind: 'prune',
           targetId: s.id,
@@ -928,8 +965,9 @@ export function createDreamingService(deps: Deps) {
             daysSinceLastReference: days,
           },
         });
+        return true;
       });
-      run.factsPruned += 1;
+      if (pruned) run.factsPruned += 1;
     }
   }
 

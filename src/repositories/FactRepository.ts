@@ -14,6 +14,8 @@ function toFact(node: Record<string, unknown>, extras: { entityIds?: string[] } 
     validFrom: toJsDate(node.validFrom),
     validTo: toJsDateOrNull(node.validTo),
     recordedAt: toJsDate(node.recordedAt),
+    deletedAt: toJsDateOrNull(node.deletedAt),
+    prunedAt: toJsDateOrNull(node.prunedAt),
     embedding: (node.embedding as number[]) ?? [],
     entityIds: extras.entityIds ?? [],
     supersedesFactId: (node.supersedesFactId as string | undefined) ?? undefined,
@@ -115,12 +117,52 @@ export const FactRepository = {
     return toFact(record.get('f'), { entityIds: record.get('entityIds') as string[] });
   },
 
-  async softDelete(tx: ManagedTransaction, id: string, at: Date): Promise<void> {
-    await tx.run(
+  /**
+   * User/API redaction. Stamps the hard read gate and closes the valid
+   * interval ONLY if it is still open.
+   *
+   * The `coalesce` is load-bearing: deleting a fact that was superseded six
+   * months ago used to overwrite its historical event-time `validTo` with
+   * `now`, so /timeline and snapshotAt reported the retracted claim as live
+   * for that entire window — silent, unrecoverable bi-temporal corruption.
+   *
+   * Still writes `validTo` as well as `deletedAt` so the ~12 legacy
+   * `validTo IS NULL` reads keep excluding deleted facts even if someone
+   * forgets the new guard; `deletedAt` is the second layer that also covers
+   * the includeSuperseded/asOf paths where `validTo` is deliberately ignored.
+   *
+   * Returns false when already deleted, so the caller skips a duplicate audit
+   * write rather than appending a second soft_delete event per retry.
+   */
+  async softDelete(tx: ManagedTransaction, id: string, at: Date): Promise<boolean> {
+    const result = await tx.run(
       `MATCH (f:Fact {id: $id})
-       SET f.validTo = datetime($at)`,
+       WHERE f.deletedAt IS NULL
+       SET f.deletedAt = datetime($at),
+           f.validTo = coalesce(f.validTo, datetime($at))
+       RETURN count(f) AS n`,
       { id, at: dateParam(at) },
     );
+    return ((result.records[0]?.get('n') as number) ?? 0) > 0;
+  },
+
+  /**
+   * Decay prune. A transaction-time system forget, NOT a redaction: the claim
+   * really did hold, so a pruned fact stays visible to /timeline, `asOf` and
+   * `includeSuperseded`. Only `deletedAt` gates reads.
+   *
+   * The liveness guard stops prune from re-closing an already-superseded
+   * fact's event-time `validTo`, the same corruption softDelete had.
+   */
+  async prune(tx: ManagedTransaction, id: string, at: Date): Promise<boolean> {
+    const result = await tx.run(
+      `MATCH (f:Fact {id: $id})
+       WHERE f.validTo IS NULL AND f.deletedAt IS NULL
+       SET f.validTo = datetime($at), f.prunedAt = datetime($at)
+       RETURN count(f) AS n`,
+      { id, at: dateParam(at) },
+    );
+    return ((result.records[0]?.get('n') as number) ?? 0) > 0;
   },
 
   async supersede(
@@ -140,9 +182,14 @@ export const FactRepository = {
       // supersede) to leave confidence untouched.
       confidenceDelta?: number;
     },
-  ): Promise<{ newConfidence: number | null }> {
+  ): Promise<{ newConfidence: number | null; applied: boolean }> {
     const result = await tx.run(
+      // A redacted fact must not be resurrected into a supersede chain, and a
+      // second supersede must not move an already-closed event-time validTo.
+      // When the guard rejects, no row comes back and `applied` is false, so
+      // the caller can skip its audit event and counter bump.
       `MATCH (oldF:Fact {id: $oldId}), (newF:Fact {id: $newId})
+       WHERE oldF.deletedAt IS NULL AND newF.deletedAt IS NULL AND oldF.validTo IS NULL
        MERGE (newF)-[r:SUPERSEDES]->(oldF)
        SET r.reason = $reason, r.supersededAt = datetime($supersededAt)
        SET oldF.validTo = datetime($validTo)
@@ -164,7 +211,10 @@ export const FactRepository = {
       },
     );
     const rec = result.records[0];
-    return { newConfidence: (rec?.get('newConfidence') as number | null) ?? null };
+    return {
+      newConfidence: (rec?.get('newConfidence') as number | null) ?? null,
+      applied: rec !== undefined,
+    };
   },
 
   // Consolidation merge: persist a canonical fact that replaces N member
@@ -193,6 +243,7 @@ export const FactRepository = {
       `MATCH (newF:Fact {id: $newId})
        UNWIND $memberIds AS mid
        MATCH (oldF:Fact {id: mid})
+       WHERE oldF.validTo IS NULL AND oldF.deletedAt IS NULL
        MERGE (newF)-[r:SUPERSEDES]->(oldF)
        SET r.reason = $reason, r.supersededAt = datetime($supersededAt)
        SET oldF.validTo = datetime($memberValidTo)`,
@@ -335,7 +386,8 @@ export const FactRepository = {
     // Contradiction supersedes are handled by event-time validTo on the old row.
     const result = await tx.run(
       `${input.entityId ? 'MATCH (e:Entity {id: $entityId})-[:HAS_FACT]->(f:Fact)' : 'MATCH (f:Fact)'}
-       WHERE f.validFrom <= datetime($at)
+       WHERE f.deletedAt IS NULL
+         AND f.validFrom <= datetime($at)
          AND (f.validTo IS NULL OR f.validTo > datetime($at))
          AND NOT EXISTS {
            MATCH (survivor:Fact)
@@ -363,7 +415,7 @@ export const FactRepository = {
     const includeSuperseded = input.includeSuperseded ?? false;
     const result = await tx.run(
       `MATCH (e:Entity {id: $entityId})-[:HAS_FACT]->(f:Fact)
-       ${includeSuperseded ? '' : 'WHERE f.validTo IS NULL'}
+       WHERE f.deletedAt IS NULL${includeSuperseded ? '' : ' AND f.validTo IS NULL'}
        OPTIONAL MATCH (other:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(other.id) AS entityIds
        RETURN f {.*} AS f, entityIds
@@ -408,7 +460,7 @@ export const FactRepository = {
     const result = await tx.run(
       `UNWIND $chunkIds AS cid
        MATCH (c:Chunk {id: cid})<-[:DERIVED_FROM]-(f:Fact)
-       WHERE $includeSuperseded OR f.validTo IS NULL
+       WHERE f.deletedAt IS NULL AND ($includeSuperseded OR f.validTo IS NULL)
        WITH DISTINCT f, collect(DISTINCT cid) AS sourceChunkIds
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(f)
        WITH f, sourceChunkIds, collect(DISTINCT e.id) AS entityIds
@@ -439,6 +491,7 @@ export const FactRepository = {
       `UNWIND $entityIds AS eid
        MATCH (e:Entity {id: eid})-[:HAS_FACT]->(f:Fact)
        WHERE NOT f.id IN $excludeFactIds
+         AND f.deletedAt IS NULL
          AND ($includeSuperseded OR f.validTo IS NULL)
        WITH DISTINCT f
        OPTIONAL MATCH (e2:Entity)-[:HAS_FACT]->(f)
@@ -489,6 +542,7 @@ export const FactRepository = {
        WITH gds.util.asNode(nodeId) AS node, score
        WHERE node:Fact
          AND NOT node.id IN $excludeFactIds
+         AND node.deletedAt IS NULL
          AND ($includeSuperseded OR node.validTo IS NULL)
          AND score > 0
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(node)

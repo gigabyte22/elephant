@@ -120,6 +120,15 @@ export const FactSchema = z
     validFrom: z.date(),
     validTo: z.date().nullable(),
     recordedAt: z.date(),
+    // Which lifecycle event closed the interval. `validTo` alone can't say,
+    // and the three events are not interchangeable: supersede is an event-time
+    // change in the world, prune is a transaction-time system forget, and a
+    // user DELETE is a redaction that must be invisible at every instant.
+    // Only `deletedAt` gates reads (see notDeletedClause); `prunedAt` is
+    // classification for audit and the dashboard. Both absent on every fact
+    // written before this split, which is the correct value for both.
+    deletedAt: z.date().nullable().optional(),
+    prunedAt: z.date().nullable().optional(),
     embedding: EmbeddingSchema,
     entityIds: z.array(z.string().uuid()).default([]),
     supersedesFactId: z.string().uuid().optional(),
