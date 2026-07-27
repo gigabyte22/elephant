@@ -168,6 +168,12 @@ const EnvSchema = z
     RETRIEVAL_RERANK_TOP_K: z.coerce.number().int().positive().default(20),
     RETRIEVAL_RERANK_KEEP_K: z.coerce.number().int().positive().default(10),
     RETRIEVAL_OVERFETCH_MULTIPLIER: z.coerce.number().int().positive().default(3),
+    // Adaptive K for vector sources. queryNodes returns the GLOBAL top-K and
+    // predicates run afterwards, so a selective filter starves recall; these
+    // bound the re-query loop that widens K until enough rows survive.
+    RETRIEVAL_ANN_MAX_K: z.coerce.number().int().positive().default(2000),
+    RETRIEVAL_ANN_ESCALATION_GROWTH: z.coerce.number().int().min(2).default(4),
+    RETRIEVAL_ANN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
     // Extra overfetch applied on top of the base multiplier when recall asks for a
     // historical `asOf`. Neo4j vector search takes the top-K nearest and only then
     // applies our valid-time predicate, so for a past date most of the K are

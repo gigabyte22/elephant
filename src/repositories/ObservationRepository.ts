@@ -58,9 +58,20 @@ export const ObservationRepository = {
     return result.records.map((r) => toObservation(r.get('o')));
   },
 
-  // Hybrid recall: cosine over observation_vectors, hard-scoped to one session
-  // and only unexpired rows. Session id is required so boost-mode never leaks
-  // another session's working memory.
+  // Hybrid recall over one session's working memory.
+  //
+  // Pre-filtered scan + exact cosine, NOT an ANN query. queryNodes returns the
+  // GLOBAL top-K and every predicate runs afterwards, so applying sessionId —
+  // the most selective axis in the system — as a post-filter meant survivors
+  // were roughly K/N for N concurrent sessions. Recall silently collapsed as
+  // the deployment grew, and the failure mode was a 200 with an empty array,
+  // indistinguishable from "nothing matched".
+  //
+  // Scanning is affordable here precisely because observations are TTL-bounded
+  // working memory reaped by ObservationReaper, so a session's live set is
+  // tens-to-hundreds of rows. That invariant is now load-bearing: if the
+  // reaper stops, this query degrades. The composite (sessionId, expiresAt)
+  // index keeps the MATCH a seek rather than a label scan.
   async listSimilar(
     tx: ManagedTransaction,
     input: {
@@ -74,13 +85,14 @@ export const ObservationRepository = {
     const minScore = input.minScore ?? 0;
     const now = input.now ?? new Date();
     const result = await tx.run(
-      `CALL db.index.vector.queryNodes('observation_vectors', toInteger($limit), $vec)
-       YIELD node, score
+      `MATCH (node:Observation {sessionId: $sessionId})
+       WHERE node.expiresAt > datetime($now)
+         AND node.embedding IS NOT NULL
+       WITH node, vector.similarity.cosine(node.embedding, $vec) AS score
        WHERE score >= $minScore
-         AND node.sessionId = $sessionId
-         AND node.expiresAt > datetime($now)
        RETURN node {.*} AS o, score
-       ORDER BY score DESC`,
+       ORDER BY score DESC
+       LIMIT toInteger($limit)`,
       {
         vec: input.embedding,
         limit: input.limit,

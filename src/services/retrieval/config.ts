@@ -49,7 +49,10 @@ export interface PprConfig {
   useRecognitionFilter: boolean;
 }
 
+import type { AnnEscalationConfig } from '../../repositories/vector-search.ts';
+
 export interface RetrievalConfig {
+  ann: AnnEscalationConfig;
   weights: ScoringWeights;
   rrfK: number;
   rerank: RerankConfig;
@@ -104,6 +107,11 @@ export function buildRetrievalConfigFromEnv(env: Env): RetrievalConfig {
     },
     refCountTickMode: env.RETRIEVAL_REFCOUNT_TICK_MODE,
     overfetchMultiplier: env.RETRIEVAL_OVERFETCH_MULTIPLIER,
+    ann: {
+      maxK: env.RETRIEVAL_ANN_MAX_K,
+      growth: env.RETRIEVAL_ANN_ESCALATION_GROWTH,
+      maxAttempts: env.RETRIEVAL_ANN_MAX_ATTEMPTS,
+    },
     asOfOverfetchMultiplier: env.RETRIEVAL_ASOF_OVERFETCH_MULTIPLIER,
   };
 }

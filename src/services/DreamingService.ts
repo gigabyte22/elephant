@@ -402,7 +402,7 @@ export function createDreamingService(deps: Deps) {
         embedding: ep.embedding,
         limit: 8,
         includeSuperseded: false,
-        scope: {
+        dedupScope: {
           projectId: ep.projectId ?? null,
           includeUnscoped: config.crossScopeDedup && !ep.isolated,
           userId: ep.userId ?? null,
@@ -455,7 +455,7 @@ export function createDreamingService(deps: Deps) {
             embedding,
             limit: 5,
             includeSuperseded: false,
-            scope: {
+            dedupScope: {
               projectId: ep.projectId ?? null,
               includeUnscoped: config.crossScopeDedup && !ep.isolated,
               userId: ep.userId ?? null,
@@ -579,7 +579,7 @@ export function createDreamingService(deps: Deps) {
           includeSuperseded: false,
           // Supersede within this episode's own bucket, or the unscoped
           // personal bucket — never another project's.
-          scope: {
+          dedupScope: {
             projectId: ep.projectId ?? null,
             includeUnscoped: config.crossScopeDedup && !ep.isolated,
             userId: ep.userId ?? null,

@@ -13,6 +13,36 @@ import type {
   RetrievalContext,
 } from '../types.ts';
 
+/**
+ * Record how a source stage actually performed against the index.
+ *
+ * `starved` is the signal that matters: it means the filter was selective
+ * enough that even the maximum K could not produce `limit` survivors, so the
+ * caller got a short (possibly empty) result that looks exactly like "nothing
+ * matched". Surfacing it in the trace — and warning regardless of ?debug —
+ * is what stops that failure being silent.
+ */
+export function recordSourceDiagnostics(
+  ctx: RetrievalContext,
+  stage: string,
+  outcome: { hits: unknown[]; requestedK: number; attempts: number; starved: boolean },
+  strategy: 'ann' | 'prefiltered' | 'fulltext',
+): void {
+  ctx.sourceDiagnostics[stage] = {
+    requestedK: outcome.requestedK,
+    survivors: outcome.hits.length,
+    attempts: outcome.attempts,
+    starved: outcome.starved,
+    strategy: outcome.attempts > 1 ? 'ann_escalated' : strategy,
+  };
+  if (outcome.starved) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[recall] ${stage} starved: wanted ${ctx.limit}, got ${outcome.hits.length} at k=${outcome.requestedK}`,
+    );
+  }
+}
+
 export function overfetchLimit(ctx: RetrievalContext): number {
   return ctx.limit * ctx.config.overfetchMultiplier;
 }

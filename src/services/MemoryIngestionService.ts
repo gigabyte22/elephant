@@ -433,7 +433,7 @@ export function createMemoryIngestionService(deps: Deps) {
         // Confine to the fact's own bucket + the unscoped personal bucket. An
         // unscoped search here let a direct POST /facts supersede a DIFFERENT
         // project's fact.
-        scope: {
+        dedupScope: {
           projectId: fact.projectId ?? null,
           includeUnscoped: true,
           userId: fact.userId ?? null,

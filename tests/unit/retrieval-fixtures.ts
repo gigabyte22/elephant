@@ -47,6 +47,7 @@ export function makeCtx(
     now: new Date('2026-04-01'),
     limit: 10,
     stageTimingsMs: {},
+    sourceDiagnostics: {},
     config: {
       weights: { rrf: 0.5, importance: 0.2, confidence: 0.1, recency: 0.1, refCount: 0.1 },
       rrfK: 60,
@@ -69,6 +70,7 @@ export function makeCtx(
       refCountTickMode: 'off',
       overfetchMultiplier: 3,
       asOfOverfetchMultiplier: 4,
+      ann: { maxK: 2000, growth: 4, maxAttempts: 3 },
       ...overrides.config,
     },
   };
