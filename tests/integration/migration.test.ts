@@ -16,6 +16,7 @@ const EXPECTED_INDEXES = [
   'episode_agent_id',
   'episode_session',
   'observation_agent_id',
+  'observation_session',
   'chunk_fulltext',
   'fact_vectors',
   'preference_vectors',

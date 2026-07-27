@@ -2,7 +2,13 @@ import type { ManagedTransaction } from 'neo4j-driver';
 import type { Fact } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import { validAtClause } from '../utils/temporal.ts';
-import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
+import {
+  type RetrievalScope,
+  memoryItemParams,
+  memoryItemSetClause,
+  readScope,
+  scopeAndClause,
+} from './scope.ts';
 
 function toFact(node: Record<string, unknown>, extras: { entityIds?: string[] } = {}): Fact {
   return {
@@ -309,16 +315,20 @@ export const FactRepository = {
       // compatibility guard on that widened branch only (a project owned by
       // one human must not dedup against another human's personal facts); it
       // is NOT a bucket axis.
-      scope?: { projectId?: string | null; includeUnscoped?: boolean; userId?: string | null };
+      dedupScope?: { projectId?: string | null; includeUnscoped?: boolean; userId?: string | null };
+      // Four-axis retrieval scope, same shape every other repository calls
+      // `scope`. Distinct from dedupScope above, which is the dream BUCKET
+      // rule; conflating the two names is why this pushdown was never wired.
+      scope?: RetrievalScope;
     },
   ): Promise<Array<Fact & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const includeSuperseded = input.includeSuperseded ?? false;
     const asOf = input.asOf ?? null;
-    const hasScope = input.scope !== undefined;
-    const projectId = input.scope?.projectId ?? null;
-    const userId = input.scope?.userId ?? null;
-    const includeUnscoped = (input.scope?.includeUnscoped ?? false) && projectId !== null;
+    const hasScope = input.dedupScope !== undefined;
+    const projectId = input.dedupScope?.projectId ?? null;
+    const userId = input.dedupScope?.userId ?? null;
+    const includeUnscoped = (input.dedupScope?.includeUnscoped ?? false) && projectId !== null;
     let scopeClause = '';
     if (hasScope) {
       scopeClause = includeUnscoped
@@ -329,12 +339,14 @@ export const FactRepository = {
           ? 'AND node.projectId IS NULL'
           : 'AND node.projectId = $projectId';
     }
+    const retrieval = scopeAndClause('node', input.scope);
     const result = await tx.run(
       // The asOf interval supersedes the simple validTo IS NULL live filter.
       `CALL db.index.vector.queryNodes('fact_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore
        ${validAtClause('node', { asOf, includeSuperseded })}
        ${scopeClause}
+       ${retrieval.clause}
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(node)
        WITH node, score, collect(e.id) AS entityIds
        RETURN node {.*} AS f, entityIds, score
@@ -346,6 +358,7 @@ export const FactRepository = {
         projectId,
         userId,
         asOf: nullableDateParam(asOf),
+        ...retrieval.params,
       },
     );
     return result.records.map((r) => ({

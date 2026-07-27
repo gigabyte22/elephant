@@ -42,6 +42,7 @@ export function createRetrievalService(deps: Deps) {
       now: query.now ?? new Date(),
       config,
       stageTimingsMs: {},
+      sourceDiagnostics: {},
       limit: query.limit ?? 20,
     };
     const state = await pipeline.run(ctx);
@@ -163,7 +164,9 @@ function projectResult(
     result.trace = {
       stageTimingsMs: ctx.stageTimingsMs,
       rerankUsed: facts.some((f) => f.expansionReason === 'rerank'),
-      candidatesSeen: {
+      // Prefer the pre-TopK snapshot. The `??` fallback keeps unit tests that
+      // compose partial pipelines (no TopKStage) working.
+      candidatesSeen: ctx.candidatesSeen ?? {
         facts: state.facts.size,
         chunks: state.chunks.size,
         preferences: state.preferences.size,
@@ -175,6 +178,10 @@ function projectResult(
         intentions: state.intentions.size,
         observations: state.observations.size,
       },
+      sources: ctx.sourceDiagnostics,
+      starved: Object.entries(ctx.sourceDiagnostics)
+        .filter(([, d]) => d.starved)
+        .map(([stage]) => stage),
     };
   }
 

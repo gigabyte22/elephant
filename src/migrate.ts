@@ -163,6 +163,14 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:episode_session',
       cypher: 'CREATE INDEX episode_session IF NOT EXISTS FOR (e:Episode) ON (e.sessionId)',
     },
+    // Backs the session-scoped observation search, which pre-filters by
+    // sessionId and scores in Cypher rather than post-filtering an ANN result.
+    // Without this the MATCH would be a full label scan.
+    {
+      name: 'index:observation_session',
+      cypher:
+        'CREATE INDEX observation_session IF NOT EXISTS FOR (o:Observation) ON (o.sessionId, o.expiresAt)',
+    },
     {
       name: 'index:observation_agent_id',
       cypher: 'CREATE INDEX observation_agent_id IF NOT EXISTS FOR (o:Observation) ON (o.agentId)',

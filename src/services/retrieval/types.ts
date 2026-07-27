@@ -99,6 +99,35 @@ export interface RetrievalContext {
   limit: number;
   // Entity ids the query linked to (QueryEntityLinkStage), used as PPR seeds.
   queryEntityIds?: string[];
+  // Per-source index behaviour, surfaced in the &debug=true trace. `starved`
+  // is the one that matters: it means even the maximum K could not produce
+  // `limit` survivors, so a short or empty result is a filter problem rather
+  // than an absence of matching data.
+  sourceDiagnostics: Record<string, SourceDiagnostics>;
+  // Candidate counts snapshotted BEFORE TopK truncates, so the trace can show
+  // that N were fetched and N-limit discarded.
+  candidatesSeen?: CandidateCounts;
+}
+
+export interface CandidateCounts {
+  facts: number;
+  chunks: number;
+  preferences: number;
+  insights: number;
+  knowledgeChunks: number;
+  procedures: number;
+  research: number;
+  researchChunks: number;
+  intentions: number;
+  observations: number;
+}
+
+export interface SourceDiagnostics {
+  requestedK: number;
+  survivors: number;
+  attempts: number;
+  starved: boolean;
+  strategy: 'ann' | 'ann_escalated' | 'prefiltered' | 'fulltext';
 }
 
 interface RankedSource {
@@ -245,17 +274,8 @@ export interface RecallResult {
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;
-    candidatesSeen: {
-      facts: number;
-      chunks: number;
-      preferences: number;
-      insights: number;
-      knowledgeChunks: number;
-      procedures: number;
-      research: number;
-      researchChunks: number;
-      intentions: number;
-      observations: number;
-    };
+    candidatesSeen: CandidateCounts;
+    sources?: Record<string, SourceDiagnostics>;
+    starved?: string[];
   };
 }

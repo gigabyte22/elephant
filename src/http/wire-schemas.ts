@@ -117,6 +117,24 @@ export const WireRecallTraceSchema = z.object({
     intentions: z.number().int().nonnegative(),
     observations: z.number().int().nonnegative(),
   }),
+  // Per-source index behaviour. Fastify's zod serializer strips unlisted keys,
+  // so anything not declared here silently never ships.
+  sources: z
+    .record(
+      z.string(),
+      z.object({
+        requestedK: z.number().int().nonnegative(),
+        survivors: z.number().int().nonnegative(),
+        attempts: z.number().int().nonnegative(),
+        starved: z.boolean(),
+        strategy: z.enum(['ann', 'ann_escalated', 'prefiltered', 'fulltext']),
+      }),
+    )
+    .optional(),
+  // Stage names whose filter was selective enough that even the maximum K
+  // could not fill `limit` — a one-glance "this result is short because of the
+  // index, not because the data is missing".
+  starved: z.array(z.string()).optional(),
 });
 
 export const WireEntitySchema = z.object({

@@ -9,6 +9,23 @@ export function TopKStage(): RetrievalStage {
   return {
     name: 'TopK',
     async run(ctx, state) {
+      // Snapshot BEFORE truncating. projectResult reads these sizes AFTER the
+      // pipeline runs, so `candidatesSeen` was mathematically incapable of
+      // exceeding `limit` — it could never reveal that 200 candidates were
+      // fetched and 195 filtered away, which is the exact failure it exists to
+      // surface.
+      ctx.candidatesSeen = {
+        facts: state.facts.size,
+        chunks: state.chunks.size,
+        preferences: state.preferences.size,
+        insights: state.insights.size,
+        knowledgeChunks: state.knowledgeChunks.size,
+        procedures: state.procedures.size,
+        research: state.research.size,
+        researchChunks: state.researchChunks.size,
+        intentions: state.intentions.size,
+        observations: state.observations.size,
+      };
       state.facts = slice(state.facts, ctx.limit, (c) => c.rerankScore ?? c.blendedScore ?? 0);
       state.chunks = slice(state.chunks, ctx.limit, (c) => c.blendedScore ?? 0);
       state.preferences = slice(state.preferences, ctx.limit, (c) => c.blendedScore ?? 0);
