@@ -159,6 +159,12 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:fact_pruned',
       cypher: 'CREATE INDEX fact_pruned IF NOT EXISTS FOR (f:Fact) ON (f.prunedAt)',
     },
+    // The nightly orphan sweep is MATCH (i:Insight) WHERE i.validTo IS NULL,
+    // a label scan without this.
+    {
+      name: 'index:insight_valid_to',
+      cypher: 'CREATE INDEX insight_valid_to IF NOT EXISTS FOR (i:Insight) ON (i.validTo)',
+    },
     {
       name: 'index:observation_expires',
       cypher: 'CREATE INDEX observation_expires IF NOT EXISTS FOR (o:Observation) ON (o.expiresAt)',

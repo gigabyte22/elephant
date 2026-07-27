@@ -57,6 +57,8 @@ interface Deps {
     dedupThreshold: number;
     supersedeVectorThreshold: number;
     promoteInsightImportance: number;
+    insightDedupThreshold: number;
+    insightRetireBatchLimit: number;
     crossScopeDedup: boolean;
     // Pruning (see utils/decay.ts for the retention model).
     pruneWindowDays: number;
@@ -99,6 +101,8 @@ function newDreamRun(id?: string): DreamRun {
     factsPruned: 0,
     factsMerged: 0,
     insightsPromoted: 0,
+    insightsRetired: 0,
+    insightsCorroborated: 0,
     extractionFailures: 0,
     supersedeFailures: 0,
     relationsCreated: 0,
@@ -138,6 +142,30 @@ async function recordDreamerEvent(
     actor: DREAMER_ACTOR,
     payload: { dreamRunId: run.id, ...args.payload },
   });
+}
+
+// Cascade insight retirement from a set of now-dead facts, auditing each.
+async function retireInsights(
+  tx: ManagedTransaction,
+  run: DreamRun,
+  factIds: string[],
+  reason: string,
+): Promise<number> {
+  const retired = await InsightRepository.retireForDeadFacts(tx, {
+    factIds,
+    at: new Date(),
+    reason,
+  });
+  for (const insightId of retired) {
+    await recordDreamerEvent(tx, run, {
+      kind: 'archive',
+      targetId: insightId,
+      targetKind: 'insight',
+      payload: { reason, sourceFactIds: factIds },
+    });
+  }
+  run.insightsRetired += retired.length;
+  return retired.length;
 }
 
 export function createDreamingService(deps: Deps) {
@@ -314,6 +342,7 @@ export function createDreamingService(deps: Deps) {
         }
         await promoteHighImportanceInsights(allCreated, supersededInCycle, run);
         await pruneStale(run);
+        await reconcileInsights(run);
       }
 
       // Rebuild the GDS projection so PPR retrieval sees this cycle's new
@@ -593,6 +622,7 @@ export function createDreamingService(deps: Deps) {
         // The candidate was redacted or already closed between the search and
         // this write. Nothing changed, so don't log or count it.
         if (!applied) return false;
+        await retireInsights(tx, run, [decision.oldFactId], 'source_superseded');
         await recordDreamerEvent(tx, run, {
           kind: 'supersede',
           targetId: decision.oldFactId,
@@ -890,6 +920,43 @@ export function createDreamingService(deps: Deps) {
       (f) => f.importance >= config.promoteInsightImportance && !supersededInCycle.has(f.id),
     );
     for (const f of promoteCandidates) {
+      // Already promoted from this exact fact — idempotent across re-runs, and
+      // a cheap id lookup rather than a vector call.
+      if (await read((tx) => InsightRepository.findBySourceFact(tx, f.id))) continue;
+
+      // Semantic dedup within the fact's own scope bucket, mirroring the fact
+      // dedup rule so one project's insights can't dedup-skip against
+      // another's. Promotion was a verbatim copy per qualifying fact, so
+      // near-identical insights accumulated with a second copy of the
+      // embedding polluting the vector space.
+      const similar = await read((tx) =>
+        InsightRepository.listSimilar(tx, {
+          embedding: f.embedding,
+          limit: 5,
+          includeRetired: false,
+        }),
+      );
+      const duplicate = similar.find(
+        (candidate) =>
+          (candidate.projectId ?? null) === (f.projectId ?? null) &&
+          cosine(f.embedding, candidate.embedding) > config.insightDedupThreshold,
+      );
+      if (duplicate) {
+        // Corroboration, not duplication: attaching the source means the
+        // insight now outlives the death of any single source fact.
+        await write(async (tx) => {
+          await InsightRepository.addSource(tx, { insightId: duplicate.id, factId: f.id });
+          await recordDreamerEvent(tx, run, {
+            kind: 'update',
+            targetId: duplicate.id,
+            targetKind: 'insight',
+            payload: { addedSourceFactId: f.id, score: duplicate.score },
+          });
+        });
+        run.insightsCorroborated += 1;
+        continue;
+      }
+
       const insight: Insight = {
         id: newId(),
         content: f.content,
@@ -911,6 +978,22 @@ export function createDreamingService(deps: Deps) {
       });
       run.insightsPromoted += 1;
     }
+  }
+
+  // Safety net for the write-time cascade. The cascade keeps insight recall a
+  // cheap scalar filter rather than a per-candidate join, but a missed call
+  // site would silently reintroduce stale insights — this runs the join once a
+  // night so that self-heals within 24h. It also serves as the migration for
+  // graphs written before insights had a lifecycle, which is why this change
+  // ships no backfill script.
+  async function reconcileInsights(run: DreamRun): Promise<void> {
+    const retired = await write((tx) =>
+      InsightRepository.retireOrphaned(tx, {
+        at: new Date(),
+        limit: config.insightRetireBatchLimit,
+      }),
+    );
+    run.insightsRetired += retired;
   }
 
   // Soft-prune low-importance, long-unreferenced facts via the Ebbinghaus curve.
@@ -955,6 +1038,7 @@ export function createDreamingService(deps: Deps) {
         // DREAM_PRUNE_BATCH_LIMIT times a night and is fully reversible from
         // validTo/prunedAt, so an :ArchivedRevision each would be pure bloat.
         if (!(await FactRepository.prune(tx, s.id, new Date()))) return false;
+        await retireInsights(tx, run, [s.id], 'source_pruned');
         await recordDreamerEvent(tx, run, {
           kind: 'prune',
           targetId: s.id,

@@ -8,12 +8,39 @@ import { ChunkRepository } from '../repositories/ChunkRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
 import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
 import { FactRepository } from '../repositories/FactRepository.ts';
+import { InsightRepository } from '../repositories/InsightRepository.ts';
 import { newId } from '../utils/ids.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
 import { type Chunker, createChunker } from './Chunker.ts';
 
 const INGEST_ACTOR = 'memory-ingest';
+
+// An insight is a verbatim copy of a high-importance fact, so once every
+// source fact is dead it is asserting a claim the graph has already retracted.
+// Retirement cascades from each path that kills a fact; the dreamer's nightly
+// sweep is the safety net for any call site that gets missed.
+async function retireInsightsFor(
+  tx: ManagedTransaction,
+  factIds: string[],
+  reason: string,
+): Promise<void> {
+  const retired = await InsightRepository.retireForDeadFacts(tx, {
+    factIds,
+    at: new Date(),
+    reason,
+  });
+  for (const insightId of retired) {
+    await AuditService.record({
+      tx,
+      kind: 'archive',
+      targetId: insightId,
+      targetKind: 'insight',
+      actor: INGEST_ACTOR,
+      payload: { reason, sourceFactIds: factIds },
+    });
+  }
+}
 
 interface Deps {
   llm: LLMAdapter;
@@ -352,6 +379,7 @@ export function createMemoryIngestionService(deps: Deps) {
         reason: 'user delete',
         actor: INGEST_ACTOR,
       });
+      await retireInsightsFor(tx, [id], 'source_deleted');
     });
   }
 
@@ -379,6 +407,7 @@ export function createMemoryIngestionService(deps: Deps) {
     // interval another supersede already closed. Nothing changed, so don't
     // claim it did in the audit log.
     if (!applied) return;
+    await retireInsightsFor(tx, [input.oldId], 'source_superseded');
     await AuditService.record({
       tx,
       kind: 'supersede',

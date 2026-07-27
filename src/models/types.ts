@@ -228,6 +228,12 @@ export const InsightSchema = z
     embedding: EmbeddingSchema,
     promotedFromFactIds: z.array(z.string().uuid()).default([]),
     createdAt: z.date(),
+    // Retirement. An insight is a verbatim copy of a high-importance fact, so
+    // when every source fact is dead the insight is asserting a claim the
+    // graph has already retracted. Deliberately no `validFrom`: an insight has
+    // no event-time story of its own and createdAt already opens its interval.
+    validTo: z.date().nullable().optional(),
+    retiredReason: z.string().optional(),
   })
   .merge(ScopeSchema);
 export type Insight = z.infer<typeof InsightSchema>;
@@ -440,6 +446,10 @@ export const DreamRunSchema = z.object({
   factsPruned: z.number().int().nonnegative().default(0),
   factsMerged: z.number().int().nonnegative().default(0),
   insightsPromoted: z.number().int().nonnegative().default(0),
+  // Retired because every source fact died, and merged into an existing
+  // insight as corroboration rather than cloned.
+  insightsRetired: z.number().int().nonnegative().default(0),
+  insightsCorroborated: z.number().int().nonnegative().default(0),
   extractionFailures: z.number().int().nonnegative().default(0),
   supersedeFailures: z.number().int().nonnegative().default(0),
   // Knowledge-graph construction (v1.3): relation/triple edges built, entity
