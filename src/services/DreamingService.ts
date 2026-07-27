@@ -14,7 +14,6 @@ import type {
 } from '../models/types.ts';
 import { resolveExtractedEntities } from '../models/types.ts';
 import { ChunkRepository } from '../repositories/ChunkRepository.ts';
-import { DreamCursorRepository } from '../repositories/DreamCursorRepository.ts';
 import { DreamRunRepository } from '../repositories/DreamRunRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
 import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
@@ -37,6 +36,10 @@ interface Deps {
   config: {
     maxEpisodesPerRun: number;
     deadlineMs: number;
+    // Attempts before an episode is dead-lettered, and the base of the
+    // exponential backoff between them.
+    maxDreamAttempts: number;
+    retryBackoffBaseMs: number;
     // Knowledge-graph construction (off the hot path). When relation extraction
     // is on, the dreamer pulls (:Entity)-[:RELATES]->(:Entity) triples per
     // episode; when entity resolution is on, it re-embeds touched entities from
@@ -140,6 +143,14 @@ async function recordDreamerEvent(
 export function createDreamingService(deps: Deps) {
   const { llm, embedder, config } = deps;
 
+  // Exponential backoff, capped so a long-lived backlog still drains. Returns
+  // null on the final attempt: there is no next attempt to schedule.
+  function nextRetryAt(priorAttempts: number): Date | null {
+    if (priorAttempts + 1 >= config.maxDreamAttempts) return null;
+    const delay = config.retryBackoffBaseMs * 2 ** priorAttempts;
+    return new Date(Date.now() + Math.min(delay, 6 * 60 * 60_000));
+  }
+
   // Serializes /dream invocations + the cron. Second caller gets thrown
   // DreamInProgressError, which HTTP maps to 409.
   const cycleMutex = new AsyncMutex();
@@ -199,14 +210,17 @@ export function createDreamingService(deps: Deps) {
     return read((tx) => DreamRunRepository.getLastCompleted(tx));
   }
 
-  // Estimated backlog = episodes newer than the cursor (falling back to last
-  // completed dream's timestamp, then epoch). Cheap count for /health.
+  // Outstanding episodes still eligible for a dream attempt. Cheap count for
+  // /health. Previously derived from the cursor, which meant a backdated
+  // episode that could never be selected also reported a backlog of zero.
   async function backlogEstimate(): Promise<number> {
-    const cursor =
-      (await read((tx) => DreamCursorRepository.get(tx))) ??
-      (await lastCompleted())?.completedAt ??
-      new Date(0);
-    return read((tx) => EpisodeRepository.countAfter(tx, cursor));
+    return read((tx) => EpisodeRepository.countPendingDream(tx, config.maxDreamAttempts));
+  }
+
+  // Episodes that exhausted their attempts and will not be retried. Surfaced
+  // so "we silently lost data" is visible rather than buried in a log line.
+  async function deadLetteredEstimate(): Promise<number> {
+    return read((tx) => EpisodeRepository.countDeadLetteredDream(tx, config.maxDreamAttempts));
   }
 
   // Awaitable variant for tests / CLI.
@@ -223,18 +237,14 @@ export function createDreamingService(deps: Deps) {
     const deadline = t0 + config.deadlineMs;
 
     try {
-      // Cursor seeds from: persistent cursor → last completed run → epoch.
-      // Using a cursor instead of "last dream run timestamp" means a
-      // time-boxed run resumes mid-backlog on the next invocation.
-      const initialCursor =
-        (await read((tx) => DreamCursorRepository.get(tx))) ??
-        (await lastCompleted())?.completedAt ??
-        new Date(0);
-
+      // Ask for work directly rather than walking forward from a cursor. The
+      // selector is ordered by transaction time, so a backdated import is
+      // picked up like anything else, and a failed episode stays selectable
+      // until it exhausts its attempts.
       const episodes = await read((tx) =>
-        EpisodeRepository.listAfterLimit(tx, {
-          after: initialCursor,
+        EpisodeRepository.listPendingDream(tx, {
           limit: config.maxEpisodesPerRun,
+          maxAttempts: config.maxDreamAttempts,
         }),
       );
 
@@ -258,13 +268,29 @@ export function createDreamingService(deps: Deps) {
         try {
           const created = await processEpisode(ep, supersededInCycle, touchedEntityIds, run);
           allCreated.push(...created);
+          await write((tx) => EpisodeRepository.markDreamed(tx, ep.id, new Date()));
         } catch (err) {
-          // A poisoned episode must not pin the cursor — log, count, advance.
+          // A poisoned episode must not pin the cycle — but it must not vanish
+          // either. Stamp the failure with exponential backoff; the episode
+          // stays selectable until it exhausts maxDreamAttempts, at which
+          // point it is dead-lettered and countable via /health.
           run.episodesFailed += 1;
-          logLLMError(`[dream ${run.id}] episode ${ep.id} failed, skipping`, err);
+          const message = err instanceof Error ? err.message : String(err);
+          const attempts = await write((tx) =>
+            EpisodeRepository.recordDreamFailure(tx, {
+              id: ep.id,
+              nextAttemptAt: nextRetryAt(ep.dreamAttempts ?? 0),
+              error: message,
+            }),
+          );
+          const exhausted = attempts >= config.maxDreamAttempts;
+          logLLMError(
+            `[dream ${run.id}] episode ${ep.id} failed (attempt ${attempts}/${config.maxDreamAttempts}` +
+              `${exhausted ? ', dead-lettered' : ', will retry'})`,
+            err,
+          );
         }
         processed += 1;
-        await write((tx) => DreamCursorRepository.set(tx, ep.timestamp));
       }
 
       run.episodesProcessed = processed;
@@ -958,6 +984,7 @@ export function createDreamingService(deps: Deps) {
     runCycle,
     lastCompleted,
     backlogEstimate,
+    deadLetteredEstimate,
     currentRunningJobId(): string | null {
       return runningJobId;
     },

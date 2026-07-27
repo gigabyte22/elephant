@@ -1,5 +1,6 @@
 // Voyage AI embeddings (https://docs.voyageai.com/reference/embeddings-api).
 // Native HTTP — no SDK dep needed.
+import { fetchWithRetry } from './retry.ts';
 
 import { approxTokens } from '../../utils/tokens.ts';
 import type { EmbeddingAdapter } from './types.ts';
@@ -23,14 +24,16 @@ export function createVoyageEmbeddingAdapter(config: VoyageEmbedAdapterConfig): 
 
   async function embedBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
-    const response = await fetch('https://api.voyageai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify({ model: config.model, input: texts }),
-    });
+    const response = await fetchWithRetry('voyage-embed', () =>
+      fetch('https://api.voyageai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({ model: config.model, input: texts }),
+      }),
+    );
     if (!response.ok) {
       throw new Error(`Voyage embed failed: ${response.status} ${await response.text()}`);
     }

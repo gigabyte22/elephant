@@ -139,6 +139,14 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:fact_temporal',
       cypher: 'CREATE INDEX fact_temporal IF NOT EXISTS FOR (f:Fact) ON (f.validFrom, f.validTo)',
     },
+    // Dream work-queue selector: MATCH (e:Episode) WHERE e.dreamedAt IS NULL.
+    // Neo4j does not index NULLs, so this does not accelerate that predicate
+    // directly — it serves the dead-letter and dreamed-count queries, and
+    // keeps the ORDER BY on recordedAt cheap.
+    {
+      name: 'index:episode_dream_queue',
+      cypher:
+        'CREATE INDEX episode_dream_queue IF NOT EXISTS FOR (e:Episode) ON (e.dreamedAt, e.recordedAt)',
     // Neo4j does not index NULLs, so these do NOT accelerate the `IS NULL`
     // read guard (that is a property check on an already-materialised row).
     // They accelerate the IS NOT NULL paths: dashboard counts, the lifecycle

@@ -11,7 +11,6 @@ import { read, write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
 import { type Container, bootstrap, shutdown } from '../../src/index.ts';
 import type { ExtractedFact, Fact } from '../../src/models/types.ts';
-import { DreamCursorRepository } from '../../src/repositories/DreamCursorRepository.ts';
 import { FactRepository } from '../../src/repositories/FactRepository.ts';
 import { newId } from '../../src/utils/ids.ts';
 import { assertDestructiveAllowed } from './guard.ts';
@@ -160,7 +159,7 @@ async function listFactsByContent(needle: string): Promise<Array<{ projectId: st
 }
 
 describe('dream cycle robustness', () => {
-  test('detectSupersede throw → run completes, supersedeFailures > 0, cursor advances', async () => {
+  test('detectSupersede throw → run completes, supersedeFailures > 0, episode still completes', async () => {
     // Pre-seed a fact whose embedding is engineered to land in the supersede
     // band relative to the new fact: 4 non-zero indices at 0.5 each, vs the
     // new fact's 5 non-zero indices at 1/sqrt(5). Cosine = 4·(0.5·1/√5) =
@@ -209,7 +208,7 @@ describe('dream cycle robustness', () => {
     expect(followup.episodesProcessed).toBe(0);
   });
 
-  test('extractFacts throw on one episode → other episodes still produce facts, cursor advances', async () => {
+  test('extractFacts throw on one episode → other episodes still produce facts', async () => {
     await postEpisode('the user mentioned berlin');
     await postEpisode('this episode contains poison-word and should fail extraction');
     await postEpisode('the user prefers dark mode');
@@ -397,8 +396,8 @@ describe('dream cycle robustness', () => {
     expect(superseded).not.toBeNull();
   });
 
-  test('embedder throw inside processEpisode → episodesFailed, cursor still advances', async () => {
-    await postEpisode('the user mentioned berlin');
+  test('embedder throw inside processEpisode → episodesFailed, episode retained for retry', async () => {
+    const episodeId = await postEpisode('the user mentioned berlin');
 
     knobs.embedderThrows = true;
 
@@ -409,12 +408,34 @@ describe('dream cycle robustness', () => {
     expect(run.episodesFailed).toBe(1);
     expect(run.factsCreated).toBe(0);
 
-    // Critical: cursor must have moved even though the episode threw — the
-    // queue must drain. Confirm via DreamCursorRepository directly.
-    const cursor = await read((tx) => DreamCursorRepository.get(tx));
-    expect(cursor).not.toBeNull();
-
+    // Two properties, and the old cursor design only had the first.
+    //
+    // 1. The cycle must not spin on a poisoned episode. Backoff is what
+    //    provides that now: the retry is scheduled, not immediate.
     const followup = await container.dreaming.runCycle();
     expect(followup.episodesProcessed).toBe(0);
+
+    // 2. …and the episode must NOT be lost. The cursor used to advance past
+    //    it, so a transient embedder outage destroyed that window permanently
+    //    with only a counter to show for it.
+    const marker = await read(async (tx) => {
+      const r = await tx.run(
+        `MATCH (e:Episode {id: $id})
+         RETURN e.dreamedAt AS dreamedAt, e.dreamAttempts AS attempts,
+                e.dreamNextAttemptAt AS nextAttemptAt, e.dreamLastError AS lastError`,
+        { id: episodeId },
+      );
+      const rec = r.records[0];
+      return {
+        dreamedAt: rec?.get('dreamedAt') ?? null,
+        attempts: rec?.get('attempts') as number,
+        nextAttemptAt: rec?.get('nextAttemptAt') ?? null,
+        lastError: rec?.get('lastError') as string | null,
+      };
+    });
+    expect(marker.dreamedAt).toBeNull();
+    expect(marker.attempts).toBe(1);
+    expect(marker.nextAttemptAt).not.toBeNull();
+    expect(marker.lastError).toBeTruthy();
   });
 });

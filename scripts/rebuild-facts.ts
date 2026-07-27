@@ -11,7 +11,6 @@
 
 import { loadEnv } from '../src/config/env.ts';
 import { closeDriver, read, write } from '../src/config/neo4j.ts';
-import { DreamCursorRepository } from '../src/repositories/DreamCursorRepository.ts';
 
 const BATCH = 5000;
 
@@ -57,11 +56,20 @@ async function main(): Promise<void> {
   await deleteAll('Fact');
   await deleteAll('Insight');
 
-  // Reset the cursor by SETTING it to epoch — deleting the node would make
-  // the dreamer fall back to the last completed run's timestamp and skip the
-  // whole backlog.
-  await write((tx) => DreamCursorRepository.set(tx, new Date(0)));
-  console.log('[rebuild-facts] dream cursor reset to epoch.');
+  // Re-queue every episode. The dreamer selects on per-episode markers now,
+  // so clearing them is what makes the whole backlog eligible again —
+  // including any episode previously dead-lettered, which is what you want
+  // when deliberately rebuilding from scratch.
+  const requeued = await write(async (tx) => {
+    const r = await tx.run(
+      `MATCH (e:Episode)
+       SET e.dreamedAt = NULL, e.dreamAttempts = 0,
+           e.dreamNextAttemptAt = NULL, e.dreamLastError = NULL
+       RETURN count(e) AS n`,
+    );
+    return Number(r.records[0]?.get('n') ?? 0);
+  });
+  console.log(`[rebuild-facts] re-queued ${requeued} episode(s) for dreaming.`);
   console.log(
     `[rebuild-facts] done. Trigger dreaming to rebuild facts from the ${episodes} retained episodes: curl -X POST http://localhost:${env.MEMORY_PORT}/dream -H "authorization: Bearer $MEMORY_SERVICE_TOKEN"`,
   );

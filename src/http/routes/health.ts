@@ -29,6 +29,9 @@ export function registerHealthRoute(app: App, container: Container): void {
               running: z.boolean(),
               runningJobId: z.string().nullable(),
               backlogEstimate: z.number().nullable(),
+              // Episodes that exhausted their dream attempts and will not be
+              // retried. Non-zero means data was extracted from nothing.
+              deadLetteredEpisodes: z.number().nullable(),
             }),
           }),
         }),
@@ -38,6 +41,7 @@ export function registerHealthRoute(app: App, container: Container): void {
       let neo4jOk = false;
       let schemaVectorDim: number | null = null;
       let backlog: number | null = null;
+      let deadLettered: number | null = null;
       try {
         await verifyConnectivity();
         neo4jOk = true;
@@ -53,6 +57,7 @@ export function registerHealthRoute(app: App, container: Container): void {
           return typeof v === 'number' ? v : null;
         });
         backlog = await container.dreaming.backlogEstimate().catch(() => null);
+        deadLettered = await container.dreaming.deadLetteredEstimate().catch(() => null);
       } catch {
         neo4jOk = false;
       }
@@ -81,6 +86,7 @@ export function registerHealthRoute(app: App, container: Container): void {
             running: runningJobId !== null,
             runningJobId,
             backlogEstimate: backlog,
+            deadLetteredEpisodes: deadLettered,
           },
         },
       };

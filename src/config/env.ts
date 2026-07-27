@@ -103,6 +103,11 @@ const EnvSchema = z
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),
     DREAM_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
+    // Dream attempts per episode before it is dead-lettered, and the base of
+    // the exponential backoff between them. Episodes used to be dropped on the
+    // first failure, so a brief embedder outage destroyed that window.
+    DREAM_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+    DREAM_RETRY_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(60_000),
 
     // Knowledge-graph construction (dream cycle, off the hot path). Relation
     // extraction builds (:Entity)-[:RELATES]->(:Entity) triples; entity
