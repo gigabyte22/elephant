@@ -12,6 +12,7 @@ const EXPECTED_INDEXES = [
   'observation_expires',
   'preference_key',
   'episode_agent_id',
+  'episode_dream_queue',
   'episode_session',
   'observation_agent_id',
   'chunk_fulltext',

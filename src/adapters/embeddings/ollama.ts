@@ -1,6 +1,7 @@
 // Ollama embeddings via its native /api/embed endpoint.
 // Variable dim — the caller must set EMBED_DIM to match the chosen model
 // (e.g. nomic-embed-text=768, mxbai-embed-large=1024). Migrate script enforces.
+import { fetchWithRetry } from './retry.ts';
 
 import { approxTokens } from '../../utils/tokens.ts';
 import type { EmbeddingAdapter } from './types.ts';
@@ -38,11 +39,13 @@ export function createOllamaEmbeddingAdapter(config: OllamaEmbedAdapterConfig): 
 
   async function embedBatch(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model: config.model, input: texts }),
-    });
+    const response = await fetchWithRetry('ollama-embed', () =>
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: config.model, input: texts }),
+      }),
+    );
     if (!response.ok) {
       throw new Error(`Ollama embed failed: ${response.status} ${await response.text()}`);
     }

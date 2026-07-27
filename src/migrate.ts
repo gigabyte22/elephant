@@ -139,6 +139,15 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:fact_temporal',
       cypher: 'CREATE INDEX fact_temporal IF NOT EXISTS FOR (f:Fact) ON (f.validFrom, f.validTo)',
     },
+    // Dream work-queue selector: MATCH (e:Episode) WHERE e.dreamedAt IS NULL.
+    // Neo4j does not index NULLs, so this does not accelerate that predicate
+    // directly — it serves the dead-letter and dreamed-count queries, and
+    // keeps the ORDER BY on recordedAt cheap.
+    {
+      name: 'index:episode_dream_queue',
+      cypher:
+        'CREATE INDEX episode_dream_queue IF NOT EXISTS FOR (e:Episode) ON (e.dreamedAt, e.recordedAt)',
+    },
     {
       name: 'index:observation_expires',
       cypher: 'CREATE INDEX observation_expires IF NOT EXISTS FOR (o:Observation) ON (o.expiresAt)',

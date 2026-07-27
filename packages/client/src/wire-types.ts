@@ -177,6 +177,9 @@ export interface WireHealth {
     running: boolean;
     runningJobId: string | null;
     backlogEstimate: number | null;
+    // Episodes that exhausted their dream attempts. Optional: older servers
+    // do not report it.
+    deadLetteredEpisodes?: number | null;
   };
 }
 

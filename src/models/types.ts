@@ -61,6 +61,18 @@ export const EpisodeSchema = z
     // Isolated projects opt out of cross-scope dedup/supersede against the
     // personal bucket, keeping their facts fully self-contained.
     isolated: z.boolean().optional(),
+    // Transaction time. `timestamp` is client-supplied EVENT time and may be
+    // backdated on import, so it cannot order a work queue. Optional because
+    // episodes written before this field existed do not have it.
+    recordedAt: z.date().optional(),
+    // Dream progress, stamped per episode rather than tracked by a single
+    // global cursor. A cursor conflates "how far have we got" with "what still
+    // needs doing", which is why it both skipped backdated episodes and
+    // dropped failed ones permanently.
+    dreamedAt: z.date().nullable().optional(),
+    dreamAttempts: z.number().int().nonnegative().optional(),
+    dreamNextAttemptAt: z.date().nullable().optional(),
+    dreamLastError: z.string().optional(),
   })
   .merge(ScopeSchema);
 export type Episode = z.infer<typeof EpisodeSchema>;

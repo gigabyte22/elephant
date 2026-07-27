@@ -129,6 +129,8 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       config: {
         maxEpisodesPerRun: env.DREAM_MAX_EPISODES_PER_RUN,
         deadlineMs: env.DREAM_DEADLINE_MS,
+        maxDreamAttempts: env.DREAM_MAX_ATTEMPTS,
+        retryBackoffBaseMs: env.DREAM_RETRY_BACKOFF_BASE_MS,
         enableRelationExtraction: env.DREAM_ENABLE_RELATION_EXTRACTION,
         relationMinConfidence: env.DREAM_RELATION_MIN_CONFIDENCE,
         enableEntityResolution: env.DREAM_ENABLE_ENTITY_RESOLUTION,
