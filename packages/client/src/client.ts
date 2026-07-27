@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 // HTTP client for the elephant memory service.
 // Reference: src/http/routes/* and src/models/wire.ts in the service source.
 // One method per route. Bearer auth, JSON envelope `{ ok, data, error }`,
@@ -35,6 +36,11 @@ export class ElephantError extends Error {
 export interface ElephantConfig {
   url: string;
   token: string;
+  /**
+   * Applied to writes that accept a projectId and did not supply one.
+   * Previously declared and never read, so callers who set it silently got
+   * unscoped writes.
+   */
   defaultProjectId?: string;
   /** Per-request timeout (ms). Default 30s. Override per-call via opts.signal. */
   timeoutMs?: number;
@@ -75,7 +81,7 @@ export class ElephantClient {
     },
     opts?: RequestOpts,
   ): Promise<{ episodeId: string }> {
-    return this.request('POST', '/episodes', input, opts);
+    return this.request('POST', '/episodes', this.withWriteDefaults(input), opts);
   }
 
   // ─ Facts ──
@@ -97,13 +103,18 @@ export class ElephantClient {
     },
     opts?: RequestOpts,
   ): Promise<WireFact> {
-    return this.request('POST', '/facts', input, opts);
+    return this.request('POST', '/facts', this.withWriteDefaults(input), opts);
   }
   saveFacts(
     facts: Array<Parameters<ElephantClient['saveFact']>[0]>,
     opts?: RequestOpts,
   ): Promise<WireFact[]> {
-    return this.request('POST', '/facts/batch', { facts }, opts);
+    return this.request(
+      'POST',
+      '/facts/batch',
+      { facts: facts.map((f) => this.withWriteDefaults(f)) },
+      opts,
+    );
   }
   supersedeFact(
     oldId: string,
@@ -176,7 +187,7 @@ export class ElephantClient {
     input: { id?: string; agentId: string; sessionId: string; content: string },
     opts?: RequestOpts,
   ): Promise<WireObservation> {
-    return this.request('POST', '/observations', input, opts);
+    return this.request('POST', '/observations', this.withWriteDefaults(input), opts);
   }
   listObservations(
     sessionId: string,
@@ -546,6 +557,25 @@ export class ElephantClient {
 
   // ─ HTTP plumbing ──
 
+  /**
+   * Stamp a client-generated id on writes that did not supply one, and apply
+   * defaultProjectId.
+   *
+   * The id matters because request() retries on network errors and timeouts.
+   * EXPECTED.md promises "all writes idempotent via client-supplied id" — that
+   * holds server-side, but neither the MCP nor the OpenClaw tool layer supplied
+   * an id, so a timed-out-but-succeeded POST duplicated on retry. Exactly the
+   * scenario the guarantee exists to cover.
+   */
+  private withWriteDefaults<T extends { id?: string; projectId?: string }>(input: T): T {
+    const out: T = { ...input };
+    if (out.id === undefined) out.id = randomUUID();
+    if (out.projectId === undefined && this.cfg.defaultProjectId !== undefined) {
+      out.projectId = this.cfg.defaultProjectId;
+    }
+    return out;
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -556,6 +586,16 @@ export class ElephantClient {
     const timeoutMs = opts?.timeoutMs ?? this.cfg.timeoutMs ?? 30_000;
     let lastErr: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
+      // Check BEFORE attaching the listener. addEventListener never fires for
+      // an already-aborted signal, so a caller that cancelled (or timed out)
+      // between attempts had its AbortController left un-aborted and the
+      // request re-issued for every remaining retry — a prompt-build path that
+      // gave up kept hammering the service.
+      if (opts?.signal?.aborted) {
+        throw opts.signal.reason instanceof Error
+          ? opts.signal.reason
+          : new Error('request aborted');
+      }
       const ctl = new AbortController();
       const timer = setTimeout(() => ctl.abort(), timeoutMs);
       // Forward an external abort so the caller can cancel.
