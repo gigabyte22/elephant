@@ -14,6 +14,8 @@ export function registerObservationsRoutes(app: App, container: Container): void
         agentId: z.string().min(1),
         sessionId: z.string().min(1),
         content: z.string().min(1),
+        projectId: z.string().min(1).optional(),
+        userId: z.string().min(1).optional(),
       }),
       response: { 200: okEnvelope(WireObservationSchema) },
     },
