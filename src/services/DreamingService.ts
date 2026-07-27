@@ -321,11 +321,26 @@ export function createDreamingService(deps: Deps) {
     touchedEntityIds: Set<string>,
     run: DreamRun,
   ): Promise<Fact[]> {
+    // Same bucket the dedup and supersede searches use. This one feeds fact
+    // CONTENT into the extraction prompt as "already-known related facts", so
+    // an unscoped search here shipped up to 8 arbitrary facts from other
+    // projects and other users into an outbound LLM call — including for
+    // episodes whose project is explicitly `isolated`, which is the one thing
+    // that flag exists to prevent.
+    //
+    // It is also an extraction-quality bug: the prompt tells the model not to
+    // restate those facts, so a project legitimately re-learning something
+    // known elsewhere had it suppressed before scoped dedup ever ran.
     const sample = await read((tx) =>
       FactRepository.listSimilar(tx, {
         embedding: ep.embedding,
         limit: 8,
         includeSuperseded: false,
+        scope: {
+          projectId: ep.projectId ?? null,
+          includeUnscoped: config.crossScopeDedup && !ep.isolated,
+          userId: ep.userId ?? null,
+        },
       }),
     );
     const sampleForLLM = sample.map((s) => ({ id: s.id, content: s.content }));
