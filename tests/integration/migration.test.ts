@@ -9,6 +9,8 @@ const EXPECTED_INDEXES = [
   'entity_name',
   'fact_fulltext',
   'fact_temporal',
+  'fact_deleted',
+  'fact_pruned',
   'observation_expires',
   'preference_key',
   'episode_agent_id',

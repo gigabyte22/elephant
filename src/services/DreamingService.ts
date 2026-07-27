@@ -540,8 +540,8 @@ export function createDreamingService(deps: Deps) {
       const now = new Date();
       const validTo = eventValidTo(oldFact.validFrom, fact.validFrom);
 
-      await write(async (tx) => {
-        const { newConfidence } = await FactRepository.supersede(tx, {
+      const superseded = await write(async (tx) => {
+        const { newConfidence, applied } = await FactRepository.supersede(tx, {
           oldId: decision.oldFactId,
           newId: fact.id,
           reason: decision.reason,
@@ -549,6 +549,9 @@ export function createDreamingService(deps: Deps) {
           supersededAt: now,
           confidenceDelta: decision.confidenceDelta,
         });
+        // The candidate was redacted or already closed between the search and
+        // this write. Nothing changed, so don't log or count it.
+        if (!applied) return false;
         await recordDreamerEvent(tx, run, {
           kind: 'supersede',
           targetId: decision.oldFactId,
@@ -560,7 +563,9 @@ export function createDreamingService(deps: Deps) {
             ...(newConfidence !== null ? { newConfidence } : {}),
           },
         });
+        return true;
       });
+      if (!superseded) continue;
       supersededInCycle.add(decision.oldFactId);
       run.factsSuperseded += 1;
     }
@@ -901,8 +906,14 @@ export function createDreamingService(deps: Deps) {
         },
       });
       if (!prune) continue;
-      await write(async (tx) => {
-        await FactRepository.softDelete(tx, s.id, new Date());
+      const pruned = await write(async (tx) => {
+        // prune(), not softDelete(): a pruned fact is a transaction-time
+        // system forget, so it stays visible to /timeline, asOf and
+        // includeSuperseded. Only a user DELETE redacts. Stays on record()
+        // rather than revise() deliberately — prune runs up to
+        // DREAM_PRUNE_BATCH_LIMIT times a night and is fully reversible from
+        // validTo/prunedAt, so an :ArchivedRevision each would be pure bloat.
+        if (!(await FactRepository.prune(tx, s.id, new Date()))) return false;
         await recordDreamerEvent(tx, run, {
           kind: 'prune',
           targetId: s.id,
@@ -913,8 +924,9 @@ export function createDreamingService(deps: Deps) {
             daysSinceLastReference: days,
           },
         });
+        return true;
       });
-      run.factsPruned += 1;
+      if (pruned) run.factsPruned += 1;
     }
   }
 
