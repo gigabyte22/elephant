@@ -2,7 +2,7 @@ import { read } from '../../../config/neo4j.ts';
 import { ProcedureRepository } from '../../../repositories/ProcedureRepository.ts';
 import type { RetrievalStage } from '../types.ts';
 import { overfetchLimit, upsertProcedureHits } from './helpers.ts';
-import { buildRetrievalScope } from './scope-helpers.ts';
+import { PROJECT_USER_AXES, buildRetrievalScope } from './scope-helpers.ts';
 
 export function ProcedureFullTextSource(): RetrievalStage {
   return {
@@ -14,7 +14,7 @@ export function ProcedureFullTextSource(): RetrievalStage {
         ProcedureRepository.fullTextSearch(tx, {
           query: ctx.ftQuery,
           limit: overfetchLimit(ctx),
-          scope: buildRetrievalScope(ctx.query),
+          scope: buildRetrievalScope(ctx.query, PROJECT_USER_AXES),
         }),
       );
       upsertProcedureHits(state, hits, 'procedure_fulltext');

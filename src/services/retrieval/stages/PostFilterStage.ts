@@ -155,7 +155,12 @@ function scopeMatches(
 // 'strict' additionally excludes nulls, so a sandboxed reader sees only
 // items carrying its own scope value. Any other mode (or no query value)
 // admits everything on this axis.
-function axisAllows(
+//
+// Exported so the unit suite can assert this and scopeFilterClause (the Cypher
+// expression of the same rule) agree over one table of inputs — they diverged
+// before, with the pushdown excluding nulls under 'filter' and emitting
+// nothing at all under 'strict'.
+export function axisAllows(
   itemValue: string | null | undefined,
   queryValue: string | undefined,
   mode: ScopeMode,

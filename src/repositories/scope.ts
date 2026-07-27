@@ -1,9 +1,11 @@
 // Shared helpers for scope-aware repo writes and retrieval-time filtering.
 //
-// Scope axes are: projectId, userId, agentId, sessionId. Each can run in one
-// of three modes at retrieval time: 'filter' (hard match), 'boost' (multiplier
-// on score), or 'none' (ignored). The default for every axis is 'boost' when a
-// value is supplied, 'none' otherwise.
+// Scope axes are: projectId, userId, agentId, sessionId. Each runs in one of
+// four modes at retrieval time:
+//   'boost'  — multiplier on score (default when a value is supplied)
+//   'filter' — hard match, but a NULL scope is a shared global and still matches
+//   'strict' — like filter, and also excludes NULLs
+//   'none'   — ignored (default when no value is supplied)
 //
 // Repository writes simply persist whichever scope props are supplied; the
 // scoring/filter logic lives in retrieval pipeline stages.
@@ -55,11 +57,21 @@ export function scopeFilterClause(
   const parts: string[] = [];
   const params: Record<string, string | null> = {};
   for (const { axis, modeKey } of AXES) {
-    if (scope[modeKey] === 'filter' && scope[axis]) {
-      const paramName = `scope_${axis}`;
-      parts.push(`${alias}.${axis} = $${paramName}`);
-      params[paramName] = scope[axis] ?? null;
-    }
+    const mode = scope[modeKey];
+    if ((mode !== 'filter' && mode !== 'strict') || !scope[axis]) continue;
+    const paramName = `scope_${axis}`;
+    // Must mirror axisAllows() in PostFilterStage exactly. This used to emit
+    // plain equality for 'filter', which excludes NULLs — so the categories
+    // that use pushdown (procedures, research, knowledge/research chunks,
+    // intentions) silently dropped legitimately-shared globals that the
+    // fact path returned. 'strict' emitted nothing at all, so it got zero
+    // pushdown and leaned entirely on the post-filter.
+    parts.push(
+      mode === 'filter'
+        ? `(${alias}.${axis} = $${paramName} OR ${alias}.${axis} IS NULL)`
+        : `${alias}.${axis} = $${paramName}`,
+    );
+    params[paramName] = scope[axis] ?? null;
   }
   return {
     clause: parts.length ? parts.join(' AND ') : '',
