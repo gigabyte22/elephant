@@ -8,7 +8,7 @@ import { read } from '../../../config/neo4j.ts';
 import type { RetrievalScope } from '../../../repositories/scope.ts';
 import type { CandidateSource, PipelineState, RetrievalContext, RetrievalStage } from '../types.ts';
 import { overfetchLimit } from './helpers.ts';
-import { buildRetrievalScope } from './scope-helpers.ts';
+import { PROJECT_USER_AXES, buildRetrievalScope } from './scope-helpers.ts';
 
 export interface ChunkSourceConfig<T> {
   vectorStageName: string;
@@ -42,7 +42,7 @@ export function createChunkVectorSource<T>(cfg: ChunkSourceConfig<T>): Retrieval
         cfg.repo.listSimilar(tx, {
           embedding: ctx.queryVector,
           limit: overfetchLimit(ctx),
-          scope: buildRetrievalScope(ctx.query),
+          scope: buildRetrievalScope(ctx.query, PROJECT_USER_AXES),
         }),
       );
       cfg.upsert(state, hits, cfg.vectorSource);
@@ -61,7 +61,7 @@ export function createChunkFullTextSource<T>(cfg: ChunkSourceConfig<T>): Retriev
         cfg.repo.fullTextSearch(tx, {
           query: ctx.ftQuery,
           limit: overfetchLimit(ctx),
-          scope: buildRetrievalScope(ctx.query),
+          scope: buildRetrievalScope(ctx.query, PROJECT_USER_AXES),
         }),
       );
       cfg.upsert(state, hits, cfg.fulltextSource);

@@ -261,12 +261,30 @@ describe('B+C. multi-layer ingestion + recall use cases', () => {
       id: string;
       projectId?: string;
     }>;
-    // The unscoped procedure may or may not pass null-handling — assert the
-    // proj-A proc is present and any proc with a projectId equals proj-A.
+    // No longer hedged. SPEC.md is explicit that under 'filter' a null scope
+    // is a shared global and still matches, and the Cypher pushdown now says
+    // the same thing as the JS post-filter — so the unscoped procedure MUST be
+    // present, exactly as it is on the fact path.
     expect(procs.some((p) => p.id === procProjAId)).toBe(true);
+    expect(procs.some((p) => p.projectId === undefined)).toBe(true);
     for (const p of procs) {
       if (p.projectId !== undefined) expect(p.projectId).toBe('proj-A');
     }
+  });
+
+  test('projectScope=strict excludes the unscoped procedure', async () => {
+    const res = await getAuth(
+      '/recall?q=deploy&projectId=proj-A&projectScope=strict' +
+        '&includeKnowledge=true&includeProcedures=true&limit=20',
+    );
+    expect(res.statusCode).toBe(200);
+    const procs = (res.json().data.procedures ?? []) as Array<{
+      id: string;
+      projectId?: string;
+    }>;
+    expect(procs.some((p) => p.id === procProjAId)).toBe(true);
+    // strict is the sandboxed reader: nulls are excluded too.
+    expect(procs.every((p) => p.projectId === 'proj-A')).toBe(true);
   });
 
   test('projectScope=boost returns both proj-A and unscoped procedures', async () => {

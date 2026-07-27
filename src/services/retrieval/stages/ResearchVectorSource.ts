@@ -2,7 +2,7 @@ import { read } from '../../../config/neo4j.ts';
 import { ResearchRepository } from '../../../repositories/ResearchRepository.ts';
 import type { RetrievalStage } from '../types.ts';
 import { overfetchLimit, upsertResearchHits } from './helpers.ts';
-import { buildRetrievalScope } from './scope-helpers.ts';
+import { PROJECT_USER_AXES, buildRetrievalScope } from './scope-helpers.ts';
 
 export function ResearchVectorSource(): RetrievalStage {
   return {
@@ -16,7 +16,7 @@ export function ResearchVectorSource(): RetrievalStage {
         ResearchRepository.listSimilar(tx, {
           embedding: ctx.queryVector,
           limit: overfetchLimit(ctx),
-          scope: buildRetrievalScope(ctx.query),
+          scope: buildRetrievalScope(ctx.query, PROJECT_USER_AXES),
         }),
       );
       upsertResearchHits(state, hits);

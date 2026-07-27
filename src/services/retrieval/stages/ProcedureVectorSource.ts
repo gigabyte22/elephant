@@ -2,7 +2,7 @@ import { read } from '../../../config/neo4j.ts';
 import { ProcedureRepository } from '../../../repositories/ProcedureRepository.ts';
 import type { RetrievalStage } from '../types.ts';
 import { overfetchLimit, upsertProcedureHits } from './helpers.ts';
-import { buildRetrievalScope } from './scope-helpers.ts';
+import { PROJECT_USER_AXES, buildRetrievalScope } from './scope-helpers.ts';
 
 export function ProcedureVectorSource(): RetrievalStage {
   return {
@@ -13,7 +13,7 @@ export function ProcedureVectorSource(): RetrievalStage {
         ProcedureRepository.listSimilar(tx, {
           embedding: ctx.queryVector,
           limit: overfetchLimit(ctx),
-          scope: buildRetrievalScope(ctx.query),
+          scope: buildRetrievalScope(ctx.query, PROJECT_USER_AXES),
         }),
       );
       upsertProcedureHits(state, hits, 'procedure_vector');
