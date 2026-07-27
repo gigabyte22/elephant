@@ -476,6 +476,8 @@ describe('/dashboard/api/dreams', () => {
         factsPruned: 4,
         factsMerged: 2,
         insightsPromoted: 1,
+        insightsRetired: 0,
+        insightsCorroborated: 0,
         extractionFailures: 2,
         supersedeFailures: 1,
         relationsCreated: 9,

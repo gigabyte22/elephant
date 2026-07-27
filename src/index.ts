@@ -139,6 +139,8 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         dedupThreshold: env.DREAM_DEDUP_THRESHOLD,
         supersedeVectorThreshold: env.DREAM_SUPERSEDE_VECTOR_THRESHOLD,
         promoteInsightImportance: env.DREAM_PROMOTE_INSIGHT_IMPORTANCE,
+        insightDedupThreshold: env.DREAM_INSIGHT_DEDUP_THRESHOLD,
+        insightRetireBatchLimit: env.DREAM_INSIGHT_RETIRE_BATCH_LIMIT,
         crossScopeDedup: env.DREAM_CROSS_SCOPE_DEDUP,
         pruneWindowDays: env.DREAM_PRUNE_WINDOW_DAYS,
         pruneBatchLimit: env.DREAM_PRUNE_BATCH_LIMIT,

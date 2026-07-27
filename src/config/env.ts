@@ -119,6 +119,11 @@ const EnvSchema = z
     DREAM_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
     DREAM_SUPERSEDE_VECTOR_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
     DREAM_PROMOTE_INSIGHT_IMPORTANCE: z.coerce.number().min(0).max(1).default(0.85),
+    // Insight hygiene: cosine above which a new promotion corroborates an
+    // existing insight instead of cloning it, and the per-cycle cap on the
+    // orphaned-insight reconciliation sweep.
+    DREAM_INSIGHT_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
+    DREAM_INSIGHT_RETIRE_BATCH_LIMIT: z.coerce.number().int().positive().default(1000),
     // Cross-scope dedup lets a project episode dedup/supersede against the
     // unscoped personal bucket (never another project's bucket).
     DREAM_CROSS_SCOPE_DEDUP: boolEnv(true),
