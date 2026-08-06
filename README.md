@@ -109,6 +109,19 @@ return an `{ok, data}` / `{ok, error}` envelope.
 
 Full request/response shapes are in [EXPECTED.md](EXPECTED.md).
 
+## Adapters
+
+Ready-made bindings for orchestrators, in `adapters/`. Each one is a thin client
+over the HTTP API above — the service is the source of truth.
+
+| Adapter | Install | What it gives you |
+|---|---|---|
+| [`hermes`](adapters/hermes/hermes_elephant/provider/README.md) | `pip install hermes-elephant && hermes-elephant install` | A [hermes-agent](https://github.com/NousResearch/hermes-agent) memory provider: query-conditioned prefetch, non-blocking episode writes, pre-compression snapshots, subagent-delegation capture, and a `hermes elephant` CLI. Stdlib-only. |
+| [`mcp`](adapters/mcp) | see its README | An MCP server exposing recall, facts, knowledge, procedures, and intentions as tools. |
+| [`openclaw`](adapters/openclaw) | see its README | An OpenClaw plugin over the vendored TypeScript client. |
+
+`packages/client` is the TypeScript client the TS adapters share.
+
 ## Dashboard
 
 <p align="center">
