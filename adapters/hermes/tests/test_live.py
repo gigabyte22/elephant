@@ -371,10 +371,26 @@ def test_procedure_round_trip(live_provider):
         reason="live test",
     )
     assert "Updated procedure" in updated
-    assert "twice" in call(live_provider, "memory_procedure_get", id=proc_id)
 
-    assert proc_id in call(live_provider, "memory_procedure_list", limit=50)
-    assert "Soft-deleted" in call(live_provider, "memory_procedure_delete", id=proc_id)
+    # A body change supersedes rather than mutates: the service creates a NEW
+    # node at v+1 and retires the old one, leaving its body intact and walkable
+    # via :SUPERSEDES (ProcedureService.update). So the edit lives at a NEW id —
+    # which is why the tool reports it back — and the old id keeps answering
+    # with v1. This test previously re-read the old id and expected the edit,
+    # which stopped holding when supersession replaced in-place updates.
+    new_id = one_uuid(updated)
+    assert new_id != proc_id
+    assert "twice" in call(live_provider, "memory_procedure_get", id=new_id)
+    assert "twice" not in call(live_provider, "memory_procedure_get", id=proc_id)
+
+    # Lookup by name follows the live version, so an agent holding only the
+    # name is not stranded on v1.
+    by_name_after = call(live_provider, "memory_procedure_get", name=name)
+    assert "twice" in by_name_after
+    assert new_id in by_name_after
+
+    assert new_id in call(live_provider, "memory_procedure_list", limit=50)
+    assert "Soft-deleted" in call(live_provider, "memory_procedure_delete", id=new_id)
 
 
 def test_procedure_save_unscoped(bare_provider):
