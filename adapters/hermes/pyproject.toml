@@ -1,8 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "hermes-memory-elephant-dev"
+name = "hermes-elephant"
 version = "0.1.0"
-description = "Dev harness for the elephant hermes-agent memory provider (the plugin itself is stdlib-only)"
+description = "Elephant memory provider for hermes-agent — hybrid GraphRAG recall, bi-temporal facts, and nightly consolidation on Neo4j"
+readme = "hermes_elephant/README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
+keywords = ["hermes-agent", "memory", "neo4j", "graphrag", "elephant"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Intentionally empty. The provider talks to the elephant service over plain
+# HTTP via urllib, so installing it never drags a dependency into the hermes
+# runtime. Keep it that way.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/kainappsinc/elephant"
+Source = "https://github.com/kainappsinc/elephant/tree/main/adapters/hermes"
+
+[project.scripts]
+hermes-elephant = "hermes_elephant.install:main"
+
+# Forward-looking. Memory-provider discovery in hermes-agent is directory-only
+# today (bundled + $HERMES_HOME/plugins), so this group is not scanned yet —
+# that gap is what `hermes-elephant install` works around. Three open upstream
+# PRs (#18842, #40644, #76567) all converge on this exact group name, so
+# declaring it now means the plugin lights up on its own once one lands.
+#
+# `hermes_agent.plugins` is deliberately NOT declared: the general PluginManager
+# eagerly imports every module in that group in every hermes process, then calls
+# register(ctx) with a context that has no register_memory_provider — so joining
+# it today would buy an import in every CLI/gateway/cron process and then fail.
+# Upstream #76567 measures exactly that cost.
+[project.entry-points."hermes_agent.memory_providers"]
+elephant = "hermes_elephant"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hermes_elephant"]
 
 [dependency-groups]
 dev = ["pytest>=8"]

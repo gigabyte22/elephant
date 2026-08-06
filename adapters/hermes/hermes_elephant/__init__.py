@@ -9,6 +9,7 @@ Hook mapping:
   sync_turn         -> POST /episodes via a non-blocking queue + daemon worker
   on_session_end    -> flush remaining queue
   on_pre_compress   -> POST /episodes (save the span before compaction drops it)
+  on_delegation     -> POST /episodes (what a subagent was asked, and returned)
   on_memory_write   -> mirror built-in memory writes as facts
   tools             -> memory_recall/save/forget, timeline, entity,
                        preference get/set, observe
@@ -35,12 +36,24 @@ except ImportError:  # running outside a hermes checkout (tests, standalone)
 
 from .client import ElephantClient, ElephantError
 
-logger = logging.getLogger(__name__)
+from ._shared import (  # noqa: F401 — re-exported for back-compat
+    CONFIG_FILE,
+    DEFAULT_URL,
+    TOKEN_ENV,
+    UUID_RE,
+    _clip,
+    _detail,
+    _format_document,
+    _format_fact,
+    _format_intention,
+    _format_procedure,
+    _format_recall,
+    _items,
+    _load_file_config,
+    _scope_of,
+)
 
-CONFIG_FILE = "elephant.json"
-TOKEN_ENV = "ELEPHANT_SERVICE_TOKEN"
-DEFAULT_URL = "http://127.0.0.1:18790"
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
 
@@ -73,85 +86,6 @@ def _present(args: Dict[str, Any], keys: tuple) -> Dict[str, Any]:
     return {key: args[key] for key in keys if args.get(key) is not None}
 
 
-def _scope_of(config: Dict[str, Any]) -> Dict[str, Any]:
-    """The configured scope axes, omitting any that are unset. An empty dict
-    means unscoped/shared, which is correct: `_qs` and the JSON bodies drop
-    absent keys rather than filtering on a literal null. Shared with the CLI so
-    a document written there lands in the same scope as one written by a tool."""
-    scope: Dict[str, Any] = {}
-    if config.get("project_id"):
-        scope["projectId"] = config["project_id"]
-    if config.get("user_id"):
-        scope["userId"] = config["user_id"]
-    return scope
-
-
-def _detail(header: str, item: Dict[str, Any]) -> str:
-    """One-line summary followed by the item's full body."""
-    return f"{header}\n\n{item.get('content') or '(no content)'}"
-
-
-def _load_file_config(hermes_home: str) -> Dict[str, Any]:
-    path = os.path.join(hermes_home, CONFIG_FILE)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-            return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _items(data: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
-    """Recall sections, defensively: a missing key, a null, or a non-list all
-    collapse to empty, and non-dict members are dropped. Formatting runs on the
-    prefetch path, where a shape change must degrade rather than raise."""
-    value = data.get(key) if isinstance(data, dict) else None
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, dict)]
-
-
-def _clip(value: Any, limit: int = 180) -> str:
-    text = " ".join(str(value or "").split())
-    return text if len(text) <= limit else f"{text[: limit - 1]}…"
-
-
-def _format_fact(fact: Dict[str, Any]) -> str:
-    bits = []
-    score = fact.get("score")
-    if isinstance(score, (int, float)) and not isinstance(score, bool):
-        bits.append(f"{score:.2f}")
-    if fact.get("category"):
-        bits.append(str(fact["category"]))
-    meta = f" ({', '.join(bits)})" if bits else ""
-    return f"- [{fact.get('id')}]{meta} {fact.get('content')}"
-
-
-def _format_document(doc: Dict[str, Any]) -> str:
-    summary = _clip(doc.get("summary")) if doc.get("summary") else ""
-    tags = ", ".join(str(t) for t in doc.get("tags") or [])
-    line = f"- [{doc.get('id')}] {doc.get('title')} ({doc.get('source')})"
-    if tags:
-        line += f" #{tags}"
-    return f"{line} — {summary}" if summary else line
-
-
-def _format_procedure(proc: Dict[str, Any]) -> str:
-    return (
-        f"- [{proc.get('id')}] {proc.get('name')} (v{proc.get('version')}): {proc.get('whenToUse')}"
-    )
-
-
-def _format_intention(intention: Dict[str, Any]) -> str:
-    meta = str(intention.get("status"))
-    if intention.get("dueAt"):
-        meta += f", due {intention['dueAt']}"
-    if intention.get("recurring"):
-        schedule = intention.get("schedule")
-        meta += f", recurring {schedule}" if schedule else ", recurring"
-    return f"- [{intention.get('id')}] ({meta}) {intention.get('content')}"
-
-
 def _tool(
     name: str,
     description: str,
@@ -179,6 +113,7 @@ def _tool(
 # below readable. `_tool` copies them, so they are never aliased into a result.
 _UNIT = {"type": "number", "minimum": 0, "maximum": 1}
 _LIST_LIMIT = {"type": "number", "minimum": 1, "maximum": 200}
+
 _TAGS = {"type": "array", "items": {"type": "string"}}
 _ID_ONLY = {"id": {"type": "string"}}
 _ID_AND_REASON = {"id": {"type": "string"}, "reason": {"type": "string"}}
@@ -191,52 +126,6 @@ _DOC_UPDATE_PROPS = {
     "tags": _TAGS,
     "reason": {"type": "string"},
 }
-
-
-def _format_recall(data: Dict[str, Any]) -> str:
-    sections: List[str] = []
-
-    prefs = _items(data, "preferences")
-    if prefs:
-        sections.append(
-            "Preferences:\n" + "\n".join(f"- {p.get('key')}: {p.get('value')}" for p in prefs)
-        )
-
-    facts = _items(data, "facts")
-    if facts:
-        sections.append("Facts:\n" + "\n".join(_format_fact(f) for f in facts))
-
-    insights = _items(data, "insights")
-    if insights:
-        sections.append("Insights:\n" + "\n".join(f"- {i.get('content')}" for i in insights))
-
-    procedures = _items(data, "procedures")
-    if procedures:
-        sections.append("Procedures:\n" + "\n".join(_format_procedure(p) for p in procedures))
-
-    knowledge = _items(data, "knowledgeChunks")
-    if knowledge:
-        sections.append(
-            "Knowledge:\n"
-            + "\n".join(f"- [{k.get('documentId')}] {_clip(k.get('text'))}" for k in knowledge)
-        )
-
-    research = _items(data, "research")
-    if research:
-        sections.append("Research:\n" + "\n".join(_format_document(r) for r in research))
-
-    research_chunks = _items(data, "researchChunks")
-    if research_chunks:
-        sections.append(
-            "Research excerpts:\n"
-            + "\n".join(f"- [{c.get('researchId')}] {_clip(c.get('text'))}" for c in research_chunks)
-        )
-
-    intentions = _items(data, "intentions")
-    if intentions:
-        sections.append("Open intentions:\n" + "\n".join(_format_intention(i) for i in intentions))
-
-    return "\n\n".join(sections)
 
 
 class ElephantMemoryProvider(MemoryProvider):
@@ -315,13 +204,21 @@ class ElephantMemoryProvider(MemoryProvider):
             finally:
                 self._queue.task_done()
 
-    def _enqueue_episode(self, transcript: str, session_id: str) -> None:
+    def _enqueue_episode(
+        self, transcript: str, session_id: str, *, origin: str = "user"
+    ) -> None:
         if not transcript.strip() or self._client is None:
             return
         episode: Dict[str, Any] = {
             "agentId": self._config.get("agent_id", "hermes"),
             "sessionId": session_id or self._session_id or "hermes:default",
             "rawTranscript": transcript,
+            # Provenance the dreamer acts on, not decoration: the extraction
+            # prompt appends a "no human user is present; any USER-labeled text
+            # is machine-generated — do not attribute intent to 'the user'"
+            # instruction for non-user origins. Omitting it meant a subagent's
+            # machine-written task text was mined for facts *about the user*.
+            "origin": origin,
         }
         if self._config.get("project_id"):
             episode["projectId"] = self._config["project_id"]
@@ -359,6 +256,41 @@ class ElephantMemoryProvider(MemoryProvider):
         if len(transcript) >= 50:
             self._enqueue_episode(f"[pre-compression snapshot]\n\n{transcript}", self._session_id)
         return ""
+
+    def on_delegation(
+        self,
+        task: str,
+        result: str,
+        *,
+        child_session_id: str = "",
+        **kwargs: Any,
+    ) -> None:
+        # Fires on the PARENT when a subagent finishes. The subagent runs with
+        # skip_memory=True and has no provider session of its own, so this is
+        # the only chance to record what was delegated and what came back —
+        # without it, a turn that did all its real work in a subagent lands in
+        # the graph as an assistant message with no substance behind it.
+        #
+        # Filed against the parent's session so the delegation reads as part of
+        # the conversation that spawned it; the child id is kept in the
+        # transcript for traceability rather than as a separate scope axis,
+        # since it names no session elephant has ever seen.
+        # Checked before building the transcript: a subagent result is the
+        # largest payload any hook here carries, and concatenating it only for
+        # _enqueue_episode to drop it costs a full copy per delegation.
+        if self._client is None:
+            return
+        if not (task or "").strip() and not (result or "").strip():
+            return
+        header = "[subagent delegation]"
+        if child_session_id:
+            header = f"{header} (child session {child_session_id})"
+        self._enqueue_episode(
+            f"{header}\n\nTASK: {task}\n\nRESULT: {result}",
+            self._session_id,
+            # Not "user": every word of this transcript is machine-generated.
+            origin="system",
+        )
 
     def on_memory_write(
         self,

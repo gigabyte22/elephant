@@ -1,0 +1,24 @@
+name: elephant
+version: 0.1.0
+description: "Elephant — self-hosted Neo4j memory service with hybrid GraphRAG recall, bi-temporal facts, versioned preferences, and nightly consolidation (dreaming). Stdlib-only client; requires a running elephant service."
+
+# Routes the plugin to plugins/memory discovery instead of the general
+# PluginManager, which has no register_memory_provider on its context. Stated
+# explicitly rather than leaning on the source-text auto-coercion in
+# hermes_cli/plugins.py, so the classification survives a refactor of that
+# heuristic.
+kind: exclusive
+
+# No pip_dependencies: the client is urllib and json. Installing this provider
+# must never add a package to the hermes runtime.
+pip_dependencies: []
+
+hooks:
+  - prefetch
+  - queue_prefetch
+  - sync_turn
+  - on_session_end
+  - on_session_switch
+  - on_pre_compress
+  - on_memory_write
+  - on_delegation

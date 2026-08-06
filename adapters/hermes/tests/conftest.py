@@ -5,7 +5,12 @@ import uuid
 
 import pytest
 
-# Make the plugin importable as the package `elephant` without a hermes checkout.
+# Make the plugin importable as `hermes_elephant` without a hermes checkout. The
+# import package is deliberately NOT `elephant`: that name is taken on PyPI by an
+# unrelated project (the Electrophysiology Analysis Toolkit), and a top-level
+# collision would break anyone who has both installed. The provider is still
+# called `elephant` everywhere a user sees it — `memory.provider`, the
+# `hermes elephant` CLI, and the installed plugin directory.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ─ live-server fixtures ─────────────────────────────────────────────────────
@@ -43,7 +48,7 @@ def live(request):
 
 @pytest.fixture(scope="session")
 def live_client(live):
-    from elephant.client import ElephantClient
+    from hermes_elephant.client import ElephantClient
 
     url, token = live
     # retries=0: against a local server a retry only masks a real failure.
@@ -51,8 +56,8 @@ def live_client(live):
 
 
 def _make_provider(tmp_path, url, token, config, session_id):
-    import elephant
-    from elephant import ElephantMemoryProvider
+    import hermes_elephant as elephant
+    from hermes_elephant import ElephantMemoryProvider
 
     home = tmp_path / f"hermes-home-{uuid.uuid4().hex[:8]}"
     home.mkdir(parents=True, exist_ok=True)

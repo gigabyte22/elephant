@@ -14,9 +14,9 @@ import urllib.request
 
 import pytest
 
-import elephant
-from elephant import ElephantMemoryProvider, register
-from elephant.client import ElephantClient, ElephantError
+import hermes_elephant as elephant
+from hermes_elephant import ElephantMemoryProvider, register
+from hermes_elephant.client import ElephantClient, ElephantError
 
 FACT_ID = "3f0e8f6a-58a2-4bfb-9d6e-0f6f4a1c2b3d"
 
@@ -271,6 +271,38 @@ def test_on_pre_compress_flushes_snapshot(provider, fake_http):
     provider._queue.join()
     episode = next(r for r in fake_http.requests if r["path"] == "/episodes")
     assert "[pre-compression snapshot]" in episode["body"]["rawTranscript"]
+
+
+def test_on_delegation_records_subagent_work(provider, fake_http):
+    fake_http.respond("POST", "/episodes", {"episodeId": "e3"})
+    fake_http.posted.clear()
+    provider.on_delegation(
+        "audit the retry logic in the payment worker and report what you find",
+        "Found two bugs: the backoff is linear, and a 429 is retried forever.",
+        child_session_id="sub-77",
+    )
+    assert fake_http.posted.wait(timeout=5), "worker never posted the delegation episode"
+    provider._queue.join()
+    episode = next(r for r in fake_http.requests if r["path"] == "/episodes")
+    transcript = episode["body"]["rawTranscript"]
+    assert "[subagent delegation]" in transcript
+    assert "child session sub-77" in transcript
+    assert "TASK: audit the retry logic" in transcript
+    assert "RESULT: Found two bugs" in transcript
+    # Not "user": the dreamer's extraction prompt keys off origin to decide
+    # whether USER-labelled text describes a person. Marking a machine-written
+    # delegation as user input mines it for facts about the operator.
+    assert episode["body"]["origin"] == "system"
+    # Filed against the PARENT's session: the child id names a session elephant
+    # has never seen, so it belongs in the transcript, not in the scope.
+    assert episode["body"]["sessionId"] == "session-1"
+
+
+def test_on_delegation_ignores_an_empty_pair(provider, fake_http):
+    before = len(fake_http.requests)
+    provider.on_delegation("   ", "", child_session_id="sub-78")
+    provider._queue.join()
+    assert len(fake_http.requests) == before
 
 
 def test_on_memory_write_mirrors_adds(provider, fake_http):

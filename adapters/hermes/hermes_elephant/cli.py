@@ -11,7 +11,7 @@ import json
 import os
 from typing import Any, Dict, Tuple
 
-from . import (
+from ._shared import (
     DEFAULT_URL,
     TOKEN_ENV,
     UUID_RE,
