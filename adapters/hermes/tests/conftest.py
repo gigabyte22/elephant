@@ -48,7 +48,7 @@ def live(request):
 
 @pytest.fixture(scope="session")
 def live_client(live):
-    from hermes_elephant.client import ElephantClient
+    from hermes_elephant.provider.client import ElephantClient
 
     url, token = live
     # retries=0: against a local server a retry only masks a real failure.
@@ -56,8 +56,8 @@ def live_client(live):
 
 
 def _make_provider(tmp_path, url, token, config, session_id):
-    import hermes_elephant as elephant
-    from hermes_elephant import ElephantMemoryProvider
+    import hermes_elephant.provider as elephant
+    from hermes_elephant.provider import ElephantMemoryProvider
 
     home = tmp_path / f"hermes-home-{uuid.uuid4().hex[:8]}"
     home.mkdir(parents=True, exist_ok=True)

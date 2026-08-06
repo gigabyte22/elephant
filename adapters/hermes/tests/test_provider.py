@@ -14,9 +14,9 @@ import urllib.request
 
 import pytest
 
-import hermes_elephant as elephant
-from hermes_elephant import ElephantMemoryProvider, register
-from hermes_elephant.client import ElephantClient, ElephantError
+import hermes_elephant.provider as elephant
+from hermes_elephant.provider import ElephantMemoryProvider, register
+from hermes_elephant.provider.client import ElephantClient, ElephantError
 
 FACT_ID = "3f0e8f6a-58a2-4bfb-9d6e-0f6f4a1c2b3d"
 

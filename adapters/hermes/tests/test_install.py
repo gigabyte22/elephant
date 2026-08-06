@@ -18,6 +18,7 @@ import pytest
 from hermes_elephant import install
 
 ADAPTER_ROOT = Path(__file__).resolve().parent.parent
+PROVIDER_DIR = ADAPTER_ROOT / "hermes_elephant" / "provider"
 
 
 @pytest.fixture
@@ -33,10 +34,11 @@ def test_install_lays_down_the_provider(home, capsys):
     # `hermes elephant`, and the plugins/memory loader all use it. The import
     # package is hermes_elephant to dodge the unrelated `elephant` on PyPI.
     assert target.is_dir()
-    assert {p.name for p in target.iterdir()} == {
-        *install.PLUGIN_FILES,
-        install.MARKER,
-    }
+    # The installed tree IS the provider subpackage, plus our marker. A
+    # directory boundary rather than an allowlist, so copy mode, --link mode
+    # and the built wheel cannot disagree about what ships.
+    expected = {p.name for p in PROVIDER_DIR.iterdir() if not p.name.startswith((".", "__pycache__"))}
+    assert {p.name for p in target.iterdir()} == expected | {install.MARKER}
     assert "Installed the elephant memory provider" in capsys.readouterr().out
 
 
@@ -75,7 +77,7 @@ def test_link_mode_points_at_the_source(home):
     assert install.main(["install", "--hermes-home", str(home), "--link"]) == 0
     target = home / "plugins" / "elephant"
     assert target.is_symlink()
-    assert target.resolve() == ADAPTER_ROOT / "hermes_elephant"
+    assert target.resolve() == PROVIDER_DIR
 
 
 def test_uninstall_removes_only_our_own(home, capsys):
@@ -178,16 +180,46 @@ def test_hermes_home_env_selects_the_profile(tmp_path, monkeypatch):
     assert (tmp_path / "work-profile" / "plugins" / "elephant").is_dir()
 
 
-def test_plugin_files_match_what_ships():
-    """PLUGIN_FILES is a hand-maintained allowlist. If a new runtime module is
-    added to the package and not listed, the installed provider silently loses
-    it — so hold the two in agreement here rather than in review."""
-    shipped = {
-        p.name
-        for p in (ADAPTER_ROOT / "hermes_elephant").iterdir()
-        if p.is_file() and p.name != "install.py" and not p.name.startswith(".")
-    }
-    assert shipped == set(install.PLUGIN_FILES)
+def test_caches_are_not_shipped(home):
+    """Copying a whole directory is what makes the shipped set self-maintaining,
+    but it also means anything sitting in that directory comes along. hermes
+    execs every *.py in a plugin directory as a submodule, so a stale
+    __pycache__ has no business being there."""
+    cache = PROVIDER_DIR / "__pycache__"
+    cache.mkdir(exist_ok=True)
+    (cache / "cli.cpython-311.pyc").write_bytes(b"\x00")
+
+    assert install.main(["install", "--hermes-home", str(home)]) == 0
+    installed = home / "plugins" / "elephant"
+    assert not (installed / "__pycache__").exists()
+    assert not any(p.suffix == ".pyc" for p in installed.rglob("*"))
+
+
+def test_install_verifies_the_discovery_contract(home, tmp_path, monkeypatch, capsys):
+    """hermes classifies a provider directory by scanning the first 8KB of its
+    __init__.py for MemoryProvider/register_memory_provider. A packaging gap
+    should fail at install time, not surface later as `Plugin: NOT installed`."""
+    fake_source = tmp_path / "provider"
+    fake_source.mkdir()
+    (fake_source / "__init__.py").write_text("# nothing hermes recognises\n", encoding="utf-8")
+    monkeypatch.setattr(install, "_source_dir", lambda: fake_source)
+
+    assert install.main(["install", "--hermes-home", str(home)]) == 1
+    assert "does not identify itself as a memory provider" in capsys.readouterr().err
+    # A failed install leaves nothing half-written behind.
+    assert not (home / "plugins" / "elephant").exists()
+
+
+def test_status_flags_a_stale_copy(home, monkeypatch, capsys):
+    """Copying rather than symlinking means `pip install -U` leaves the profile
+    running the old version. Nothing else would ever notice."""
+    install.main(["install", "--hermes-home", str(home)])
+    monkeypatch.setattr(install, "package_version", lambda: "9.9.9")
+
+    install.main(["status", "--hermes-home", str(home)])
+    out = capsys.readouterr().out
+    assert "STALE" in out
+    assert "9.9.9" in out
 
 
 def test_entry_point_and_console_script_are_declared():
@@ -196,7 +228,9 @@ def test_entry_point_and_console_script_are_declared():
     manifest = tomllib.loads((ADAPTER_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     entry_points = manifest["project"]["entry-points"]
 
-    assert entry_points["hermes_agent.memory_providers"] == {"elephant": "hermes_elephant"}
+    assert entry_points["hermes_agent.memory_providers"] == {
+        "elephant": "hermes_elephant.provider"
+    }
     # Joining the general group would make hermes's PluginManager import this in
     # every process and then fail on a context with no register_memory_provider.
     assert "hermes_agent.plugins" not in entry_points

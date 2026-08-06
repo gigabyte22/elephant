@@ -20,9 +20,11 @@ from pathlib import Path
 
 import pytest
 
-from hermes_elephant import ElephantMemoryProvider
+from hermes_elephant.provider import ElephantMemoryProvider
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent / "hermes_elephant" / "config_schema.py"
+SCHEMA_PATH = (
+    Path(__file__).resolve().parent.parent / "hermes_elephant" / "provider" / "config_schema.py"
+)
 
 
 @dataclass(frozen=True)

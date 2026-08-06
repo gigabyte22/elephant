@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "hermes-elephant"
 version = "0.1.0"
 description = "Elephant memory provider for hermes-agent — hybrid GraphRAG recall, bi-temporal facts, and nightly consolidation on Neo4j"
-readme = "hermes_elephant/README.md"
+readme = "hermes_elephant/provider/README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 keywords = ["hermes-agent", "memory", "neo4j", "graphrag", "elephant"]
@@ -40,7 +40,7 @@ hermes-elephant = "hermes_elephant.install:main"
 # it today would buy an import in every CLI/gateway/cron process and then fail.
 # Upstream #76567 measures exactly that cost.
 [project.entry-points."hermes_agent.memory_providers"]
-elephant = "hermes_elephant"
+elephant = "hermes_elephant.provider"
 
 [tool.hatch.build.targets.wheel]
 packages = ["hermes_elephant"]

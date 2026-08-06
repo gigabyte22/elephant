@@ -26,7 +26,7 @@ import pytest
 
 from conftest import requires_live
 
-from hermes_elephant.client import ElephantError
+from hermes_elephant.provider.client import ElephantError
 
 pytestmark = requires_live
 

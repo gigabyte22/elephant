@@ -64,7 +64,7 @@ package also declares a `hermes_agent.memory_providers` entry point, so once
 entry-point discovery lands upstream the install step becomes redundant.
 
 ```bash
-hermes-elephant status                                # where it goes, and whether it's there
+hermes-elephant status                                # where it goes, whether it's there, whether it's stale
 hermes-elephant install --link                        # symlink instead of copy (development)
 hermes-elephant uninstall
 HERMES_HOME=~/.hermes-work hermes-elephant install    # a specific profile

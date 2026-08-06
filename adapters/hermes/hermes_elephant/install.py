@@ -6,7 +6,7 @@ hermes-agent discovers memory providers by scanning directories: the bundled
 #76567 are open against it). So ``pip install hermes-elephant`` alone leaves the
 provider invisible — ``hermes memory status`` reports ``Plugin: NOT installed``.
 
-This command closes that gap by copying the provider into
+This command closes that gap by copying :mod:`hermes_elephant.provider` into
 ``$HERMES_HOME/plugins/elephant/``, which is the path stock hermes already
 supports. It is the same two-step shape the Memori provider ships
 (``pip install hermes-memori && hermes-memori install``).
@@ -26,46 +26,69 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from ._shared import TOKEN_ENV
+from .provider._shared import TOKEN_ENV
 
 PLUGIN_NAME = "elephant"
 
-# The provider's runtime surface. Copied verbatim into the plugin directory.
-#
-# ``install.py`` is deliberately absent: hermes executes *every* ``*.py`` in a
-# provider directory as a submodule so relative imports resolve
-# (plugins/memory/__init__.py), and the installer has no business running inside
-# the agent. Everything here is stdlib-only, which is why the plugin adds no
-# dependency to the hermes runtime.
-PLUGIN_FILES = (
-    "__init__.py",
-    "client.py",
-    "_shared.py",
-    "cli.py",
-    "config_schema.py",
-    "plugin.yaml",
-    "README.md",
-)
-
 # Written into the installed directory so `uninstall` and re-`install` can tell
-# our copy apart from a directory the user put there by hand.
+# our copy apart from a directory the user put there by hand, and so `status`
+# can spot a copy left behind by an earlier version of the package.
 MARKER = ".hermes-elephant"
+
+# Never copied into the plugin directory: hermes execs every *.py there as a
+# submodule, and caches are not source.
+_IGNORED = shutil.ignore_patterns("__pycache__", "*.pyc", ".*")
+
+
+def package_version() -> str:
+    """The installed distribution's version, or ``"unknown"``.
+
+    Recorded in the marker so ``status`` can tell you the copy in your profile
+    has fallen behind the package — the one real cost of copying rather than
+    symlinking, and otherwise completely invisible.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            return version("hermes-elephant")
+        except PackageNotFoundError:
+            return "unknown"
+    except Exception:
+        return "unknown"
 
 
 def hermes_home() -> Path:
     """The active hermes profile root.
 
-    ``HERMES_HOME`` is how hermes itself scopes profiles, so honouring it means
-    ``HERMES_HOME=~/.hermes-work hermes-elephant install`` targets that profile
-    rather than the default one.
+    Mirrors ``hermes_constants.get_hermes_home()``, including its Windows
+    branch — installing to ``~/.hermes`` on a machine where hermes actually
+    reads ``%LOCALAPPDATA%\\hermes`` would drop the provider somewhere nothing
+    scans and then report success. Prefer hermes's own resolver when it is
+    importable (we are installed into its venv, so usually it is); the fallback
+    exists for a bare ``pip install`` outside that venv.
     """
-    return Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    override = os.environ.get("HERMES_HOME")
+    if override:
+        return Path(override)
+    try:
+        from hermes_constants import get_hermes_home  # type: ignore[import-not-found]
+
+        return Path(get_hermes_home())
+    except Exception:
+        pass
+    if sys.platform == "win32":
+        local_appdata = os.environ.get("LOCALAPPDATA")
+        if local_appdata:
+            return Path(local_appdata) / "hermes"
+    return Path.home() / ".hermes"
 
 
 def plugin_dir(home: Optional[Path] = None) -> Path:
@@ -73,11 +96,69 @@ def plugin_dir(home: Optional[Path] = None) -> Path:
 
 
 def _source_dir() -> Path:
-    return Path(__file__).resolve().parent
+    """The provider subpackage — exactly what gets installed.
+
+    A directory boundary rather than a filename allowlist, so copy mode, link
+    mode, and the built wheel can never disagree about what ships.
+    """
+    return Path(__file__).resolve().parent / "provider"
+
+
+def _read_marker(target: Path) -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads((target / MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def _is_ours(target: Path) -> bool:
-    return (target / MARKER).exists() or target.is_symlink()
+    """Whether this installer created *target*.
+
+    A symlink counts only when it points at our own package. Treating every
+    symlink as ours would let ``uninstall`` silently unlink one the user made
+    pointing at their own provider tree.
+    """
+    if (target / MARKER).exists():
+        return True
+    if target.is_symlink():
+        try:
+            return target.resolve() == _source_dir()
+        except OSError:
+            return False
+    return False
+
+
+def _remove(target: Path) -> None:
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    else:
+        shutil.rmtree(target)
+
+
+def _verify(target: Path) -> Optional[str]:
+    """Check the installed tree against hermes's discovery contract.
+
+    hermes classifies a directory as a memory provider by reading the first
+    8 KiB of its ``__init__.py`` and looking for ``MemoryProvider`` or
+    ``register_memory_provider`` (``plugins/memory/__init__.py``). Asserting
+    that here means a packaging gap fails loudly at install time instead of
+    surfacing later as an unexplained ``Plugin: NOT installed``, and it pins an
+    otherwise invisible upstream constraint: pushing those markers past the
+    window with a longer module docstring would break discovery silently.
+    """
+    init_file = target / "__init__.py"
+    if not init_file.is_file():
+        return f"{init_file} is missing — the installed tree is not a provider."
+    try:
+        head = init_file.read_text(encoding="utf-8", errors="replace")[:8192]
+    except OSError as err:
+        return f"could not read {init_file}: {err}"
+    if "MemoryProvider" not in head and "register_memory_provider" not in head:
+        return (
+            f"{init_file} does not identify itself as a memory provider within the "
+            "first 8KB — hermes will not discover it."
+        )
+    return None
 
 
 def _install(target: Path, *, link: bool, force: bool) -> int:
@@ -91,33 +172,32 @@ def _install(target: Path, *, link: bool, force: bool) -> int:
                 file=sys.stderr,
             )
             return 1
-        if target.is_symlink() or target.is_file():
-            target.unlink()
-        else:
-            shutil.rmtree(target)
+        _remove(target)
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if link:
-        # Dev mode: the symlink points at the installed package, so edits to the
-        # source show up in hermes without reinstalling. install.py comes along
-        # for the ride and hermes will exec it as a submodule; it is inert on
-        # import, which is why all of its logic lives under main().
+        # Dev mode: edits to the source show up in hermes without reinstalling.
+        # The linked tree is the same directory copy mode ships, so this is a
+        # faithful rehearsal rather than a different file set.
         target.symlink_to(source, target_is_directory=True)
         print(f"Linked {target} -> {source}")
     else:
-        target.mkdir(parents=True)
-        missing: List[str] = []
-        for name in PLUGIN_FILES:
-            src = source / name
-            if not src.exists():
-                missing.append(name)
-                continue
-            shutil.copy2(src, target / name)
-        if missing:
-            print(f"warning: missing from the installed package: {', '.join(missing)}", file=sys.stderr)
-        (target / MARKER).write_text("installed by hermes-elephant\n", encoding="utf-8")
-        print(f"Installed the elephant memory provider to {target}")
+        shutil.copytree(source, target, ignore=_IGNORED)
+
+    problem = _verify(target)
+    if problem:
+        print(f"Install failed: {problem}", file=sys.stderr)
+        if not link:
+            _remove(target)
+        return 1
+
+    if not link:
+        (target / MARKER).write_text(
+            json.dumps({"version": package_version(), "source": str(source)}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Installed the elephant memory provider ({package_version()}) to {target}")
 
     print(
         "\nNext:\n"
@@ -138,10 +218,7 @@ def _uninstall(target: Path) -> int:
             file=sys.stderr,
         )
         return 1
-    if target.is_symlink():
-        target.unlink()
-    else:
-        shutil.rmtree(target)
+    _remove(target)
     print(f"Removed {target}")
     return 0
 
@@ -151,15 +228,25 @@ def _status(target: Path) -> int:
     # we actually resolved — which is not $HERMES_HOME when --hermes-home is set.
     print(f"profile root: {target.parent.parent}")
     print(f"plugin dir:   {target}")
+    print(f"package:      {package_version()}")
+
     if target.is_symlink():
         print(f"installed:    yes (symlink -> {target.resolve()})")
     elif target.is_dir():
-        kind = "yes" if _is_ours(target) else "yes (not created by this installer)"
-        print(f"installed:    {kind}")
+        marker = _read_marker(target)
+        if marker is None:
+            print("installed:    yes (not created by this installer)")
+        elif marker.get("version") != package_version():
+            print(
+                f"installed:    STALE — copy is {marker.get('version')}, "
+                f"package is {package_version()}; re-run `hermes-elephant install`"
+            )
+        else:
+            print("installed:    yes")
     else:
         print("installed:    no — run `hermes-elephant install`")
-    token = os.environ.get(TOKEN_ENV)
-    print(f"token env:    {'set' if token else 'unset (run `hermes memory setup`)'}")
+
+    print(f"token env:    {'set' if os.environ.get(TOKEN_ENV) else 'unset (run `hermes memory setup`)'}")
     return 0
 
 
@@ -185,7 +272,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--hermes-home",
         type=Path,
         default=None,
-        help="target profile root (default: $HERMES_HOME, else ~/.hermes)",
+        help="target profile root (default: $HERMES_HOME, else hermes's own default)",
     )
     parser.add_argument(
         "--link",
@@ -199,12 +286,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    command = args.command
     target = plugin_dir(args.hermes_home)
 
-    if command == "install":
+    if args.command == "install":
         return _install(target, link=args.link, force=args.force)
-    if command == "uninstall":
+    if args.command == "uninstall":
         return _uninstall(target)
     return _status(target)
 
