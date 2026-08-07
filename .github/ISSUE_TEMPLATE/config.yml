@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/gigabyte22/elephant/security/advisories/new
+    about: Report privately — please never open a public issue for a security problem.
+  - name: Integrating an orchestrator
+    url: https://github.com/gigabyte22/elephant/blob/main/INTEGRATION.md
+    about: The wiring guide, including the write-tier decision tree.

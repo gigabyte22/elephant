@@ -4,6 +4,9 @@
 
 # Elephant
 
+[![CI](https://github.com/gigabyte22/elephant/actions/workflows/ci.yml/badge.svg)](https://github.com/gigabyte22/elephant/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Long-term memory for AI agents, in a single service.** Elephant gives your
 agent orchestrator durable, searchable memory backed entirely by Neo4j — its
 native vector, full-text, and temporal capabilities mean there is no separate
@@ -194,6 +197,9 @@ comfortable operating a Neo4j.
   (`KNOWLEDGE_BLOB_DIR`, default `./.knowledge-blobs`) holds raw uploaded
   documents on disk and is gitignored — keep it that way.
 
+- Found a vulnerability? Please report it privately — see
+  [SECURITY.md](SECURITY.md), not the public issue tracker.
+
 ## Development
 
 ```bash
@@ -202,6 +208,9 @@ pnpm test:integration   # full HTTP surface against a throwaway Neo4j testcontai
 pnpm lint               # biome
 pnpm typecheck
 ```
+
+Setup, house style, and the pull request checklist live in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

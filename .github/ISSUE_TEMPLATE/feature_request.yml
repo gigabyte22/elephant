@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest a capability or a change in behaviour
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that Elephant makes hard or impossible?
+        Describe the situation, not just the feature you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: >
+        The change you're proposing. If it touches the API, sketch the request
+        and response; if it touches the graph, say which labels and properties.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Including whatever you're doing today as a workaround.
+
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Are you willing to work on it?
+      options:
+        - label: I'd be up for opening a pull request
