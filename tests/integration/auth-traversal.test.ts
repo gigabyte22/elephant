@@ -100,9 +100,9 @@ describe('auth exemption cannot be escaped into an API route', () => {
     expect(res.statusCode).toBe(200);
   });
 
-  for (const escape of escapes) {
+  for (const esc of escapes) {
     for (const target of ['facts', 'recall?q=x', 'dashboard/api/overview']) {
-      const url = `/dashboard/${escape}/${target}`;
+      const url = `/dashboard/${esc}/${target}`;
 
       test(`no unauthenticated data from ${url}`, async () => {
         const res = await app.inject({ method: 'GET', url });
@@ -139,12 +139,12 @@ describe('static handler cannot serve files outside web/dist', () => {
     { path: 'CLAUDE.md', marker: 'Neo4j-backed long-term memory' },
   ];
 
-  for (const escape of escapes) {
+  for (const esc of escapes) {
     for (const { path, marker } of secrets) {
       // web/dist is two levels below the repo root, so two hops escape it.
-      const url = `/dashboard/${escape}/${escape}/${path}`;
+      const url = `/dashboard/${esc}/${esc}/${path}`;
 
-      test(`does not disclose ${path} via ${escape}`, async () => {
+      test(`does not disclose ${path} via ${esc}`, async () => {
         const res = await app.inject({ method: 'GET', url });
         expect(
           res.body.includes(marker),
