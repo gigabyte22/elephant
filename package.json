@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kainappsinc/elephant.git"
+    "url": "https://github.com/gigabyte22/elephant.git"
   },
   "description": "Neo4j-backed long-term memory service for agent orchestrators",
   "type": "module",
