@@ -41,11 +41,19 @@ docker compose up -d neo4j && pnpm migrate && pnpm serve
 
 ## Install
 
+Not on PyPI yet — install from your elephant checkout, which you need anyway
+for the service:
+
 ```bash
-pip install hermes-elephant     # into the hermes venv
-hermes-elephant install
+# into hermes's own venv, so it is already in place if entry-point
+# discovery lands upstream
+~/.hermes/hermes-agent/venv/bin/pip install ./adapters/hermes
+~/.hermes/hermes-agent/venv/bin/hermes-elephant install
 hermes memory setup             # select 'elephant'
 ```
+
+The installed provider is stdlib-only, so any Python can install the package —
+the hermes venv is just the tidiest place for it.
 
 ### Why the second step
 
@@ -70,8 +78,8 @@ hermes-elephant uninstall
 HERMES_HOME=~/.hermes-work hermes-elephant install    # a specific profile
 ```
 
-Re-run `hermes-elephant install` after `pip install -U hermes-elephant`: the
-upgrade replaces the package, but the copy already sitting in
+Re-run `hermes-elephant install` after upgrading the package: the
+upgrade replaces it, but the copy already sitting in
 `$HERMES_HOME/plugins/elephant/` keeps running the old version until you do.
 (`hermes update` does *not* require this — it rebuilds the install directory
 and leaves `$HERMES_HOME` alone.)
