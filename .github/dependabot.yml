@@ -6,11 +6,6 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
-    ignore:
-      # @types/node tracks the runtime, and package.json pins engines to node
-      # >=22. Types several majors ahead describe APIs we don't have.
-      - dependency-name: '@types/node'
-        update-types: [version-update:semver-major]
     groups:
       # One PR per week for the routine churn; majors still come in alone.
       minor-and-patch:
