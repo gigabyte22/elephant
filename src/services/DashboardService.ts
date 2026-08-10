@@ -236,6 +236,7 @@ export interface DreamRunsPayload {
     episodesFailed: number;
     factsCreated: number;
     factsSuperseded: number;
+    factsSupersedeSwept: number;
     factsPruned: number;
     factsMerged: number;
     insightsPromoted: number;
@@ -574,6 +575,7 @@ export function createDashboardService(config: DashboardServiceConfig = {}): Das
             episodesFailed: r.episodesFailed,
             factsCreated: r.factsCreated,
             factsSuperseded: r.factsSuperseded,
+            factsSupersedeSwept: r.factsSupersedeSwept,
             factsPruned: r.factsPruned,
             factsMerged: r.factsMerged,
             insightsPromoted: r.insightsPromoted,

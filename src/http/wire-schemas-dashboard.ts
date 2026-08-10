@@ -271,6 +271,9 @@ export const WireDreamRunSummarySchema = z.object({
   episodesFailed: z.number().int().nonnegative().default(0),
   factsCreated: z.number().int().nonnegative(),
   factsSuperseded: z.number().int().nonnegative(),
+  // Facts the supersede sweep checked this cycle — most find nothing, which
+  // is the healthy case; factsSuperseded counts the ones it actually closed.
+  factsSupersedeSwept: z.number().int().nonnegative().default(0),
   factsPruned: z.number().int().nonnegative(),
   factsMerged: z.number().int().nonnegative().default(0),
   insightsPromoted: z.number().int().nonnegative(),

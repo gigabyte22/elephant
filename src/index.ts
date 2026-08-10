@@ -120,7 +120,11 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     blobStore,
     vault,
     extraction,
-    ingestion: createMemoryIngestionService({ llm, embedder, config: sharedConfig }),
+    ingestion: createMemoryIngestionService({
+      llm,
+      embedder,
+      config: { ...sharedConfig, supersedeMode: env.INGEST_SUPERSEDE_MODE },
+    }),
     retrieval: createRetrievalService({
       pipeline: overrides.retrievalPipeline ?? buildDefaultRetrievalPipeline({ embedder, llm }),
       config: buildRetrievalConfigFromEnv(env),
@@ -145,6 +149,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         refreshProjection: env.RETRIEVAL_ENABLE_PPR,
         dedupThreshold: env.DREAM_DEDUP_THRESHOLD,
         supersedeVectorThreshold: env.DREAM_SUPERSEDE_VECTOR_THRESHOLD,
+        supersedeSweepMaxFacts: env.DREAM_SUPERSEDE_SWEEP_MAX_FACTS,
         promoteInsightImportance: env.DREAM_PROMOTE_INSIGHT_IMPORTANCE,
         insightDedupThreshold: env.DREAM_INSIGHT_DEDUP_THRESHOLD,
         insightRetireBatchLimit: env.DREAM_INSIGHT_RETIRE_BATCH_LIMIT,

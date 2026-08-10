@@ -279,6 +279,7 @@ function DreamRunBody({ run }: { run: DreamRunSummary }) {
         rows={[
           ['created', run.factsCreated],
           ['superseded', run.factsSuperseded],
+          ['supersede-checked', run.factsSupersedeSwept],
           ['merged', run.factsMerged],
           ['pruned', run.factsPruned],
           ['insights promoted', run.insightsPromoted],

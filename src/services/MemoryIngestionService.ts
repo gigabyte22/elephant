@@ -52,6 +52,16 @@ interface Deps {
     summaryThresholdTokens: number;
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
+    /**
+     * Where the contradiction check for an explicitly-written fact runs.
+     *
+     * 'dream' (default) leaves the fact unchecked and lets the dreamer's
+     * supersede sweep claim it, so POST /facts returns without an LLM call in
+     * the request. 'inline' restores the old behaviour for a deployment that
+     * wants a contradiction closed the instant it is written and can afford
+     * the latency.
+     */
+    supersedeMode: 'dream' | 'inline';
   };
 }
 
@@ -330,6 +340,9 @@ export function createMemoryIngestionService(deps: Deps) {
       userId: input.userId,
       agentId: input.agentId,
       sessionId: input.sessionId,
+      // Inline mode checks below, so the fact is already spoken for; 'dream'
+      // leaves it null, which is exactly what the sweep selects on.
+      supersedeCheckedAt: config.supersedeMode === 'inline' ? now : null,
     };
 
     const created = await write(async (tx) => {
@@ -349,7 +362,11 @@ export function createMemoryIngestionService(deps: Deps) {
       });
       return c;
     });
-    await runSupersedeCheck(created);
+    // In 'dream' mode the fact is left with supersedeCheckedAt unset and the
+    // dreamer's sweep runs the same check off the request path. This call was
+    // ungated: every POST /facts paid a vector search plus a blocking LLM
+    // round-trip, on the same provider the dream cycle is using.
+    if (config.supersedeMode === 'inline') await runSupersedeCheck(created);
     return created;
   }
 

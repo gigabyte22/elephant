@@ -174,6 +174,14 @@ const EnvSchema = z
     // the previously hardcoded constants in DreamingService.
     DREAM_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
     DREAM_SUPERSEDE_VECTOR_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
+    // Where the contradiction check for a fact written through POST /facts
+    // runs. 'dream' keeps the LLM off the request path and lets the dreamer's
+    // sweep do it; 'inline' is the old behaviour, for a caller that needs the
+    // supersede closed before the write returns.
+    INGEST_SUPERSEDE_MODE: z.enum(['dream', 'inline']).default('dream'),
+    // Facts the sweep claims per cycle. Bounded because each one costs a vector
+    // search and an LLM call, and the cycle has a deadline to respect.
+    DREAM_SUPERSEDE_SWEEP_MAX_FACTS: z.coerce.number().int().nonnegative().default(50),
     DREAM_PROMOTE_INSIGHT_IMPORTANCE: z.coerce.number().min(0).max(1).default(0.85),
     // Insight hygiene: cosine above which a new promotion corroborates an
     // existing insight instead of cloning it, and the per-cycle cap on the

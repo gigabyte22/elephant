@@ -142,6 +142,12 @@ export const FactSchema = z
     // keeps it backwards-compatible with facts written before the columns existed.
     referenceCount: z.number().int().nonnegative().optional(),
     lastReferencedAt: z.date().nullable().optional(),
+    // When this fact was checked for contradicting an existing one. Null on a
+    // fact written through POST /facts, which no longer waits on that LLM call
+    // — the dreamer's supersede sweep claims those. Dream-created facts are
+    // checked as they are extracted, so they are stamped at creation. Absent on
+    // facts written before this existed, which the sweep then picks up once.
+    supersedeCheckedAt: z.date().nullable().optional(),
     // Optional origin scope for direct writes with no source episode
     // (precedent: IntentionSchema). Facts extracted from episodes derive
     // origin from the episode instead; these stay unset there.
@@ -468,6 +474,10 @@ export const DreamRunSchema = z.object({
   episodesFailed: z.number().int().nonnegative().default(0),
   factsCreated: z.number().int().nonnegative().default(0),
   factsSuperseded: z.number().int().nonnegative().default(0),
+  // Facts written through POST /facts that this cycle ran the contradiction
+  // check for. Distinct from factsSuperseded, which counts the facts that check
+  // actually closed — most sweeps find nothing, and that is the healthy case.
+  factsSupersedeSwept: z.number().int().nonnegative().default(0),
   factsPruned: z.number().int().nonnegative().default(0),
   factsMerged: z.number().int().nonnegative().default(0),
   insightsPromoted: z.number().int().nonnegative().default(0),
