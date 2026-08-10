@@ -9,6 +9,7 @@ import type {
   AuditEvent,
   AuditEventKind,
   Chunk,
+  ChunkDerivation,
   Entity,
   Fact,
   Insight,
@@ -143,6 +144,14 @@ export interface WireKnowledgeChunk extends WireScope {
   position: number;
   text: string;
   createdAt: string;
+  /**
+   * 'model' when this passage is a model's rendering of non-text bytes — OCR of
+   * a screenshot, a transcription, a description of a photo — rather than the
+   * source's own words. Consumers that quote recalled text should say so:
+   * "a screenshot described as showing revenue down 12%" is a different claim
+   * from "revenue is down 12%".
+   */
+  derivation: ChunkDerivation;
 }
 
 export interface WireProcedure extends WireScope {
@@ -363,6 +372,7 @@ export function toWireKnowledgeChunk(c: KnowledgeChunk): WireKnowledgeChunk {
     position: c.position,
     text: c.text,
     createdAt: c.createdAt.toISOString(),
+    derivation: c.derivation,
     ...pickScope(c),
   };
 }

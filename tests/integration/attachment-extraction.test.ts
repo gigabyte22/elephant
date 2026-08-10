@@ -71,7 +71,10 @@ async function attach(documentId: string, mimeType = 'image/jpeg'): Promise<stri
 beforeAll(async () => {
   blobStore = createFakeBlobStore();
   extraction = createFakeExtractionService({
-    'image/': { status: 'done', text: OCR_TEXT, detail: 'fake-vision' },
+    // derivation 'model' also marks this as a provider-backed extractor in the
+    // fake, so uploads defer it exactly as vision does.
+    'image/': { status: 'done', text: OCR_TEXT, detail: 'fake-vision', derivation: 'model' },
+    'text/': { status: 'done', text: 'Verbatim text needs no provider.' },
   });
   container = await bootstrap({
     llm: createFakeLLMAdapter({}),
@@ -97,16 +100,15 @@ describe('reextractAttachment', () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
 
-    const before = await chunkCount(attachmentId);
+    // The upload defers a provider-backed extraction, so this is the run that
+    // first produces chunks.
+    expect(await chunkCount(attachmentId)).toBe(0);
     const updated = await container.knowledge.reextractAttachment(attachmentId);
 
     expect(updated.extractionStatus).toBe('done');
     expect(updated.extractedChars).toBe(OCR_TEXT.length);
     expect(updated.detail).toBe('fake-vision');
     expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
-    // Sanity: the first extraction already produced these, so re-running is
-    // replacing a populated set, not filling an empty one.
-    expect(before).toBeGreaterThan(0);
   });
 
   test('replaces rather than accumulates chunks when run repeatedly', async () => {
@@ -153,6 +155,7 @@ describe('reextractAttachment', () => {
   test('shrinking output drops the chunks the longer text had created', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
     const long = await chunkCount(attachmentId);
 
     // A second reading of the same bytes — a different model, or a prompt
@@ -170,6 +173,86 @@ describe('reextractAttachment', () => {
 
     expect(updated.extractedChars).toBe(REVISED_TEXT.length);
     expect(await chunkCount(attachmentId)).toBeLessThan(long);
+  });
+});
+
+describe('the upload path', () => {
+  test('parks a slow extraction as pending instead of running it in the request', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    // The upload passes allowSlow: false, and an extractor that needs a model
+    // answers 'pending' rather than making the request wait minutes for a
+    // provider — the client aborts at 30s and its retry creates a second
+    // attachment. Which extractions are slow is the extractor's call, not a
+    // MIME list the composition root has to keep in sync.
+    const parked = await container.knowledge.getAttachment(attachmentId);
+    expect(parked?.extractionStatus).toBe('pending');
+    expect(await chunkCount(attachmentId)).toBe(0);
+
+    // ...and the worker's re-run, which allows the slow path, indexes it.
+    await container.knowledge.reextractAttachment(attachmentId);
+    const done = await container.knowledge.getAttachment(attachmentId);
+    expect(done?.extractionStatus).toBe('done');
+    expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
+  });
+
+  test('extracts text attachments inline — they cost milliseconds', async () => {
+    const documentId = await makeDocument();
+    const att = await container.knowledge.addAttachment(documentId, {
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      dataBase64: Buffer.from('Verbatim text needs no provider.').toString('base64'),
+    });
+
+    expect(att.extractionStatus).toBe('done');
+    expect(await chunkCount(att.id)).toBeGreaterThan(0);
+  });
+});
+
+describe('provenance and reassembly', () => {
+  test('marks attachment chunks as model-derived, leaving body chunks verbatim', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
+
+    const derivations = await read(async (tx) => {
+      const r = await tx.run(
+        `MATCH (c:KnowledgeChunk {documentId: $documentId})
+         RETURN c.attachmentId IS NOT NULL AS fromAttachment,
+                collect(DISTINCT c.derivation) AS derivations`,
+        { documentId },
+      );
+      return Object.fromEntries(
+        r.records.map((rec) => [
+          rec.get('fromAttachment') ? 'attachment' : 'body',
+          rec.get('derivations') as string[],
+        ]),
+      );
+    });
+
+    // OCR is the model's reading of an image, not the image's own words. A
+    // consumer quoting recalled text needs to be able to tell the difference.
+    expect(derivations.attachment).toEqual(['model']);
+    expect(derivations.body).toEqual(['verbatim']);
+    expect(attachmentId).toBeTruthy();
+  });
+
+  test('reassembles attachment text without repeating the chunk overlap', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
+
+    const loaded = await container.knowledge.getWithAttachments(documentId);
+    const text = loaded?.attachmentTexts[attachmentId] ?? '';
+
+    // Chunks are written with CHUNK_OVERLAP_TOKENS of their predecessor
+    // prepended, so joining them naively repeated a stretch of every seam.
+    // Each source line must appear exactly once.
+    expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
+    for (let i = 0; i < 40; i++) {
+      expect(text.match(new RegExp(`Line ${i}:`, 'g')) ?? []).toHaveLength(1);
+    }
   });
 });
 
@@ -194,19 +277,65 @@ describe('the worker sequence', () => {
     expect(await container.knowledge.listPendingAttachments(1)).toEqual([]);
   });
 
-  test('a structurally failed attachment is recorded, not left to spin', async () => {
+  test('a structural failure backs the attachment off instead of spinning on it', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
 
     // What the worker does when extraction throws for a reason the extractors
     // cannot map themselves — a missing blob, an embedder outage. Leaving it
-    // 'pending' would re-claim the same row every tick and starve the queue.
-    await container.knowledge.markAttachmentFailed(attachmentId, 'blob 123 not found');
+    // 'pending' and due would re-claim the same row every tick and starve the
+    // queue; failing it outright would make a five-minute outage permanent.
+    const first = await container.knowledge.markAttachmentFailed(
+      attachmentId,
+      'blob 123 not found',
+    );
 
-    expect(await container.knowledge.listPendingAttachments(1)).toEqual([]);
+    expect(first).toEqual({ attempts: 1, deadLettered: false });
+    const att = await container.knowledge.getAttachment(attachmentId);
+    expect(att?.extractionStatus).toBe('pending');
+    expect(att?.detail).toBe('blob 123 not found');
+    // Still owed, but not due — so it is out of the worker's way meanwhile.
+    expect(await container.knowledge.listPendingAttachments(5)).toEqual([]);
+    expect(await container.knowledge.extractionQueueDepth()).toEqual({
+      pending: 1,
+      deadLettered: 0,
+    });
+  });
+
+  test('dead-letters an attachment once its attempts are spent', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    const attempts = container.env.KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS;
+    const outcomes = [];
+    for (let i = 0; i < attempts; i++) {
+      outcomes.push(await container.knowledge.markAttachmentFailed(attachmentId, 'provider down'));
+    }
+
+    expect(outcomes.map((o) => o.deadLettered)).toEqual([
+      ...Array.from({ length: attempts - 1 }, () => false),
+      true,
+    ]);
     const att = await container.knowledge.getAttachment(attachmentId);
     expect(att?.extractionStatus).toBe('failed');
-    expect(att?.detail).toBe('blob 123 not found');
+    // 'failed' is the terminal state the backfill script exists to recover.
+    expect(await container.knowledge.extractionQueueDepth()).toEqual({
+      pending: 0,
+      deadLettered: 1,
+    });
+  });
+
+  test('a successful extraction clears the retry state', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+    await container.knowledge.markAttachmentFailed(attachmentId, 'transient');
+
+    await container.knowledge.reextractAttachment(attachmentId);
+
+    const att = await container.knowledge.getAttachment(attachmentId);
+    expect(att?.extractionStatus).toBe('done');
+    expect(att?.extractionAttempts).toBe(0);
+    expect(att?.extractionNextAttemptAt).toBeNull();
   });
 
   test('a re-extraction reads the stored blob instead of re-uploading', async () => {

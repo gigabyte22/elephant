@@ -7,6 +7,11 @@ export interface ChunkPiece {
   text: string;
   tokenCount: number;
   position: number;
+  /** Leading characters of `text` carried over from the previous piece. Zero on
+   *  the first piece and whenever overlap is off. Recorded because overlap is
+   *  invisible once a chunk is stored: a caller stitching chunks back into the
+   *  original document has no other way to know how much to drop. */
+  overlapChars: number;
 }
 
 export interface ChunkerOptions {
@@ -97,37 +102,28 @@ export function createChunker(deps: { countTokens: CountTokens }): Chunker {
     }
     if (buf !== '') packed.push(buf);
 
-    if (opts.overlapTokens <= 0) {
-      return withPositions(packed, deps.countTokens);
-    }
-
     // Add overlap: prepend the tail of chunk N-1 to chunk N. Because we
     // packed to (maxTokens - overlapTokens), the final chunk fits under
-    // maxTokens.
-    const overlapped: string[] = [];
+    // maxTokens. With overlap off, takeTail returns '' and every piece
+    // reports an overlap of zero — the same path, no special case.
+    const out: ChunkPiece[] = [];
     for (let i = 0; i < packed.length; i++) {
-      if (i === 0) {
-        overlapped.push(packed[i]!);
-        continue;
-      }
-      const prev = packed[i - 1]!;
-      const overlap = await takeTail(prev, opts.overlapTokens, deps.countTokens);
-      overlapped.push(overlap ? `${overlap}\n\n${packed[i]!}` : packed[i]!);
+      const prev = packed[i - 1];
+      const overlap =
+        prev === undefined ? '' : await takeTail(prev, opts.overlapTokens, deps.countTokens);
+      const prefix = overlap === '' ? '' : `${overlap}\n\n`;
+      const pieceText = `${prefix}${packed[i]!}`;
+      out.push({
+        text: pieceText,
+        tokenCount: await deps.countTokens(pieceText),
+        position: i,
+        overlapChars: prefix.length,
+      });
     }
-
-    return withPositions(overlapped, deps.countTokens);
+    return out;
   }
 
   return { chunk };
-}
-
-async function withPositions(texts: string[], count: CountTokens): Promise<ChunkPiece[]> {
-  const out: ChunkPiece[] = [];
-  for (let i = 0; i < texts.length; i++) {
-    const t = texts[i]!;
-    out.push({ text: t, tokenCount: await count(t), position: i });
-  }
-  return out;
 }
 
 // Returns the suffix of `text` that is approximately `targetTokens` tokens long,

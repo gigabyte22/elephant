@@ -30,9 +30,10 @@ export interface ChunkRepositoryConfig<T extends BaseChunkRow> {
   vectorIndex: string;
   fulltextIndex: string;
   mapNode: (node: Record<string, unknown>) => T;
-  // Extra per-chunk SET fragment + params (e.g. 'ch.attachmentId = c.attachmentId').
+  // Extra per-chunk SET fragments + params (e.g. 'ch.attachmentId = c.attachmentId').
+  // One fragment per property; the factory joins and indents them.
   extraChunkProps?: {
-    set: string;
+    set: string[];
     params: (chunk: T) => Record<string, unknown>;
   };
   // When true, search results are joined to the parent and filtered on its
@@ -59,7 +60,11 @@ export function createChunkRepository<T extends BaseChunkRow>(
   cfg: ChunkRepositoryConfig<T>,
 ): ChunkRepositoryCore<T> {
   const { label, kind, parentLabel, parentEdge, parentIdProp, vectorIndex, fulltextIndex } = cfg;
-  const extraSet = cfg.extraChunkProps ? `${cfg.extraChunkProps.set},\n           ` : '';
+  // Each fragment becomes its own line of the SET clause, aligned with the ones
+  // the template below writes literally.
+  const extraSet = (cfg.extraChunkProps?.set ?? [])
+    .map((fragment) => `${fragment},\n             `)
+    .join('');
   // MATCH-after-WHERE continues the Cypher pipeline: rows whose parent is
   // expired (or missing) drop out before RETURN.
   const livenessGuard = cfg.parentLivenessGuard

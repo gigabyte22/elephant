@@ -33,6 +33,13 @@ export function registerHealthRoute(app: App, container: Container): void {
               // retried. Non-zero means data was extracted from nothing.
               deadLetteredEpisodes: z.number().nullable(),
             }),
+            // Attachment text extraction, which has the same shape of queue:
+            // `pending` is owed work, `deadLettered` has spent its retries and
+            // needs scripts/backfill-attachment-extraction.ts.
+            extraction: z.object({
+              pending: z.number().nullable(),
+              deadLettered: z.number().nullable(),
+            }),
           }),
         }),
       },
@@ -42,6 +49,7 @@ export function registerHealthRoute(app: App, container: Container): void {
       let schemaVectorDim: number | null = null;
       let backlog: number | null = null;
       let deadLettered: number | null = null;
+      let extraction: { pending: number; deadLettered: number } | null = null;
       try {
         await verifyConnectivity();
         neo4jOk = true;
@@ -58,6 +66,7 @@ export function registerHealthRoute(app: App, container: Container): void {
         });
         backlog = await container.dreaming.backlogEstimate().catch(() => null);
         deadLettered = await container.dreaming.deadLetteredEstimate().catch(() => null);
+        extraction = await container.knowledge.extractionQueueDepth().catch(() => null);
       } catch {
         neo4jOk = false;
       }
@@ -87,6 +96,10 @@ export function registerHealthRoute(app: App, container: Container): void {
             runningJobId,
             backlogEstimate: backlog,
             deadLetteredEpisodes: deadLettered,
+          },
+          extraction: {
+            pending: extraction?.pending ?? null,
+            deadLettered: extraction?.deadLettered ?? null,
           },
         },
       };

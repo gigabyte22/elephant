@@ -280,6 +280,9 @@ export type KnowledgeDocument = z.infer<typeof KnowledgeDocumentSchema>;
 // `attachmentId` is set for chunks derived from an attachment's extracted text
 // so they can be removed when that attachment is deleted.
 
+export const ChunkDerivationSchema = z.enum(['verbatim', 'model']);
+export type ChunkDerivation = z.infer<typeof ChunkDerivationSchema>;
+
 export const KnowledgeChunkSchema = z
   .object({
     id: z.string().uuid(),
@@ -290,6 +293,14 @@ export const KnowledgeChunkSchema = z
     tokenCount: z.number().int().nonnegative(),
     embedding: EmbeddingSchema,
     createdAt: z.date(),
+    // How this chunk's text came to exist. 'model' means a model produced it
+    // from non-text bytes (OCR, transcription, an image description) rather
+    // than it being the source's own words. Chunks written before this existed
+    // are verbatim by default, which is what body text always was.
+    derivation: ChunkDerivationSchema.default('verbatim'),
+    // Leading characters copied from the previous chunk, so the set can be
+    // stitched back into the original text without repeating each boundary.
+    overlapChars: z.number().int().nonnegative().default(0),
   })
   .merge(ScopeSchema);
 export type KnowledgeChunk = z.infer<typeof KnowledgeChunkSchema>;
@@ -302,6 +313,7 @@ export const ExtractionStatusSchema = z.enum([
   'done',
   'pending',
   'empty',
+  'truncated',
   'unsupported',
   'skipped',
   'failed',
@@ -321,6 +333,12 @@ export const KnowledgeAttachmentSchema = z
     extractedChars: z.number().int().nonnegative().default(0),
     detail: z.string().optional(),
     createdAt: z.date(),
+    // Extraction retry state, mirroring Episode's dream queue. A provider
+    // outage is transient, so a structural failure earns a bounded number of
+    // further attempts on a backoff before it is dead-lettered as 'failed'.
+    // Absent on attachments written before this existed, where 0 is right.
+    extractionAttempts: z.number().int().nonnegative().optional(),
+    extractionNextAttemptAt: z.date().nullable().optional(),
   })
   .merge(ScopeSchema);
 export type KnowledgeAttachment = z.infer<typeof KnowledgeAttachmentSchema>;

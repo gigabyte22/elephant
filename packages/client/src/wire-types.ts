@@ -181,6 +181,12 @@ export interface WireHealth {
     // do not report it.
     deadLetteredEpisodes?: number | null;
   };
+  // Attachment text extraction queue. Optional: older servers do not report it.
+  extraction?: {
+    pending: number | null;
+    /** Spent their retries; recoverable only via the backfill script. */
+    deadLettered: number | null;
+  };
 }
 
 // ── Recall ──────────────────────────────────────────────────────────────────
@@ -253,7 +259,17 @@ export interface RecallResult {
   chunks?: Array<WireChunkBase & { episodeId: string; score: number }>;
   preferences?: Array<WirePreference & { score: number }>;
   insights?: Array<WireInsight & { score: number }>;
-  knowledgeChunks?: Array<WireScope & WireChunkBase & { documentId: string; score: number }>;
+  knowledgeChunks?: Array<
+    WireScope &
+      WireChunkBase & {
+        documentId: string;
+        score: number;
+        /** 'model' when a model produced this text from non-text bytes (OCR, a
+         *  transcription, an image description) rather than it being the
+         *  source's own words. Quote it accordingly. */
+        derivation: 'verbatim' | 'model';
+      }
+  >;
   procedures?: Array<WireProcedure & { score: number }>;
   research?: Array<WireResearch & { score: number }>;
   researchChunks?: Array<WireScope & WireChunkBase & { researchId: string; score: number }>;

@@ -93,8 +93,12 @@ const EnvSchema = z
     KNOWLEDGE_BLOB_DIR: z.string().default('./.knowledge-blobs'),
     KNOWLEDGE_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(26_214_400), // 25 MiB
     // Vision/transcription providers for extracting searchable text from
-    // image/audio attachments. 'auto' picks an available provider by API key;
-    // 'none' stores+serves the blob but skips text extraction.
+    // image/audio attachments. 'auto' enables the capability only when
+    // dedicated KNOWLEDGE_VISION_*/KNOWLEDGE_TRANSCRIBE_* credentials say where
+    // to send the bytes; naming a provider opts into the shared OPENAI_* pair or
+    // ANTHROPIC_API_KEY instead. 'none' stores+serves the blob but skips
+    // extraction. Sending a user's attachments to a third party should be a
+    // decision, not a side effect of having configured an LLM.
     KNOWLEDGE_VISION_PROVIDER: z.enum(['auto', 'none', 'openai', 'anthropic']).default('auto'),
     KNOWLEDGE_VISION_MODEL: z.string().optional(),
     KNOWLEDGE_TRANSCRIBE_PROVIDER: z.enum(['auto', 'none', 'openai']).default('auto'),
@@ -119,13 +123,33 @@ const EnvSchema = z
     // minutes; the backfill script raises this since it runs off the request path.
     KNOWLEDGE_VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
     KNOWLEDGE_TRANSCRIBE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+    // What the transcription endpoint will accept. OpenAI's Whisper caps at
+    // 25 MB; a local faster-whisper may allow more. Oversized audio is refused
+    // up front rather than spending the timeout to earn a 413.
+    KNOWLEDGE_TRANSCRIBE_MAX_BYTES: z.coerce.number().int().positive().default(26_214_400),
     // Images are downscaled before OCR: vision token cost is proportional to
     // pixels, and a 12 MP phone photo is ~10x slower than the 1024px version
     // that transcribes just as accurately.
     KNOWLEDGE_VISION_MAX_DIM: z.coerce.number().int().positive().default(1024),
     KNOWLEDGE_VISION_JPEG_QUALITY: z.coerce.number().int().min(1).max(100).default(80),
+    // Output ceiling for one OCR call. A dense screenshot runs to a few thousand
+    // tokens; when the model hits this the attachment is recorded 'truncated'
+    // rather than passed off as a complete reading.
+    KNOWLEDGE_VISION_MAX_TOKENS: z.coerce.number().int().positive().default(4096),
+    // Text attachments are the one family extracted inline (they take
+    // milliseconds), so the request path is only as bounded as this cap.
+    KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES: z.coerce.number().int().positive().default(2_097_152), // 2 MiB
+    // A PDF with no text layer is a scan: its pages are rendered and OCR'd,
+    // one model call each, so the page count is the cost. Beyond this the
+    // attachment is recorded 'truncated' with what was read.
+    KNOWLEDGE_PDF_OCR_MAX_PAGES: z.coerce.number().int().positive().default(10),
     // How often the async worker drains 'pending' attachments.
     KNOWLEDGE_EXTRACTION_CRON: z.string().default('*/2 * * * *'),
+    // A structural failure (provider outage, missing blob) retries on an
+    // exponential backoff rather than dead-lettering on the first error, which
+    // used to make a brief outage permanent until someone ran the backfill.
+    KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(4),
+    KNOWLEDGE_EXTRACTION_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(300_000),
 
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),

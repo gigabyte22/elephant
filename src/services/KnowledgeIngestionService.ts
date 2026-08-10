@@ -14,6 +14,7 @@ import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, notFound, payloadTooLarge } from '../http/errors.ts';
 import type {
+  ChunkDerivation,
   KnowledgeAttachment,
   KnowledgeChunk,
   KnowledgeDocument,
@@ -23,8 +24,9 @@ import { KnowledgeAttachmentRepository } from '../repositories/KnowledgeAttachme
 import { KnowledgeChunkRepository } from '../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../repositories/KnowledgeDocumentRepository.ts';
 import { newId } from '../utils/ids.ts';
+import { nextRetryAt } from '../utils/retry.ts';
 import { AuditService } from './AuditService.ts';
-import { type Chunker, createChunker } from './Chunker.ts';
+import { type Chunker, type ChunkPiece, createChunker } from './Chunker.ts';
 
 interface Deps {
   llm: LLMAdapter;
@@ -40,10 +42,9 @@ interface Deps {
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
     maxAttachmentBytes?: number;
-    /** Returns true for MIME types whose extraction should be queued for the
-     *  async worker instead of run inline. Injected so the service stays
-     *  independent of provider configuration. */
-    deferExtraction?: (mimeType: string) => boolean;
+    /** Attempts an attachment's extraction gets before it is dead-lettered. */
+    maxExtractionAttempts: number;
+    extractionRetryBackoffBaseMs: number;
   };
 }
 
@@ -77,6 +78,35 @@ export interface UpdateKnowledgeDocumentInput {
   expiresAt?: Date | null;
   actor?: string;
   reason?: string;
+}
+
+// Assemble chunk rows from the chunker's pieces and their embeddings. Body text
+// and attachment text differ only in `attachmentId` and `derivation`, so they
+// share this rather than three near-copies drifting apart a field at a time.
+function buildChunks(
+  pieces: ChunkPiece[],
+  vectors: number[][],
+  opts: {
+    documentId: string;
+    scope: Scope;
+    at: Date;
+    attachmentId?: string;
+    derivation?: ChunkDerivation;
+  },
+): KnowledgeChunk[] {
+  return pieces.map((p, i) => ({
+    id: newId(),
+    documentId: opts.documentId,
+    attachmentId: opts.attachmentId,
+    position: p.position,
+    text: p.text,
+    tokenCount: p.tokenCount,
+    embedding: vectors[i] ?? [],
+    createdAt: opts.at,
+    derivation: opts.derivation ?? 'verbatim',
+    overlapChars: p.overlapChars,
+    ...opts.scope,
+  }));
 }
 
 export function createKnowledgeIngestionService(deps: Deps) {
@@ -147,16 +177,11 @@ export function createKnowledgeIngestionService(deps: Deps) {
       ...(input.scope ?? {}),
     };
 
-    const chunks: KnowledgeChunk[] = pieces.map((p, i) => ({
-      id: newId(),
+    const chunks = buildChunks(pieces, chunkVecs, {
       documentId,
-      position: p.position,
-      text: p.text,
-      tokenCount: p.tokenCount,
-      embedding: chunkVecs[i] ?? [],
-      createdAt: now,
-      ...(input.scope ?? {}),
-    }));
+      scope: input.scope ?? {},
+      at: now,
+    });
 
     const created = await write(async (tx) => {
       const doc = await KnowledgeDocumentRepository.create(tx, document);
@@ -212,16 +237,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
       embedding = vectors[0] ?? [];
       const chunkVecs = vectors.slice(1);
       contentHash = createHash('sha256').update(input.content).digest('hex');
-      chunks = pieces.map((p, i) => ({
-        id: newId(),
-        documentId: id,
-        position: p.position,
-        text: p.text,
-        tokenCount: p.tokenCount,
-        embedding: chunkVecs[i] ?? [],
-        createdAt: now,
-        ...scope,
-      }));
+      chunks = buildChunks(pieces, chunkVecs, { documentId: id, scope, at: now });
     } else if (input.summary !== undefined) {
       // Summary-only change → re-embed the summary so recall stays consistent.
       await assertSummaryWithinLimit(input.summary);
@@ -272,7 +288,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
   async function chunkText(
     text: string,
     scope: Scope,
-    opts: { documentId: string; attachmentId?: string },
+    opts: { documentId: string; attachmentId?: string; derivation?: ChunkDerivation },
   ): Promise<KnowledgeChunk[]> {
     const pieces = await chunker.chunk(text, {
       maxTokens: chunkTarget,
@@ -280,18 +296,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     });
     if (pieces.length === 0) return [];
     const vectors = await embedder.embedBatch(pieces.map((p) => p.text));
-    const now = new Date();
-    return pieces.map((p, i) => ({
-      id: newId(),
-      documentId: opts.documentId,
-      attachmentId: opts.attachmentId,
-      position: p.position,
-      text: p.text,
-      tokenCount: p.tokenCount,
-      embedding: vectors[i] ?? [],
-      createdAt: now,
-      ...scope,
-    }));
+    return buildChunks(pieces, vectors, { ...opts, scope, at: new Date() });
   }
 
   function requireAttachmentDeps(): { blobStore: BlobStore; extraction: ExtractionService } {
@@ -315,13 +320,18 @@ export function createKnowledgeIngestionService(deps: Deps) {
       // extraction is never stored whole — only chunked + embedded — so the
       // full document text lives only here. listByDocument already returns
       // chunks in position order, so appending per attachment preserves it.
+      //
+      // Each chunk after the first carries CHUNK_OVERLAP_TOKENS of the previous
+      // one as a prefix, so dropping `overlapChars` is what keeps this from
+      // repeating ~50 tokens at every boundary.
       const attachmentTexts: Record<string, string> = {};
       if (attachments.length > 0) {
         const chunks = await KnowledgeChunkRepository.listByDocument(tx, id);
         for (const c of chunks) {
           if (!c.attachmentId) continue; // skip body-derived chunks
           const existing = attachmentTexts[c.attachmentId];
-          attachmentTexts[c.attachmentId] = existing ? `${existing}\n${c.text}` : c.text;
+          attachmentTexts[c.attachmentId] =
+            existing === undefined ? c.text : `${existing}\n${c.text.slice(c.overlapChars)}`;
         }
       }
       return { document, attachments, attachmentTexts };
@@ -346,23 +356,26 @@ export function createKnowledgeIngestionService(deps: Deps) {
 
     const scope: Scope = { projectId: existing.projectId, userId: existing.userId };
     const stored = await blobStore.put(data);
-    // Vision and transcription calls take seconds to minutes — well past the 30s
-    // timeout dobby's client puts on this request, whose retries would each
-    // create another attachment. Queue those for the worker and return now; text
-    // and PDF are milliseconds and stay inline.
-    const deferred = config.deferExtraction?.(input.mimeType) ?? false;
-    const extracted: ExtractionResult = deferred
-      ? { status: 'pending', text: '', detail: 'queued for extraction' }
-      : await extraction.extract({
-          data,
-          mimeType: input.mimeType,
-          filename: input.filename,
-        });
+    // allowSlow: false — an extractor that needs seconds to minutes (vision,
+    // transcription, OCR of a scanned PDF) returns 'pending' instead of running
+    // here, because this request is under a client timeout whose retries would
+    // each create another attachment. The worker re-runs those with allowSlow.
+    // Text and a PDF with a text layer answer in milliseconds and stay inline.
+    const extracted: ExtractionResult = await extraction.extract({
+      data,
+      mimeType: input.mimeType,
+      filename: input.filename,
+      allowSlow: false,
+    });
 
     const attachmentId = newId();
     const chunks =
       extracted.text.length > 0
-        ? await chunkText(extracted.text, scope, { documentId, attachmentId })
+        ? await chunkText(extracted.text, scope, {
+            documentId,
+            attachmentId,
+            derivation: extracted.derivation,
+          })
         : [];
 
     const attachment: KnowledgeAttachment = {
@@ -425,10 +438,13 @@ export function createKnowledgeIngestionService(deps: Deps) {
     const stream = await blobStore.getStream(attachment.blobId);
     const data = await buffer(stream);
 
+    // The worker and the backfill are the slow path: nothing is waiting on this
+    // call, so an extractor that needs a model gets to make it here.
     const extracted = await extraction.extract({
       data,
       mimeType: attachment.mimeType,
       filename: attachment.filename,
+      allowSlow: true,
     });
 
     const scope: Scope = { projectId: attachment.projectId, userId: attachment.userId };
@@ -437,6 +453,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
         ? await chunkText(extracted.text, scope, {
             documentId: attachment.documentId,
             attachmentId,
+            derivation: extracted.derivation,
           })
         : [];
 
@@ -475,21 +492,58 @@ export function createKnowledgeIngestionService(deps: Deps) {
     });
   }
 
-  /** Oldest attachments still awaiting extraction. Drives the async worker. */
+  /** Oldest pending attachments that are due a try. Drives the async worker. */
   async function listPendingAttachments(limit: number): Promise<KnowledgeAttachment[]> {
-    return read((tx) => KnowledgeAttachmentRepository.listByStatus(tx, ['pending'], limit));
-  }
-
-  /** Record a structural failure (missing blob, embedder down) so the worker
-   *  stops re-picking the same row every tick. Recoverable via the backfill. */
-  async function markAttachmentFailed(attachmentId: string, detail: string): Promise<void> {
-    await write((tx) =>
-      KnowledgeAttachmentRepository.update(tx, attachmentId, {
-        extractionStatus: 'failed',
-        extractedChars: 0,
-        detail,
+    return read((tx) =>
+      KnowledgeAttachmentRepository.listDueForExtraction(tx, {
+        limit,
+        maxAttempts: config.maxExtractionAttempts,
       }),
     );
+  }
+
+  /**
+   * Record a structural failure — a missing blob, an embedder outage — that the
+   * extractors could not map to a status themselves.
+   *
+   * The attachment goes back on the queue behind an exponential backoff and is
+   * only dead-lettered to 'failed' once its attempts are spent. It used to fail
+   * terminally on the first error, which made a five-minute provider outage
+   * permanent: recovery needed someone to notice and run the backfill by hand.
+   * Returns the resulting status so the worker can log which happened.
+   */
+  async function markAttachmentFailed(
+    attachmentId: string,
+    detail: string,
+  ): Promise<{ attempts: number; deadLettered: boolean }> {
+    const attachment = await read((tx) => KnowledgeAttachmentRepository.getById(tx, attachmentId));
+    const priorAttempts = attachment?.extractionAttempts ?? 0;
+    const nextAttemptAt = nextRetryAt(priorAttempts, {
+      maxAttempts: config.maxExtractionAttempts,
+      baseMs: config.extractionRetryBackoffBaseMs,
+    });
+    const attempts = await write((tx) =>
+      KnowledgeAttachmentRepository.recordExtractionFailure(tx, {
+        id: attachmentId,
+        nextAttemptAt,
+        error: detail,
+      }),
+    );
+    return { attempts, deadLettered: nextAttemptAt === null };
+  }
+
+  /** Extraction backlog + dead letters, for /health. */
+  async function extractionQueueDepth(): Promise<{ pending: number; deadLettered: number }> {
+    return read(async (tx) => ({
+      pending: await KnowledgeAttachmentRepository.countPendingExtraction(
+        tx,
+        config.maxExtractionAttempts,
+      ),
+      deadLettered: await KnowledgeAttachmentRepository.countDeadLetteredExtraction(
+        tx,
+        config.maxExtractionAttempts,
+      ),
+    }));
   }
 
   async function deleteAttachment(
@@ -569,6 +623,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     reextractAttachment,
     listPendingAttachments,
     markAttachmentFailed,
+    extractionQueueDepth,
     deleteAttachment,
     purgeAttachmentBlobs,
     getAttachment,

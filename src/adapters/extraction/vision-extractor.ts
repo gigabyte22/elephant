@@ -1,5 +1,6 @@
 import type AnthropicNS from '@anthropic-ai/sdk';
 import { prepareImageForVision } from './image-preprocess.ts';
+import { deferred } from './service.ts';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
 
 export interface VisionConfig {
@@ -14,10 +15,64 @@ export interface VisionConfig {
   maxDim: number;
   /** JPEG quality used when a downscale re-encodes. */
   jpegQuality: number;
+  /** Output ceiling for one OCR call. A dense screenshot needs several thousand
+   *  tokens; too low and the transcription stops mid-sentence. */
+  maxTokens: number;
 }
 
-const PROMPT =
-  'Transcribe verbatim any text visible in this image (OCR). Then add one short line describing the image. Output plain text only — no preamble.';
+// The two halves are labelled because they are different kinds of claim: the
+// OCR block is what the image says, the description is what the model thinks it
+// depicts. A reader — human or agent — pulling this text out of recall should
+// not have to guess which one they are quoting.
+const PROMPT = [
+  'Read this image and reply with exactly two labelled sections and nothing else:',
+  'OCR:',
+  'the text visible in the image, transcribed verbatim; leave this section empty if there is none',
+  'DESCRIPTION:',
+  'one short line describing the image',
+].join('\n');
+
+/** What a provider gave back: the text, plus whether the model stopped because
+ *  it hit the output ceiling rather than because it was finished. */
+export interface VisionResponse {
+  text: string;
+  truncated: boolean;
+}
+
+/**
+ * The truncation branch is the point of this helper: a model that ran out of
+ * output tokens returns a transcription that stops mid-word, and storing that
+ * as 'done' makes a half-read screenshot indistinguishable from a fully-read
+ * one. The partial text is still worth indexing — it just has to say so. The
+ * LLM adapters make the same check (see the max_tokens guards in
+ * ../llm/anthropic.ts), where an incomplete JSON body is fatal rather than
+ * merely lossy.
+ */
+export function mapVisionResponse(
+  response: VisionResponse,
+  meta: { provider: string; model: string },
+): ExtractionResult {
+  const text = response.text.trim();
+  const source = `${meta.provider}:${meta.model}`;
+  if (text.length === 0) {
+    return {
+      status: 'empty',
+      text: '',
+      detail: response.truncated
+        ? `${source} — produced no text before hitting max_tokens`
+        : source,
+    };
+  }
+  if (response.truncated) {
+    return {
+      status: 'truncated',
+      text,
+      detail: `${source} — output stopped at max_tokens; transcription is incomplete`,
+      derivation: 'model',
+    };
+  }
+  return { status: 'done', text, detail: source, derivation: 'model' };
+}
 
 /** The MIME types this extractor claims. Exported so the factory can register a
  *  disabled stand-in over exactly the same set when no provider is configured,
@@ -33,6 +88,10 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
   return {
     supports: supportsImage,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
+      // Every image needs a model call, so this extractor is always the slow
+      // path. Say so rather than making the upload request wait on it.
+      if (!input.allowSlow) return deferred('vision extraction');
+
       // Downscale first: vision prefill cost scales with pixel count, and a
       // full-size phone photo costs minutes of GPU for no accuracy gain over the
       // 1024px version. This also normalises whatever it re-encodes to JPEG,
@@ -62,14 +121,11 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
 
       try {
         const b64 = prepared.data.toString('base64');
-        const text =
+        const response =
           config.provider === 'anthropic'
             ? await viaAnthropic(config, prepared.mimeType, b64)
             : await viaOpenAI(config, prepared.mimeType, b64);
-        const trimmed = text.trim();
-        return trimmed.length > 0
-          ? { status: 'done', text: trimmed, detail: `${config.provider}:${config.model}` }
-          : { status: 'empty', text: '', detail: config.provider };
+        return mapVisionResponse(response, config);
       } catch (err) {
         return {
           status: 'failed',
@@ -81,7 +137,7 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
   };
 }
 
-async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promise<string> {
+async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promise<VisionResponse> {
   const { default: OpenAI } = await import('openai');
   const client = new OpenAI({
     apiKey: config.openaiApiKey ?? 'unused',
@@ -93,7 +149,7 @@ async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promi
   });
   const res = await client.chat.completions.create({
     model: config.model,
-    max_tokens: 1500,
+    max_tokens: config.maxTokens,
     messages: [
       {
         role: 'user',
@@ -104,10 +160,17 @@ async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promi
       },
     ],
   });
-  return res.choices[0]?.message?.content ?? '';
+  return {
+    text: res.choices[0]?.message?.content ?? '',
+    truncated: res.choices[0]?.finish_reason === 'length',
+  };
 }
 
-async function viaAnthropic(config: VisionConfig, mime: string, b64: string): Promise<string> {
+async function viaAnthropic(
+  config: VisionConfig,
+  mime: string,
+  b64: string,
+): Promise<VisionResponse> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({
     apiKey: config.anthropicApiKey ?? 'unused',
@@ -116,7 +179,7 @@ async function viaAnthropic(config: VisionConfig, mime: string, b64: string): Pr
   });
   const res = await client.messages.create({
     model: config.model,
-    max_tokens: 1500,
+    max_tokens: config.maxTokens,
     messages: [
       {
         role: 'user',
@@ -139,8 +202,11 @@ async function viaAnthropic(config: VisionConfig, mime: string, b64: string): Pr
   // Narrow with the SDK's own type, not a structural literal: TextBlock grows
   // required fields across releases (0.115 added `citations`), and a hand-written
   // shape stops being assignable the moment it does.
-  return res.content
-    .filter((b): b is AnthropicNS.TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
+  return {
+    text: res.content
+      .filter((b): b is AnthropicNS.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n'),
+    truncated: res.stop_reason === 'max_tokens',
+  };
 }

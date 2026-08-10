@@ -148,6 +148,18 @@ export function buildStatements(embedDim: number): Statement[] {
       cypher:
         'CREATE INDEX episode_dream_queue IF NOT EXISTS FOR (e:Episode) ON (e.dreamedAt, e.recordedAt)',
     },
+    // Attachment extraction queue: the worker claims by status, and /health
+    // counts by it. Single-property on purpose — a composite over
+    // (extractionStatus, extractionNextAttemptAt) would contain only rows that
+    // have *both*, and a freshly uploaded attachment has no next-attempt time
+    // until it has already failed once. That is exactly the population being
+    // claimed, so the composite would have indexed everything except the rows
+    // that matter.
+    {
+      name: 'index:knowledge_attachment_queue',
+      cypher:
+        'CREATE INDEX knowledge_attachment_queue IF NOT EXISTS FOR (a:KnowledgeAttachment) ON (a.extractionStatus)',
+    },
     // Neo4j does not index NULLs, so these do NOT accelerate the `IS NULL`
     // read guard (that is a property check on an already-materialised row).
     // They accelerate the IS NOT NULL paths: dashboard counts, the lifecycle
