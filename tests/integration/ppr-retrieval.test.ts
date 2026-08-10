@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { read, write as txWrite } from '../../src/config/neo4j.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { ExtractedFact, ExtractedRelation } from '../../src/models/types.ts';
 import { FactRepository } from '../../src/repositories/FactRepository.ts';
 import { PPR_GRAPH_NAME } from '../../src/services/graph/GraphProjectionService.ts';

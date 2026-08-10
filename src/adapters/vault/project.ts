@@ -4,7 +4,7 @@
 // failure, and the vault sync (./sync.ts) is the repair path. When no vault
 // is configured these are no-ops.
 
-import { type NarrativeItem, bodyFor, frontmatterFor } from './frontmatter.ts';
+import { bodyFor, frontmatterFor, type NarrativeItem } from './frontmatter.ts';
 import type { VaultKind, VaultWriter } from './types.ts';
 
 export async function projectToVault(

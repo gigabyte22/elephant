@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
   ConsolidateResponseSchema,
-  JsonExtractionError,
   extractJson,
+  JsonExtractionError,
   parseJsonResponse,
 } from '../../src/adapters/llm/json-prompt.ts';
 

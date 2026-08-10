@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import type { EmbeddingAdapter } from '../../src/adapters/embeddings/types.ts';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { read, write as txWrite } from '../../src/config/neo4j.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { ExtractedFact, ExtractedRelation } from '../../src/models/types.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 

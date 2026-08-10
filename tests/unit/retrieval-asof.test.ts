@@ -4,8 +4,8 @@
 // holds every path to one instant, so that's what these cover.
 
 import { describe, expect, test } from 'vitest';
-import { PostFilterStage } from '../../src/services/retrieval/stages/PostFilterStage.ts';
 import { asOfOverfetchLimit } from '../../src/services/retrieval/stages/helpers.ts';
+import { PostFilterStage } from '../../src/services/retrieval/stages/PostFilterStage.ts';
 import type { FactCandidate } from '../../src/services/retrieval/types.ts';
 import { makeCtx, makeFact, makePreferenceCandidate, makeState } from './retrieval-fixtures.ts';
 

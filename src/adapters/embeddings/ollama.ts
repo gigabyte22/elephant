@@ -1,9 +1,9 @@
 // Ollama embeddings via its native /api/embed endpoint.
 // Variable dim — the caller must set EMBED_DIM to match the chosen model
 // (e.g. nomic-embed-text=768, mxbai-embed-large=1024). Migrate script enforces.
-import { fetchWithRetry } from './retry.ts';
 
 import { approxTokens } from '../../utils/tokens.ts';
+import { fetchWithRetry } from './retry.ts';
 import type { EmbeddingAdapter } from './types.ts';
 
 interface OllamaEmbedAdapterConfig {

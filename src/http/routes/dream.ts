@@ -3,7 +3,7 @@ import type { Container } from '../../index.ts';
 import { DreamInProgressError } from '../../services/DreamingService.ts';
 import { conflict, notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WireDreamRunSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireDreamRunSchema } from '../wire-schemas.ts';
 
 export function registerDreamRoutes(app: App, container: Container): void {
   app.route({

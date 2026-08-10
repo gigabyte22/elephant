@@ -9,7 +9,7 @@ import type { ManagedTransaction } from 'neo4j-driver';
 import { read, write } from '../../config/neo4j.ts';
 import type { WorkingStateEntry, WorkingStateScope } from '../../models/types.ts';
 import { dateParam, toJsDate, toJsDateOrNull } from '../../utils/neo4j-conv.ts';
-import { type WorkingStateAdapter, scopeKey } from './types.ts';
+import { scopeKey, type WorkingStateAdapter } from './types.ts';
 
 function rowToEntry(node: Record<string, unknown>, scope: WorkingStateScope): WorkingStateEntry {
   let value: unknown;

@@ -33,15 +33,7 @@ export function StatStrip({ stats }: Props) {
   );
 }
 
-function Cell({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}) {
+function Cell({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="relative flex flex-col gap-1 py-6 pl-6 pr-5 first:pl-0 border-l border-hairline first:border-l-0 last:pr-0">
       <span className="label-meta">{label}</span>

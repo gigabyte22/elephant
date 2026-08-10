@@ -12,19 +12,19 @@ import {
   ExtractFactsResponseSchema,
   ExtractRelationsResponseSchema,
   JsonExtractionError,
+  parseJsonResponse,
   RerankResponseSchema,
   SupersedeResponseSchema,
-  parseJsonResponse,
 } from './json-prompt.ts';
 import {
+  buildConsolidateUserPrompt,
+  buildExtractFactsUserPrompt,
   CONSOLIDATE_FACTS_SYSTEM,
   EXTRACT_FACTS_SYSTEM,
   EXTRACT_RELATIONS_SYSTEM,
   RERANK_SYSTEM,
   SUMMARIZE_SYSTEM,
   SUPERSEDE_SYSTEM,
-  buildConsolidateUserPrompt,
-  buildExtractFactsUserPrompt,
 } from './prompts.ts';
 import type { LLMAdapter } from './types.ts';
 

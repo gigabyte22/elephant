@@ -8,7 +8,7 @@ import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adap
 import type { LLMAdapter } from '../../src/adapters/llm/types.ts';
 import { read as txRead, write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import { DreamRunRepository } from '../../src/repositories/DreamRunRepository.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 

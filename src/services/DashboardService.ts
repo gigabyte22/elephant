@@ -5,7 +5,7 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import { read } from '../config/neo4j.ts';
 import type { MemoryKind } from '../models/types.ts';
-import { type WireFact, toWireFact } from '../models/wire.ts';
+import { toWireFact, type WireFact } from '../models/wire.ts';
 import {
   DashboardRepository,
   type GraphEdgeRow,
@@ -13,7 +13,7 @@ import {
   type ScopeFilter,
 } from '../repositories/DashboardRepository.ts';
 import { DreamRunRepository } from '../repositories/DreamRunRepository.ts';
-import { type PruneConfig, ebbinghausRetention, shouldPrune } from '../utils/decay.ts';
+import { ebbinghausRetention, type PruneConfig, shouldPrune } from '../utils/decay.ts';
 import { truncate } from '../utils/truncate.ts';
 
 export interface ScopeInput {

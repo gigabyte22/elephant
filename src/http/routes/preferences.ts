@@ -3,7 +3,7 @@ import type { Container } from '../../index.ts';
 import { toWirePreference } from '../../models/wire.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WirePreferenceSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WirePreferenceSchema } from '../wire-schemas.ts';
 
 // A preference is identified by (key, projectId, userId). Omitting both axes
 // addresses the unscoped preference — its own row, not a wildcard over every

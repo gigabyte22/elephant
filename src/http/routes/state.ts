@@ -4,7 +4,7 @@ import type { WorkingStateScope } from '../../models/types.ts';
 import { toWireWorkingStateEntry } from '../../models/wire.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WireWorkingStateEntrySchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireWorkingStateEntrySchema } from '../wire-schemas.ts';
 
 const ScopeBody = z.object({
   agentId: z.string().min(1),

@@ -16,6 +16,8 @@ import {
 import { badRequest } from '../errors.ts';
 import type { App } from '../types.ts';
 import {
+  okEnvelope,
+  queryBool,
   WireChunkSchema,
   WireEntitySchema,
   WireFactWithScoreSchema,
@@ -29,8 +31,6 @@ import {
   WireRecallTraceSchema,
   WireResearchChunkSchema,
   WireResearchSchema,
-  okEnvelope,
-  queryBool,
 } from '../wire-schemas.ts';
 
 const Scope = z.enum(['boost', 'filter', 'none', 'strict']);

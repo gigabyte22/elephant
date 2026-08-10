@@ -4,7 +4,7 @@ import type { Container } from '../../index.ts';
 import { toWireArchivedRevision, toWireAuditEvent } from '../../models/wire.ts';
 import { AuditService } from '../../services/AuditService.ts';
 import type { App } from '../types.ts';
-import { WireArchivedRevisionSchema, WireAuditEventSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireArchivedRevisionSchema, WireAuditEventSchema } from '../wire-schemas.ts';
 
 export function registerAuditRoutes(app: App, _container: Container): void {
   app.route({

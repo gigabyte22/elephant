@@ -1,8 +1,8 @@
 // Voyage AI embeddings (https://docs.voyageai.com/reference/embeddings-api).
 // Native HTTP — no SDK dep needed.
-import { fetchWithRetry } from './retry.ts';
 
 import { approxTokens } from '../../utils/tokens.ts';
+import { fetchWithRetry } from './retry.ts';
 import type { EmbeddingAdapter } from './types.ts';
 
 interface VoyageEmbedAdapterConfig {

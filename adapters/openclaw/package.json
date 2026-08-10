@@ -6,9 +6,17 @@
   "main": "index.ts",
   "license": "MIT",
   "openclaw": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   },
-  "keywords": ["openclaw", "openclaw-plugin", "memory", "elephant", "neo4j"],
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "memory",
+    "elephant",
+    "neo4j"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

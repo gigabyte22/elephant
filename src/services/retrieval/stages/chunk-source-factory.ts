@@ -8,7 +8,7 @@ import { read } from '../../../config/neo4j.ts';
 import type { RetrievalScope } from '../../../repositories/scope.ts';
 import type { CandidateSource, PipelineState, RetrievalContext, RetrievalStage } from '../types.ts';
 import { overfetchLimit } from './helpers.ts';
-import { PROJECT_USER_AXES, buildRetrievalScope } from './scope-helpers.ts';
+import { buildRetrievalScope, PROJECT_USER_AXES } from './scope-helpers.ts';
 
 export interface ChunkSourceConfig<T> {
   vectorStageName: string;

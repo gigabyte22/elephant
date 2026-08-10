@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest'
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { __resetEnvForTests } from '../../src/config/env.ts';
 import { read, write as txWrite } from '../../src/config/neo4j.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { Fact } from '../../src/models/types.ts';
 import { EntityRepository } from '../../src/repositories/EntityRepository.ts';
 import { FactRepository } from '../../src/repositories/FactRepository.ts';
@@ -50,7 +50,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // biome-ignore lint/performance/noDelete: assigning undefined to process.env coerces to the string "undefined"
+  // `delete`, not `= undefined` — assigning to process.env coerces the value
+  // to the string "undefined", which reads as a set variable.
   delete process.env.DREAM_CONSOLIDATION_MIN_SIMILARITY;
   __resetEnvForTests();
   await shutdown();

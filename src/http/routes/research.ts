@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireResearch } from '../../models/wire.ts';
-import { notFound } from '../errors.ts';
-import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
-import { WireResearchSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireResearchSchema } from '../wire-schemas.ts';
 
 const CreateBody = z.object({
   id: z.string().uuid().optional(),

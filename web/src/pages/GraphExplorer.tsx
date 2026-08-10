@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ErrorBanner, LoadingBanner } from '../components/StateBanner.tsx';
 import {
   CosmosCanvas,
   type CosmosSettings,
@@ -14,10 +13,11 @@ import {
 import { GraphCanvas } from '../components/graph/GraphCanvas.tsx';
 import { NodeInspector } from '../components/graph/NodeInspector.tsx';
 import { SearchPanel } from '../components/graph/SearchPanel.tsx';
+import { ErrorBanner, LoadingBanner } from '../components/StateBanner.tsx';
 import { useGraphNeighborhood } from '../hooks/useGraphNeighborhood.ts';
 import { useGraphOverview } from '../hooks/useGraphOverview.ts';
 import { useIsDesktop } from '../hooks/useMediaQuery.ts';
-import { type GalaxyMeta, buildCosmos } from '../lib/cosmos.ts';
+import { buildCosmos, type GalaxyMeta } from '../lib/cosmos.ts';
 
 // Graph page with two modes:
 //   cosmos — the whole memory at once. Louvain communities render as galaxies

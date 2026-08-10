@@ -6,7 +6,7 @@
 
 import type { Redis } from 'ioredis';
 import type { WorkingStateEntry, WorkingStateScope } from '../../models/types.ts';
-import { type WorkingStateAdapter, scopeKey } from './types.ts';
+import { scopeKey, type WorkingStateAdapter } from './types.ts';
 
 interface SerialisedEntry {
   value: unknown;

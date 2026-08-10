@@ -30,7 +30,8 @@ export function DetailPanel({ open, onClose, title, children }: Props) {
   if (!open) return null;
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: styled overlay panel; native <dialog> fights the custom backdrop/animation
+    // Deliberately a div, not <dialog>: the native element fights the custom
+    // backdrop/animation this panel uses.
     <div className="fixed inset-0 z-40" role="dialog" aria-modal="true">
       <button
         type="button"

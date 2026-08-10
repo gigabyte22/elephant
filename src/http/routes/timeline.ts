@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireFact, toWirePreference } from '../../models/wire.ts';
 import type { App } from '../types.ts';
-import { WireFactSchema, WirePreferenceSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireFactSchema, WirePreferenceSchema } from '../wire-schemas.ts';
 
 const Query = z.object({
   at: z.coerce.date(),

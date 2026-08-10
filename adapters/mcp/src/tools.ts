@@ -7,7 +7,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { McpScopeConfig } from './config.ts';
 import {
-  type TextResult,
   formatDocument,
   formatDocumentLine,
   formatFactLine,
@@ -16,6 +15,7 @@ import {
   formatRecall,
   formatStateEntry,
   listResult,
+  type TextResult,
   textResult,
 } from './format.ts';
 

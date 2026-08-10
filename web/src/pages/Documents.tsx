@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { DocumentItem, DocumentSort, NarrativeKind } from '../api/types.ts';
 import { LedgerScroll } from '../components/LedgerScroll.tsx';
 import { PageHeading } from '../components/PageHeading.tsx';

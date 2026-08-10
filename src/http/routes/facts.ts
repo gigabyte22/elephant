@@ -5,7 +5,7 @@ import { toWireFact } from '../../models/wire.ts';
 import { FactRepository } from '../../repositories/FactRepository.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WireFactSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireFactSchema } from '../wire-schemas.ts';
 
 const FactBody = z.object({
   id: z.string().uuid().optional(),

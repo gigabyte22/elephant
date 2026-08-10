@@ -6,9 +6,9 @@ import sensible from '@fastify/sensible';
 import fastifyStatic from '@fastify/static';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
-  type ZodTypeProvider,
   serializerCompiler,
   validatorCompiler,
+  type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import type { Container } from '../index.ts';
 import { bearerAuth } from './auth.ts';

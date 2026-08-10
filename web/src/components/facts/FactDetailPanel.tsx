@@ -157,15 +157,7 @@ function LineageSection({ fact }: { fact: TopFact }) {
   );
 }
 
-function LineageRow({
-  link,
-  index,
-  current,
-}: {
-  link: WireFact;
-  index: number;
-  current: boolean;
-}) {
+function LineageRow({ link, index, current }: { link: WireFact; index: number; current: boolean }) {
   return (
     <li className="relative flex gap-4 border-l border-hairline-strong pb-4 pl-4 last:pb-0">
       {current && (
@@ -205,15 +197,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Readout({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'cyan' | 'rust';
-}) {
+function Readout({ label, value, tone }: { label: string; value: string; tone?: 'cyan' | 'rust' }) {
   const color = tone === 'cyan' ? 'text-cyan-400' : tone === 'rust' ? 'text-rust' : 'text-ink-100';
   return (
     <div className="flex flex-col gap-1">

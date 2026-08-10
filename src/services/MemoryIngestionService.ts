@@ -353,11 +353,7 @@ export function createMemoryIngestionService(deps: Deps) {
     return created;
   }
 
-  async function supersede(input: {
-    oldId: string;
-    newId: string;
-    reason: string;
-  }): Promise<void> {
+  async function supersede(input: { oldId: string; newId: string; reason: string }): Promise<void> {
     await write((tx) => supersedeFactWithAudit(tx, input));
   }
 

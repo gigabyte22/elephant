@@ -6,7 +6,7 @@ import { EntityRepository } from '../../repositories/EntityRepository.ts';
 import { FactRepository } from '../../repositories/FactRepository.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WireEntitySchema, WireFactSchema, okEnvelope, queryBool } from '../wire-schemas.ts';
+import { okEnvelope, queryBool, WireEntitySchema, WireFactSchema } from '../wire-schemas.ts';
 
 export function registerEntitiesRoutes(app: App, _container: Container): void {
   app.route({

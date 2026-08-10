@@ -2,9 +2,9 @@ import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireProcedure } from '../../models/wire.ts';
 import { notFound } from '../errors.ts';
-import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
-import { WireProcedureSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireProcedureSchema } from '../wire-schemas.ts';
 
 const ScopeBody = z.object({
   projectId: z.string().min(1).optional(),

@@ -4,7 +4,7 @@
 // internal aggregate shapes used only by the built-in viewer.
 
 import { z } from 'zod';
-import { WireFactSchema, WireMemoryKindSchema, okEnvelope } from './wire-schemas.ts';
+import { okEnvelope, WireFactSchema, WireMemoryKindSchema } from './wire-schemas.ts';
 
 export { okEnvelope };
 

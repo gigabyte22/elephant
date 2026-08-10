@@ -3,9 +3,9 @@ import type { Fact } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import { validAtClause } from '../utils/temporal.ts';
 import {
-  type RetrievalScope,
   memoryItemParams,
   memoryItemSetClause,
+  type RetrievalScope,
   readScope,
   scopeAndClause,
 } from './scope.ts';
