@@ -2,6 +2,8 @@
 // hash-based bag-of-tokens vector so cosine similarity is meaningful for
 // duplicate-detection tests without depending on any network call.
 
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import type {
   Episode,
   ExtractedFact,
@@ -11,7 +13,9 @@ import type {
 } from '../models/types.ts';
 import { approxTokens } from '../utils/tokens.ts';
 import type { EmbeddingAdapter } from './embeddings/types.ts';
+import type { ExtractionResult, ExtractionService } from './extraction/types.ts';
 import type { LLMAdapter } from './llm/types.ts';
+import type { BlobStore } from './storage/types.ts';
 
 interface FakeEmbedOptions {
   dim?: number;
@@ -127,5 +131,53 @@ export function createFakeLLMAdapter(opts: FakeLLMOptions = {}): LLMAdapter {
         score: Math.max(0, 1 - i * 0.05),
       }));
     },
+  };
+}
+
+/** In-memory blob store. Lets attachment paths be exercised without touching a
+ *  KNOWLEDGE_BLOB_DIR on disk. */
+export function createFakeBlobStore(): BlobStore & { count: () => number } {
+  const blobs = new Map<string, Buffer>();
+  let seq = 0;
+  return {
+    async put(data: Buffer) {
+      const blobId = `fake-blob-${++seq}`;
+      blobs.set(blobId, data);
+      return {
+        blobId,
+        sha256: createHash('sha256').update(data).digest('hex'),
+        size: data.byteLength,
+      };
+    },
+    async getStream(blobId: string): Promise<Readable> {
+      const data = blobs.get(blobId);
+      if (!data) throw new Error(`fake blob store: no such blob ${blobId}`);
+      return Readable.from(data);
+    },
+    async size(blobId: string) {
+      return blobs.get(blobId)?.byteLength ?? null;
+    },
+    async delete(blobId: string) {
+      blobs.delete(blobId);
+    },
+    count: () => blobs.size,
+  };
+}
+
+/** Extraction service driven by a MIME → result table, plus a call counter so
+ *  tests can assert that deferred extraction did NOT run inline. */
+export function createFakeExtractionService(
+  byMime: Record<string, ExtractionResult> = {},
+): ExtractionService & { calls: () => number } {
+  let calls = 0;
+  return {
+    async extract({ mimeType }): Promise<ExtractionResult> {
+      calls++;
+      const key = Object.keys(byMime).find(
+        (k) => k === mimeType || (k.endsWith('/') && mimeType.startsWith(k)),
+      );
+      return key ? byMime[key]! : { status: 'unsupported', text: '', detail: mimeType };
+    },
+    calls: () => calls,
   };
 }

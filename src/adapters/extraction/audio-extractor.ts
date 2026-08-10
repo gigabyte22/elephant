@@ -4,6 +4,8 @@ export interface AudioConfig {
   model: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  /** Ceiling for a single transcription. Long recordings are slow on local Whisper. */
+  timeoutMs: number;
 }
 
 // Speech-to-text for audio attachments via an OpenAI-compatible transcription
@@ -20,6 +22,8 @@ export function createAudioExtractor(config: AudioConfig): Extractor {
         const client = new OpenAI({
           apiKey: config.openaiApiKey ?? 'unused',
           baseURL: config.openaiBaseUrl,
+          timeout: config.timeoutMs,
+          maxRetries: 0,
         });
         const file = await toFile(input.data, input.filename || 'audio', { type: input.mimeType });
         const res = await client.audio.transcriptions.create({ model: config.model, file });

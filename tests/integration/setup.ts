@@ -33,6 +33,12 @@ export async function setup(): Promise<void> {
   process.env.MEMORY_EMBED_PROVIDER = 'openai';
   process.env.OPENAI_API_KEY = 'fake-not-used';
   process.env.EMBED_DIM = EMBED_DIM;
+  // Without this, the fake API keys above make the extraction factory build a
+  // *real* vision/transcription client, and any image or audio attachment in a
+  // test would attempt a live provider call. Disabled means those attachments
+  // deterministically report 'skipped'.
+  process.env.KNOWLEDGE_VISION_PROVIDER = 'none';
+  process.env.KNOWLEDGE_TRANSCRIBE_PROVIDER = 'none';
 
   // Apply schema. Imported lazily so env vars are set before module-level reads.
   const { migrate } = await import('../../src/migrate.ts');
