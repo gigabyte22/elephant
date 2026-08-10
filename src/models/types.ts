@@ -302,6 +302,7 @@ export const ExtractionStatusSchema = z.enum([
   'done',
   'pending',
   'empty',
+  'truncated',
   'unsupported',
   'skipped',
   'failed',

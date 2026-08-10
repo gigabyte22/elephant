@@ -41,7 +41,10 @@ import type { KnowledgeAttachment } from '../src/models/types.ts';
 // 'empty' is excluded by default: a genuinely blank image legitimately extracts
 // to nothing, and re-running it every backfill burns GPU for a guaranteed
 // no-change. --include-empty opts back in after a model or prompt change.
-const DEFAULT_STATUSES = ['unsupported', 'skipped', 'failed', 'pending'];
+// 'truncated' is included: a truncated reading is repaired by raising
+// KNOWLEDGE_VISION_MAX_TOKENS (or KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES) and running
+// this again, which is the whole recovery flow for it.
+const DEFAULT_STATUSES = ['unsupported', 'skipped', 'failed', 'pending', 'truncated'];
 
 const dryRun = !process.argv.includes('--yes');
 const includeEmpty = process.argv.includes('--include-empty');

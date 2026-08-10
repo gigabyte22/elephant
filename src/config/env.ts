@@ -124,6 +124,13 @@ const EnvSchema = z
     // that transcribes just as accurately.
     KNOWLEDGE_VISION_MAX_DIM: z.coerce.number().int().positive().default(1024),
     KNOWLEDGE_VISION_JPEG_QUALITY: z.coerce.number().int().min(1).max(100).default(80),
+    // Output ceiling for one OCR call. A dense screenshot runs to a few thousand
+    // tokens; when the model hits this the attachment is recorded 'truncated'
+    // rather than passed off as a complete reading.
+    KNOWLEDGE_VISION_MAX_TOKENS: z.coerce.number().int().positive().default(4096),
+    // Text attachments are the one family extracted inline (they take
+    // milliseconds), so the request path is only as bounded as this cap.
+    KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES: z.coerce.number().int().positive().default(2_097_152), // 2 MiB
     // How often the async worker drains 'pending' attachments.
     KNOWLEDGE_EXTRACTION_CRON: z.string().default('*/2 * * * *'),
 

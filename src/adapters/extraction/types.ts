@@ -6,6 +6,7 @@ export type ExtractionStatus =
   | 'done' // text extracted and indexed
   | 'pending' // queued for the async extraction worker; not yet attempted
   | 'empty' // extractor ran but found no text
+  | 'truncated' // text extracted and indexed, but known to be incomplete
   | 'unsupported' // no extractor handles this MIME type
   | 'skipped' // extractor exists but declined: no provider configured, or input it cannot read
   | 'failed'; // extractor threw
