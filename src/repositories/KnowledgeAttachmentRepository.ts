@@ -62,6 +62,52 @@ export const KnowledgeAttachmentRepository = {
     return result.records.map((r) => toKnowledgeAttachment(r.get('a')));
   },
 
+  // Record the outcome of a (re-)extraction. Only these three fields ever change
+  // after creation — the bytes, hash and scope are immutable.
+  async update(
+    tx: ManagedTransaction,
+    id: string,
+    patch: {
+      extractionStatus: KnowledgeAttachment['extractionStatus'];
+      extractedChars: number;
+      detail?: string;
+    },
+  ): Promise<KnowledgeAttachment | null> {
+    const result = await tx.run(
+      `MATCH (a:KnowledgeAttachment {id: $id})
+       SET a.extractionStatus = $extractionStatus,
+           a.extractedChars = $extractedChars,
+           a.detail = $detail
+       RETURN a {.*} AS a`,
+      {
+        id,
+        extractionStatus: patch.extractionStatus,
+        extractedChars: patch.extractedChars,
+        detail: patch.detail ?? null,
+      },
+    );
+    const row = result.records[0];
+    return row ? toKnowledgeAttachment(row.get('a')) : null;
+  },
+
+  // Oldest-first ids whose extraction still needs to run. Drives the async
+  // worker; the backfill uses its own wider predicate.
+  async listByStatus(
+    tx: ManagedTransaction,
+    statuses: string[],
+    limit: number,
+  ): Promise<KnowledgeAttachment[]> {
+    const result = await tx.run(
+      `MATCH (a:KnowledgeAttachment)
+       WHERE a.extractionStatus IN $statuses
+       RETURN a {.*} AS a
+       ORDER BY a.createdAt ASC
+       LIMIT toInteger($limit)`,
+      { statuses, limit },
+    );
+    return result.records.map((r) => toKnowledgeAttachment(r.get('a')));
+  },
+
   async getById(tx: ManagedTransaction, id: string): Promise<KnowledgeAttachment | null> {
     const result = await tx.run('MATCH (a:KnowledgeAttachment {id: $id}) RETURN a {.*} AS a', {
       id,

@@ -1,5 +1,6 @@
 import { buildHttpServer } from '../src/http/server.ts';
 import { bootstrap, shutdown } from '../src/index.ts';
+import { startAttachmentExtractionWorker } from '../src/jobs/AttachmentExtractionWorker.ts';
 import { startDreamScheduler } from '../src/jobs/DreamScheduler.ts';
 import { startObservationReaper } from '../src/jobs/ObservationReaper.ts';
 import { startOkfSyncScheduler } from '../src/jobs/OkfSyncScheduler.ts';
@@ -10,6 +11,7 @@ async function main(): Promise<void> {
 
   const dream = startDreamScheduler(container);
   const reaper = startObservationReaper(container);
+  const extraction = startAttachmentExtractionWorker(container);
   // Mirrors buildVaultWriter's gate — no vault, nothing to sweep.
   const okfSync = container.env.OKF_ENABLED ? startOkfSyncScheduler(container) : undefined;
 
@@ -21,13 +23,15 @@ async function main(): Promise<void> {
   app.log.info(
     `elephant listening on http://${container.env.MEMORY_BIND}:${container.env.MEMORY_PORT} ` +
       `(llm=${container.llm.name}, embedder=${container.embedder.name}, dim=${container.embedder.dim}, ` +
-      `dreamCron=${dream.pattern}${okfSync ? `, okfSyncCron=${okfSync.pattern}` : ''})`,
+      `dreamCron=${dream.pattern}, extractionCron=${extraction.pattern}` +
+      `${okfSync ? `, okfSyncCron=${okfSync.pattern}` : ''})`,
   );
 
   const stop = async (signal: string): Promise<void> => {
     app.log.info(`received ${signal}, shutting down`);
     dream.stop();
     reaper.stop();
+    extraction.stop();
     okfSync?.stop();
     await app.close();
     await shutdown();

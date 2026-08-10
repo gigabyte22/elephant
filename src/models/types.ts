@@ -298,7 +298,14 @@ export type KnowledgeChunk = z.infer<typeof KnowledgeChunkSchema>;
 // A binary file attached to a KnowledgeDocument. Bytes live in the blob store
 // (referenced by blobId); extracted text is indexed as KnowledgeChunks.
 
-export const ExtractionStatusSchema = z.enum(['done', 'empty', 'unsupported', 'skipped', 'failed']);
+export const ExtractionStatusSchema = z.enum([
+  'done',
+  'pending',
+  'empty',
+  'unsupported',
+  'skipped',
+  'failed',
+]);
 export type ExtractionStatusValue = z.infer<typeof ExtractionStatusSchema>;
 
 export const KnowledgeAttachmentSchema = z

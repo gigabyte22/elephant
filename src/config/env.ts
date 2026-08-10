@@ -99,6 +99,33 @@ const EnvSchema = z
     KNOWLEDGE_VISION_MODEL: z.string().optional(),
     KNOWLEDGE_TRANSCRIBE_PROVIDER: z.enum(['auto', 'none', 'openai']).default('auto'),
     KNOWLEDGE_TRANSCRIBE_MODEL: z.string().default('whisper-1'),
+    // Dedicated vision/transcription endpoints. These exist so enabling OCR does
+    // not require setting OPENAI_BASE_URL, which is shared with the LLM and
+    // embedding adapters and would silently point Whisper at the vision host.
+    // Both fall back to OPENAI_* when unset (see adapters/factory.ts).
+    KNOWLEDGE_VISION_BASE_URL: z
+      .string()
+      .url()
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    KNOWLEDGE_VISION_API_KEY: z.string().optional(),
+    KNOWLEDGE_TRANSCRIBE_BASE_URL: z
+      .string()
+      .url()
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    KNOWLEDGE_TRANSCRIBE_API_KEY: z.string().optional(),
+    // Per-call ceiling for a single extraction. A local vision model can take
+    // minutes; the backfill script raises this since it runs off the request path.
+    KNOWLEDGE_VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+    KNOWLEDGE_TRANSCRIBE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+    // Images are downscaled before OCR: vision token cost is proportional to
+    // pixels, and a 12 MP phone photo is ~10x slower than the 1024px version
+    // that transcribes just as accurately.
+    KNOWLEDGE_VISION_MAX_DIM: z.coerce.number().int().positive().default(1024),
+    KNOWLEDGE_VISION_JPEG_QUALITY: z.coerce.number().int().min(1).max(100).default(80),
+    // How often the async worker drains 'pending' attachments.
+    KNOWLEDGE_EXTRACTION_CRON: z.string().default('*/2 * * * *'),
 
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),
@@ -225,6 +252,44 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['OLLAMA_BASE_URL'],
         message: 'OLLAMA_BASE_URL required when MEMORY_EMBED_PROVIDER=ollama',
+      });
+    }
+    // An explicitly-selected extraction provider with nothing to talk to is a
+    // configuration error, not a reason to silently disable the feature — silent
+    // degradation is exactly how image attachments went unread for months.
+    if (
+      env.KNOWLEDGE_VISION_PROVIDER === 'openai' &&
+      !env.KNOWLEDGE_VISION_BASE_URL &&
+      !env.KNOWLEDGE_VISION_API_KEY &&
+      !env.OPENAI_BASE_URL &&
+      !env.OPENAI_API_KEY
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['KNOWLEDGE_VISION_BASE_URL'],
+        message:
+          'KNOWLEDGE_VISION_BASE_URL or KNOWLEDGE_VISION_API_KEY (or the OPENAI_* fallbacks) required when KNOWLEDGE_VISION_PROVIDER=openai',
+      });
+    }
+    if (env.KNOWLEDGE_VISION_PROVIDER === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ANTHROPIC_API_KEY'],
+        message: 'ANTHROPIC_API_KEY required when KNOWLEDGE_VISION_PROVIDER=anthropic',
+      });
+    }
+    if (
+      env.KNOWLEDGE_TRANSCRIBE_PROVIDER === 'openai' &&
+      !env.KNOWLEDGE_TRANSCRIBE_BASE_URL &&
+      !env.KNOWLEDGE_TRANSCRIBE_API_KEY &&
+      !env.OPENAI_BASE_URL &&
+      !env.OPENAI_API_KEY
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['KNOWLEDGE_TRANSCRIBE_BASE_URL'],
+        message:
+          'KNOWLEDGE_TRANSCRIBE_BASE_URL or KNOWLEDGE_TRANSCRIBE_API_KEY (or the OPENAI_* fallbacks) required when KNOWLEDGE_TRANSCRIBE_PROVIDER=openai',
       });
     }
     if (env.WORKING_STATE_BACKEND === 'redis' && !env.REDIS_URL) {

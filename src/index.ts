@@ -10,6 +10,7 @@ import {
   buildLLMAdapter,
   buildVaultWriter,
   buildWorkingStateAdapter,
+  isDeferredExtraction,
 } from './adapters/factory.ts';
 import type { LLMAdapter } from './adapters/llm/types.ts';
 import type { BlobStore } from './adapters/storage/types.ts';
@@ -80,6 +81,10 @@ export interface ContainerOverrides {
   retrievalPipeline?: Pipeline;
   workingStateAdapter?: WorkingStateAdapter;
   vault?: VaultWriter;
+  // Injectable so attachment paths can be exercised without a blob directory or
+  // a live vision/transcription provider.
+  extraction?: ExtractionService;
+  blobStore?: BlobStore;
 }
 
 export async function buildContainer(overrides: ContainerOverrides = {}): Promise<Container> {
@@ -103,9 +108,9 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     embedderMaxInputTokens: env.EMBED_MAX_INPUT_TOKENS,
   };
 
-  const blobStore = buildBlobStore(env);
+  const blobStore = overrides.blobStore ?? buildBlobStore(env);
   const vault = overrides.vault ?? buildVaultWriter(env);
-  const extraction = buildExtractionService(env);
+  const extraction = overrides.extraction ?? buildExtractionService(env);
   const graphProjection = createGraphProjectionService();
 
   return {
@@ -162,7 +167,11 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       blobStore,
       extraction,
       vault,
-      config: { ...sharedConfig, maxAttachmentBytes: env.KNOWLEDGE_MAX_ATTACHMENT_BYTES },
+      config: {
+        ...sharedConfig,
+        maxAttachmentBytes: env.KNOWLEDGE_MAX_ATTACHMENT_BYTES,
+        deferExtraction: (mimeType) => isDeferredExtraction(env, mimeType),
+      },
     }),
     procedures: createProcedureService({
       embedder,

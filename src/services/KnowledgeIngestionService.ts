@@ -4,8 +4,9 @@
 // node types atomically.
 
 import { createHash } from 'node:crypto';
+import { buffer } from 'node:stream/consumers';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
-import type { ExtractionService } from '../adapters/extraction/types.ts';
+import type { ExtractionResult, ExtractionService } from '../adapters/extraction/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import type { BlobStore } from '../adapters/storage/types.ts';
 import { projectToVault, tombstoneInVault } from '../adapters/vault/project.ts';
@@ -39,6 +40,10 @@ interface Deps {
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
     maxAttachmentBytes?: number;
+    /** Returns true for MIME types whose extraction should be queued for the
+     *  async worker instead of run inline. Injected so the service stays
+     *  independent of provider configuration. */
+    deferExtraction?: (mimeType: string) => boolean;
   };
 }
 
@@ -341,11 +346,18 @@ export function createKnowledgeIngestionService(deps: Deps) {
 
     const scope: Scope = { projectId: existing.projectId, userId: existing.userId };
     const stored = await blobStore.put(data);
-    const extracted = await extraction.extract({
-      data,
-      mimeType: input.mimeType,
-      filename: input.filename,
-    });
+    // Vision and transcription calls take seconds to minutes — well past the 30s
+    // timeout dobby's client puts on this request, whose retries would each
+    // create another attachment. Queue those for the worker and return now; text
+    // and PDF are milliseconds and stay inline.
+    const deferred = config.deferExtraction?.(input.mimeType) ?? false;
+    const extracted: ExtractionResult = deferred
+      ? { status: 'pending', text: '', detail: 'queued for extraction' }
+      : await extraction.extract({
+          data,
+          mimeType: input.mimeType,
+          filename: input.filename,
+        });
 
     const attachmentId = newId();
     const chunks =
@@ -390,6 +402,94 @@ export function createKnowledgeIngestionService(deps: Deps) {
       });
       return created;
     });
+  }
+
+  // Re-run extraction on an already-stored blob and replace whatever text it
+  // previously contributed. Shared by the async worker (draining 'pending') and
+  // the backfill script (repairing rows written before a provider existed), so
+  // there is exactly one implementation of "extract and index these bytes".
+  //
+  // Idempotent by construction: the attachment's old chunks are deleted in the
+  // same transaction that writes the new ones, so a re-run replaces rather than
+  // duplicates, and a failure mid-way rolls back to the previous state.
+  async function reextractAttachment(
+    attachmentId: string,
+    opts: { actor?: string } = {},
+  ): Promise<KnowledgeAttachment> {
+    const { blobStore, extraction } = requireAttachmentDeps();
+    const attachment = await read((tx) => KnowledgeAttachmentRepository.getById(tx, attachmentId));
+    if (!attachment) throw notFound(`attachment ${attachmentId}`);
+
+    // BlobStore exposes only a stream; buffer it for the extractors, which all
+    // want the whole file (image decode, PDF parse, multipart upload).
+    const stream = await blobStore.getStream(attachment.blobId);
+    const data = await buffer(stream);
+
+    const extracted = await extraction.extract({
+      data,
+      mimeType: attachment.mimeType,
+      filename: attachment.filename,
+    });
+
+    const scope: Scope = { projectId: attachment.projectId, userId: attachment.userId };
+    const chunks =
+      extracted.text.length > 0
+        ? await chunkText(extracted.text, scope, {
+            documentId: attachment.documentId,
+            attachmentId,
+          })
+        : [];
+
+    return write(async (tx) => {
+      await KnowledgeChunkRepository.deleteForAttachment(tx, attachmentId);
+      if (chunks.length > 0) {
+        await KnowledgeChunkRepository.createForDocument(tx, {
+          documentId: attachment.documentId,
+          chunks,
+        });
+      }
+      const updated = await KnowledgeAttachmentRepository.update(tx, attachmentId, {
+        extractionStatus: extracted.status,
+        extractedChars: extracted.text.length,
+        detail: extracted.detail,
+      });
+      if (!updated) throw notFound(`attachment ${attachmentId}`);
+      await KnowledgeDocumentRepository.update(tx, attachment.documentId, {
+        updatedAt: new Date(),
+      });
+      await AuditService.record({
+        tx,
+        kind: 'update',
+        targetId: attachment.documentId,
+        targetKind: 'knowledge_document',
+        actor: opts.actor,
+        payload: {
+          attachmentReextracted: attachmentId,
+          filename: attachment.filename,
+          from: attachment.extractionStatus,
+          to: extracted.status,
+          chunkCount: chunks.length,
+        },
+      });
+      return updated;
+    });
+  }
+
+  /** Oldest attachments still awaiting extraction. Drives the async worker. */
+  async function listPendingAttachments(limit: number): Promise<KnowledgeAttachment[]> {
+    return read((tx) => KnowledgeAttachmentRepository.listByStatus(tx, ['pending'], limit));
+  }
+
+  /** Record a structural failure (missing blob, embedder down) so the worker
+   *  stops re-picking the same row every tick. Recoverable via the backfill. */
+  async function markAttachmentFailed(attachmentId: string, detail: string): Promise<void> {
+    await write((tx) =>
+      KnowledgeAttachmentRepository.update(tx, attachmentId, {
+        extractionStatus: 'failed',
+        extractedChars: 0,
+        detail,
+      }),
+    );
   }
 
   async function deleteAttachment(
@@ -466,6 +566,9 @@ export function createKnowledgeIngestionService(deps: Deps) {
     softDelete,
     getWithAttachments,
     addAttachment,
+    reextractAttachment,
+    listPendingAttachments,
+    markAttachmentFailed,
     deleteAttachment,
     purgeAttachmentBlobs,
     getAttachment,
