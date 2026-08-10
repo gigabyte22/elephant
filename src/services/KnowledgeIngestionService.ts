@@ -41,10 +41,6 @@ interface Deps {
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
     maxAttachmentBytes?: number;
-    /** Returns true for MIME types whose extraction should be queued for the
-     *  async worker instead of run inline. Injected so the service stays
-     *  independent of provider configuration. */
-    deferExtraction?: (mimeType: string) => boolean;
   };
 }
 
@@ -356,18 +352,17 @@ export function createKnowledgeIngestionService(deps: Deps) {
 
     const scope: Scope = { projectId: existing.projectId, userId: existing.userId };
     const stored = await blobStore.put(data);
-    // Vision and transcription calls take seconds to minutes — well past the 30s
-    // timeout dobby's client puts on this request, whose retries would each
-    // create another attachment. Queue those for the worker and return now; text
-    // and PDF are milliseconds and stay inline.
-    const deferred = config.deferExtraction?.(input.mimeType) ?? false;
-    const extracted: ExtractionResult = deferred
-      ? { status: 'pending', text: '', detail: 'queued for extraction' }
-      : await extraction.extract({
-          data,
-          mimeType: input.mimeType,
-          filename: input.filename,
-        });
+    // allowSlow: false — an extractor that needs seconds to minutes (vision,
+    // transcription, OCR of a scanned PDF) returns 'pending' instead of running
+    // here, because this request is under a client timeout whose retries would
+    // each create another attachment. The worker re-runs those with allowSlow.
+    // Text and a PDF with a text layer answer in milliseconds and stay inline.
+    const extracted: ExtractionResult = await extraction.extract({
+      data,
+      mimeType: input.mimeType,
+      filename: input.filename,
+      allowSlow: false,
+    });
 
     const attachmentId = newId();
     const chunks =
@@ -439,10 +434,13 @@ export function createKnowledgeIngestionService(deps: Deps) {
     const stream = await blobStore.getStream(attachment.blobId);
     const data = await buffer(stream);
 
+    // The worker and the backfill are the slow path: nothing is waiting on this
+    // call, so an extractor that needs a model gets to make it here.
     const extracted = await extraction.extract({
       data,
       mimeType: attachment.mimeType,
       filename: attachment.filename,
+      allowSlow: true,
     });
 
     const scope: Scope = { projectId: attachment.projectId, userId: attachment.userId };

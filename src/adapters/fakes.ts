@@ -13,6 +13,7 @@ import type {
 } from '../models/types.ts';
 import { approxTokens } from '../utils/tokens.ts';
 import type { EmbeddingAdapter } from './embeddings/types.ts';
+import { deferred } from './extraction/service.ts';
 import type { ExtractionResult, ExtractionService } from './extraction/types.ts';
 import type { LLMAdapter } from './llm/types.ts';
 import type { BlobStore } from './storage/types.ts';
@@ -165,18 +166,25 @@ export function createFakeBlobStore(): BlobStore & { count: () => number } {
 }
 
 /** Extraction service driven by a MIME → result table, plus a call counter so
- *  tests can assert that deferred extraction did NOT run inline. */
+ *  tests can assert that deferred extraction did NOT run inline.
+ *
+ *  A configured result whose derivation is 'model' stands for a real extractor
+ *  that needs a provider, so it defers unless the caller allows the slow path —
+ *  the same contract vision, transcription and PDF OCR follow. */
 export function createFakeExtractionService(
   byMime: Record<string, ExtractionResult> = {},
 ): ExtractionService & { calls: () => number } {
   let calls = 0;
   return {
-    async extract({ mimeType }): Promise<ExtractionResult> {
+    async extract({ mimeType, allowSlow }): Promise<ExtractionResult> {
       calls++;
       const key = Object.keys(byMime).find(
         (k) => k === mimeType || (k.endsWith('/') && mimeType.startsWith(k)),
       );
-      return key ? byMime[key]! : { status: 'unsupported', text: '', detail: mimeType };
+      if (!key) return { status: 'unsupported', text: '', detail: mimeType };
+      const result = byMime[key]!;
+      if (result.derivation === 'model' && !allowSlow) return deferred('fake slow extraction');
+      return result;
     },
     calls: () => calls,
   };

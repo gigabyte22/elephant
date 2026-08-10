@@ -135,6 +135,10 @@ const EnvSchema = z
     // Text attachments are the one family extracted inline (they take
     // milliseconds), so the request path is only as bounded as this cap.
     KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES: z.coerce.number().int().positive().default(2_097_152), // 2 MiB
+    // A PDF with no text layer is a scan: its pages are rendered and OCR'd,
+    // one model call each, so the page count is the cost. Beyond this the
+    // attachment is recorded 'truncated' with what was read.
+    KNOWLEDGE_PDF_OCR_MAX_PAGES: z.coerce.number().int().positive().default(10),
     // How often the async worker drains 'pending' attachments.
     KNOWLEDGE_EXTRACTION_CRON: z.string().default('*/2 * * * *'),
 

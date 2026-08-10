@@ -11,7 +11,6 @@ import {
   buildVaultWriter,
   buildWorkingStateAdapter,
   describeExtractionCapabilities,
-  isDeferredExtraction,
 } from './adapters/factory.ts';
 import type { LLMAdapter } from './adapters/llm/types.ts';
 import type { BlobStore } from './adapters/storage/types.ts';
@@ -171,7 +170,6 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       config: {
         ...sharedConfig,
         maxAttachmentBytes: env.KNOWLEDGE_MAX_ATTACHMENT_BYTES,
-        deferExtraction: (mimeType) => isDeferredExtraction(env, mimeType),
       },
     }),
     procedures: createProcedureService({

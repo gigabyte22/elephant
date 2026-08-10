@@ -1,5 +1,12 @@
 import type { ExtractionInput, ExtractionResult, ExtractionService, Extractor } from './types.ts';
 
+/** What an extractor returns when it needs the background worker: the bytes are
+ *  stored, nothing is indexed yet, and `reextractAttachment` will run it again
+ *  with `allowSlow`. */
+export function deferred(what: string): ExtractionResult {
+  return { status: 'pending', text: '', detail: `queued for ${what}` };
+}
+
 // A placeholder for a media type we know how to handle but have no provider for.
 // Registering one keeps 'unsupported' honest — it now means "no extractor exists
 // for this MIME" rather than doubling as "OCR is switched off", which is the
