@@ -277,19 +277,65 @@ describe('the worker sequence', () => {
     expect(await container.knowledge.listPendingAttachments(1)).toEqual([]);
   });
 
-  test('a structurally failed attachment is recorded, not left to spin', async () => {
+  test('a structural failure backs the attachment off instead of spinning on it', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
 
     // What the worker does when extraction throws for a reason the extractors
     // cannot map themselves — a missing blob, an embedder outage. Leaving it
-    // 'pending' would re-claim the same row every tick and starve the queue.
-    await container.knowledge.markAttachmentFailed(attachmentId, 'blob 123 not found');
+    // 'pending' and due would re-claim the same row every tick and starve the
+    // queue; failing it outright would make a five-minute outage permanent.
+    const first = await container.knowledge.markAttachmentFailed(
+      attachmentId,
+      'blob 123 not found',
+    );
 
-    expect(await container.knowledge.listPendingAttachments(1)).toEqual([]);
+    expect(first).toEqual({ attempts: 1, deadLettered: false });
+    const att = await container.knowledge.getAttachment(attachmentId);
+    expect(att?.extractionStatus).toBe('pending');
+    expect(att?.detail).toBe('blob 123 not found');
+    // Still owed, but not due — so it is out of the worker's way meanwhile.
+    expect(await container.knowledge.listPendingAttachments(5)).toEqual([]);
+    expect(await container.knowledge.extractionQueueDepth()).toEqual({
+      pending: 1,
+      deadLettered: 0,
+    });
+  });
+
+  test('dead-letters an attachment once its attempts are spent', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    const attempts = container.env.KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS;
+    const outcomes = [];
+    for (let i = 0; i < attempts; i++) {
+      outcomes.push(await container.knowledge.markAttachmentFailed(attachmentId, 'provider down'));
+    }
+
+    expect(outcomes.map((o) => o.deadLettered)).toEqual([
+      ...Array.from({ length: attempts - 1 }, () => false),
+      true,
+    ]);
     const att = await container.knowledge.getAttachment(attachmentId);
     expect(att?.extractionStatus).toBe('failed');
-    expect(att?.detail).toBe('blob 123 not found');
+    // 'failed' is the terminal state the backfill script exists to recover.
+    expect(await container.knowledge.extractionQueueDepth()).toEqual({
+      pending: 0,
+      deadLettered: 1,
+    });
+  });
+
+  test('a successful extraction clears the retry state', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+    await container.knowledge.markAttachmentFailed(attachmentId, 'transient');
+
+    await container.knowledge.reextractAttachment(attachmentId);
+
+    const att = await container.knowledge.getAttachment(attachmentId);
+    expect(att?.extractionStatus).toBe('done');
+    expect(att?.extractionAttempts).toBe(0);
+    expect(att?.extractionNextAttemptAt).toBeNull();
   });
 
   test('a re-extraction reads the stored blob instead of re-uploading', async () => {

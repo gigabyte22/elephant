@@ -7,6 +7,8 @@ export interface AudioConfig {
   openaiBaseUrl?: string;
   /** Ceiling for a single transcription. Long recordings are slow on local Whisper. */
   timeoutMs: number;
+  /** Largest payload the transcription endpoint accepts. */
+  maxBytes: number;
 }
 
 /** The MIME types this extractor claims. Exported so the factory can register a
@@ -25,6 +27,19 @@ export function createAudioExtractor(config: AudioConfig): Extractor {
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
       // Transcription is minutes for a long recording; never inline.
       if (!input.allowSlow) return deferred('transcription');
+
+      // Refuse an oversized file up front. Sending it anyway spends the whole
+      // timeout (five minutes by default) to arrive at a 413, and reports it as
+      // 'failed' — which reads like an outage rather than a file this endpoint
+      // will never accept. Splitting long audio needs ffmpeg and is not
+      // something this adapter pretends to do.
+      if (input.data.byteLength > config.maxBytes) {
+        return {
+          status: 'skipped',
+          text: '',
+          detail: `audio is ${input.data.byteLength} bytes; the transcription endpoint accepts ${config.maxBytes}. Split it before uploading.`,
+        };
+      }
 
       try {
         const { default: OpenAI, toFile } = await import('openai');

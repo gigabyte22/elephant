@@ -170,6 +170,8 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       config: {
         ...sharedConfig,
         maxAttachmentBytes: env.KNOWLEDGE_MAX_ATTACHMENT_BYTES,
+        maxExtractionAttempts: env.KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS,
+        extractionRetryBackoffBaseMs: env.KNOWLEDGE_EXTRACTION_RETRY_BACKOFF_MS,
       },
     }),
     procedures: createProcedureService({

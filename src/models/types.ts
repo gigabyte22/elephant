@@ -333,6 +333,12 @@ export const KnowledgeAttachmentSchema = z
     extractedChars: z.number().int().nonnegative().default(0),
     detail: z.string().optional(),
     createdAt: z.date(),
+    // Extraction retry state, mirroring Episode's dream queue. A provider
+    // outage is transient, so a structural failure earns a bounded number of
+    // further attempts on a backoff before it is dead-lettered as 'failed'.
+    // Absent on attachments written before this existed, where 0 is right.
+    extractionAttempts: z.number().int().nonnegative().optional(),
+    extractionNextAttemptAt: z.date().nullable().optional(),
   })
   .merge(ScopeSchema);
 export type KnowledgeAttachment = z.infer<typeof KnowledgeAttachmentSchema>;

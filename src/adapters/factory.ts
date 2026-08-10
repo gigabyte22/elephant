@@ -243,6 +243,7 @@ export function buildExtractionService(env: Env): ExtractionService {
         openaiApiKey: transcribe.key,
         openaiBaseUrl: transcribe.baseUrl,
         timeoutMs: env.KNOWLEDGE_TRANSCRIBE_TIMEOUT_MS,
+        maxBytes: env.KNOWLEDGE_TRANSCRIBE_MAX_BYTES,
       }),
     );
   } else {
