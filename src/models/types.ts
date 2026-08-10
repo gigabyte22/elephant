@@ -65,6 +65,12 @@ export const EpisodeSchema = z
     // backdated on import, so it cannot order a work queue. Optional because
     // episodes written before this field existed do not have it.
     recordedAt: z.date().optional(),
+    // True while `summary` is a clipped head of the transcript rather than a
+    // real summary. Ingestion writes one of these instead of blocking the
+    // request on a summarize call; the dreamer replaces it and re-embeds.
+    // Absent on episodes written before this existed, whose summaries are
+    // already the finished article.
+    summaryProvisional: z.boolean().optional(),
     // Dream progress, stamped per episode rather than tracked by a single
     // global cursor. A cursor conflates "how far have we got" with "what still
     // needs doing", which is why it both skipped backdated episodes and
@@ -142,6 +148,12 @@ export const FactSchema = z
     // keeps it backwards-compatible with facts written before the columns existed.
     referenceCount: z.number().int().nonnegative().optional(),
     lastReferencedAt: z.date().nullable().optional(),
+    // When this fact was checked for contradicting an existing one. Null on a
+    // fact written through POST /facts, which no longer waits on that LLM call
+    // — the dreamer's supersede sweep claims those. Dream-created facts are
+    // checked as they are extracted, so they are stamped at creation. Absent on
+    // facts written before this existed, which the sweep then picks up once.
+    supersedeCheckedAt: z.date().nullable().optional(),
     // Optional origin scope for direct writes with no source episode
     // (precedent: IntentionSchema). Facts extracted from episodes derive
     // origin from the episode instead; these stay unset there.
@@ -468,6 +480,12 @@ export const DreamRunSchema = z.object({
   episodesFailed: z.number().int().nonnegative().default(0),
   factsCreated: z.number().int().nonnegative().default(0),
   factsSuperseded: z.number().int().nonnegative().default(0),
+  // Facts written through POST /facts that this cycle ran the contradiction
+  // check for. Distinct from factsSuperseded, which counts the facts that check
+  // actually closed — most sweeps find nothing, and that is the healthy case.
+  factsSupersedeSwept: z.number().int().nonnegative().default(0),
+  // Episodes whose clipped-head summary this cycle replaced with a real one.
+  summariesInstalled: z.number().int().nonnegative().default(0),
   factsPruned: z.number().int().nonnegative().default(0),
   factsMerged: z.number().int().nonnegative().default(0),
   insightsPromoted: z.number().int().nonnegative().default(0),

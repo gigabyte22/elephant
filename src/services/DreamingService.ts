@@ -27,6 +27,7 @@ import { newId } from '../utils/ids.ts';
 import { nextRetryAt } from '../utils/retry.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
+import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import type { GraphProjectionService } from './graph/GraphProjectionService.ts';
 
 const DREAMER_ACTOR = 'dreamer';
@@ -57,6 +58,12 @@ interface Deps {
     // crossScopeDedup widens both searches to the unscoped personal bucket.
     dedupThreshold: number;
     supersedeVectorThreshold: number;
+    /** Facts the supersede sweep claims per cycle; 0 disables the pass. */
+    supersedeSweepMaxFacts: number;
+    /** Episodes whose provisional summary is upgraded per cycle; 0 disables. */
+    summarySweepMaxEpisodes: number;
+    /** Target length for an installed summary, matching ingestion's. */
+    summaryTargetTokens: number;
     promoteInsightImportance: number;
     insightDedupThreshold: number;
     insightRetireBatchLimit: number;
@@ -82,6 +89,11 @@ interface Deps {
 const EXTRACTION_CONTEXT_USABLE = 0.75;
 const EXTRACTION_INPUT_TOKEN_CAP = 2000;
 
+// How settled a directly-written fact must be before the sweep checks it. An
+// orchestrator writing a batch of related facts would otherwise have the first
+// of them judged against siblings that have not landed yet.
+const SUPERSEDE_SWEEP_GRACE_MS = 60_000;
+
 export class DreamInProgressError extends Error {
   constructor(public readonly runningJobId: string) {
     super(`dream run ${runningJobId} is already in progress`);
@@ -99,6 +111,8 @@ function newDreamRun(id?: string): DreamRun {
     episodesFailed: 0,
     factsCreated: 0,
     factsSuperseded: 0,
+    factsSupersedeSwept: 0,
+    summariesInstalled: 0,
     factsPruned: 0,
     factsMerged: 0,
     insightsPromoted: 0,
@@ -176,6 +190,10 @@ export function createDreamingService(deps: Deps) {
     maxAttempts: config.maxDreamAttempts,
     baseMs: config.retryBackoffBaseMs,
   };
+
+  // Same map-reduce ingestion uses, so a summary written here is the one that
+  // POST /episodes would have produced had it waited.
+  const summarize = createBoundedSummarizer(llm, config.summaryTargetTokens);
 
   // Serializes /dream invocations + the cron. Second caller gets thrown
   // DreamInProgressError, which HTTP maps to 409.
@@ -274,6 +292,15 @@ export function createDreamingService(deps: Deps) {
         }),
       );
 
+      // Repay the write path's debt first: an episode whose summary is still a
+      // clipped head is under-searchable at the episode level, and this cycle
+      // may not reach its later passes if the backlog is deep.
+      try {
+        await installEpisodeSummaries(run, deadline);
+      } catch (err) {
+        logLLMError(`[dream ${run.id}] summary install failed, skipping`, err);
+      }
+
       // Chronological processing. Within one episode, facts are siblings
       // (no mutual supersede); across episodes, later facts CAN supersede
       // earlier ones. Preserves cross-episode contradiction detection while
@@ -330,6 +357,15 @@ export function createDreamingService(deps: Deps) {
           await resolveEntityGraph(touchedEntityIds, run);
         } catch (err) {
           logLLMError(`[dream ${run.id}] entity resolution failed, skipping`, err);
+        }
+        // Runs after the per-episode passes so a fact written while this cycle
+        // was mid-flight is judged against everything the cycle just learned,
+        // and before consolidation so a superseded fact is not merged into a
+        // canonical one on its way out.
+        try {
+          await supersedeSweep(run, deadline, supersededInCycle);
+        } catch (err) {
+          logLLMError(`[dream ${run.id}] supersede sweep failed, skipping`, err);
         }
         // Consolidation runs before promote/prune so promotion sees the merged
         // canonical fact and prune evaluates the consolidated set.
@@ -493,6 +529,9 @@ export function createDreamingService(deps: Deps) {
             // their own dream-learned facts and don't leak into other scopes.
             projectId: ep.projectId,
             userId: ep.userId,
+            // The contradiction pass below covers this fact, so the sweep that
+            // picks up unchecked facts must not claim it a second time.
+            supersedeCheckedAt: now,
           };
           const created = await FactRepository.create(tx, fact, {
             sourceChunkIds: group.chunkIds,
@@ -569,77 +608,202 @@ export function createDreamingService(deps: Deps) {
     const epFactIds = new Set(newFromThisEp.map((f) => f.id));
     for (const fact of newFromThisEp) {
       if (supersededInCycle.has(fact.id)) continue;
-      const candidates = await read((tx) =>
-        FactRepository.listSimilar(tx, {
-          embedding: fact.embedding,
-          limit: 8,
-          minScore: config.supersedeVectorThreshold,
-          includeSuperseded: false,
-          // Supersede within this episode's own bucket, or the unscoped
-          // personal bucket — never another project's.
-          dedupScope: {
-            projectId: ep.projectId ?? null,
-            includeUnscoped: config.crossScopeDedup && !ep.isolated,
-            userId: ep.userId ?? null,
-          },
-        }),
-      );
-      const others = candidates.filter((c) => c.id !== fact.id && !epFactIds.has(c.id));
-      if (others.length === 0) continue;
-
-      let decision: Awaited<ReturnType<typeof llm.detectSupersede>>;
-      try {
-        decision = await llm.detectSupersede({
-          candidate: { id: fact.id, content: fact.content },
-          existing: others.map((o) => ({ id: o.id, content: o.content })),
-        });
-      } catch (err) {
-        run.supersedeFailures += 1;
-        logLLMError(
-          `[dream ${run.id}] detectSupersede failed for fact=${fact.id} in episode=${ep.id}, skipping`,
-          err,
-        );
-        continue;
-      }
-      if (!decision) continue;
-
-      const oldFact = others.find((o) => o.id === decision.oldFactId);
-      if (!oldFact) continue;
-      const now = new Date();
-      const validTo = eventValidTo(oldFact.validFrom, fact.validFrom);
-
-      const superseded = await write(async (tx) => {
-        const { newConfidence, applied } = await FactRepository.supersede(tx, {
-          oldId: decision.oldFactId,
-          newId: fact.id,
-          reason: decision.reason,
-          validTo,
-          supersededAt: now,
-          confidenceDelta: decision.confidenceDelta,
-        });
-        // The candidate was redacted or already closed between the search and
-        // this write. Nothing changed, so don't log or count it.
-        if (!applied) return false;
-        await retireInsights(tx, run, [decision.oldFactId], 'source_superseded');
-        await recordDreamerEvent(tx, run, {
-          kind: 'supersede',
-          targetId: decision.oldFactId,
-          targetKind: 'fact',
-          payload: {
-            newFactId: fact.id,
-            reason: decision.reason,
-            confidenceDelta: decision.confidenceDelta,
-            ...(newConfidence !== null ? { newConfidence } : {}),
-          },
-        });
-        return true;
+      await checkSupersede(fact, run, {
+        // Supersede within this episode's own bucket, or the unscoped personal
+        // bucket — never another project's.
+        dedupScope: {
+          projectId: ep.projectId ?? null,
+          includeUnscoped: config.crossScopeDedup && !ep.isolated,
+          userId: ep.userId ?? null,
+        },
+        exclude: epFactIds,
+        supersededInCycle,
+        context: `episode=${ep.id}`,
       });
-      if (!superseded) continue;
-      supersededInCycle.add(decision.oldFactId);
-      run.factsSuperseded += 1;
     }
 
     return newFromThisEp;
+  }
+
+  /**
+   * Does `fact` contradict something already stored? If so, close the loser at
+   * event time and record it.
+   *
+   * Shared by the two callers that ask: the per-episode pass above, and the
+   * sweep over facts written straight to POST /facts. Best-effort throughout —
+   * the fact is already committed, so a model hiccup skips this fact rather
+   * than failing anything.
+   *
+   * Resolves false only when the model call threw, which is the sweep's cue to
+   * leave the fact unstamped and retry it next cycle. Every other outcome —
+   * including "nothing contradicts this" — is a completed check.
+   */
+  async function checkSupersede(
+    fact: Fact,
+    run: DreamRun,
+    opts: {
+      dedupScope: { projectId: string | null; includeUnscoped: boolean; userId: string | null };
+      /** Facts that must not be treated as prior art — an episode's siblings. */
+      exclude?: Set<string>;
+      supersededInCycle: Set<string>;
+      /** Names the caller in log lines. */
+      context: string;
+    },
+  ): Promise<boolean> {
+    const candidates = await read((tx) =>
+      FactRepository.listSimilar(tx, {
+        embedding: fact.embedding,
+        limit: 8,
+        minScore: config.supersedeVectorThreshold,
+        includeSuperseded: false,
+        dedupScope: opts.dedupScope,
+      }),
+    );
+    const others = candidates.filter((c) => c.id !== fact.id && !opts.exclude?.has(c.id));
+    if (others.length === 0) return true;
+
+    let decision: Awaited<ReturnType<typeof llm.detectSupersede>>;
+    try {
+      decision = await llm.detectSupersede({
+        candidate: { id: fact.id, content: fact.content },
+        existing: others.map((o) => ({ id: o.id, content: o.content })),
+      });
+    } catch (err) {
+      run.supersedeFailures += 1;
+      logLLMError(
+        `[dream ${run.id}] detectSupersede failed for fact=${fact.id} in ${opts.context}, skipping`,
+        err,
+      );
+      return false;
+    }
+    if (!decision) return true;
+
+    const oldFact = others.find((o) => o.id === decision.oldFactId);
+    if (!oldFact) return true;
+    const now = new Date();
+    const validTo = eventValidTo(oldFact.validFrom, fact.validFrom);
+
+    const superseded = await write(async (tx) => {
+      const { newConfidence, applied } = await FactRepository.supersede(tx, {
+        oldId: decision.oldFactId,
+        newId: fact.id,
+        reason: decision.reason,
+        validTo,
+        supersededAt: now,
+        confidenceDelta: decision.confidenceDelta,
+      });
+      // The candidate was redacted or already closed between the search and
+      // this write. Nothing changed, so don't log or count it.
+      if (!applied) return false;
+      await retireInsights(tx, run, [decision.oldFactId], 'source_superseded');
+      await recordDreamerEvent(tx, run, {
+        kind: 'supersede',
+        targetId: decision.oldFactId,
+        targetKind: 'fact',
+        payload: {
+          newFactId: fact.id,
+          reason: decision.reason,
+          confidenceDelta: decision.confidenceDelta,
+          ...(newConfidence !== null ? { newConfidence } : {}),
+        },
+      });
+      return true;
+    });
+    if (!superseded) return true;
+    opts.supersededInCycle.add(decision.oldFactId);
+    run.factsSuperseded += 1;
+    return true;
+  }
+
+  /**
+   * Replace the clipped-head summaries ingestion wrote in place of a real one.
+   *
+   * Summarizing a long transcript is a map-reduce of several sequential LLM
+   * calls; doing it inside POST /episodes was the last blocking model call on
+   * the write path. Until this runs, the episode's summary vector matches on
+   * its opening lines only — the transcript's chunks are fully embedded either
+   * way, so content recall is unaffected, but episode-level recall is
+   * head-biased for one cycle.
+   *
+   * Runs before fact extraction so a cycle that later hits its deadline has
+   * still repaid the write path's debt.
+   */
+  async function installEpisodeSummaries(run: DreamRun, deadline: number): Promise<void> {
+    if (config.summarySweepMaxEpisodes === 0) return;
+    const pending = await read((tx) =>
+      EpisodeRepository.listProvisionalSummaries(tx, config.summarySweepMaxEpisodes),
+    );
+    for (const ep of pending) {
+      if (Date.now() >= deadline) break;
+      try {
+        const tokens = await llm.countTokens(ep.rawTranscript);
+        const summary = await summarize(ep.rawTranscript, tokens);
+        const embedding = await embedder.embed(summary);
+        await write((tx) =>
+          EpisodeRepository.installSummary(tx, { id: ep.id, summary, embedding }),
+        );
+        run.summariesInstalled += 1;
+      } catch (err) {
+        // The clipped head stays in place and the episode stays claimable, so
+        // the next cycle tries again. Best-effort like every other sub-pass.
+        logLLMError(`[dream ${run.id}] summarize failed for episode=${ep.id}, keeping head`, err);
+      }
+    }
+  }
+
+  /**
+   * Contradiction check for facts nobody has checked yet.
+   *
+   * POST /facts used to run this inline, which put a vector search and a
+   * blocking LLM call in the write request — on the same provider the dream
+   * cycle uses, so a busy orchestrator and the dreamer queued behind each
+   * other. Those facts are now written unchecked and claimed here.
+   *
+   * Facts are stamped as checked whatever the outcome, so one that survives is
+   * not re-examined every cycle forever; only a fact whose check threw is left
+   * unstamped, which is what makes the next cycle retry it.
+   */
+  async function supersedeSweep(
+    run: DreamRun,
+    deadline: number,
+    supersededInCycle: Set<string>,
+  ): Promise<void> {
+    if (config.supersedeSweepMaxFacts === 0) return;
+    const pending = await read((tx) =>
+      FactRepository.listPendingSupersedeCheck(tx, {
+        limit: config.supersedeSweepMaxFacts,
+        // Facts written in the last minute are left alone: an orchestrator
+        // often writes a batch, and checking one against its own siblings
+        // before they have all landed is the sibling problem the episode pass
+        // solves with an exclude set.
+        before: new Date(Date.now() - SUPERSEDE_SWEEP_GRACE_MS),
+      }),
+    );
+    const checked: string[] = [];
+    for (const fact of pending) {
+      if (Date.now() >= deadline) break;
+      // Already closed by an earlier pass this cycle — nothing left to judge,
+      // but it is done with the queue either way.
+      if (supersededInCycle.has(fact.id)) {
+        checked.push(fact.id);
+        continue;
+      }
+      const completed = await checkSupersede(fact, run, {
+        dedupScope: {
+          projectId: fact.projectId ?? null,
+          includeUnscoped: config.crossScopeDedup,
+          userId: fact.userId ?? null,
+        },
+        supersededInCycle,
+        context: 'supersede sweep',
+      });
+      // A failed check leaves the stamp off so the next cycle tries again.
+      if (completed) checked.push(fact.id);
+    }
+    if (checked.length > 0) {
+      await write((tx) => FactRepository.markSupersedeChecked(tx, checked, new Date()));
+    }
+    run.factsSupersedeSwept += checked.length;
   }
 
   // Decide how to feed the LLM for one Episode. Always pack chunks greedily

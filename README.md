@@ -40,10 +40,12 @@ vector database, SQL store, or queue to operate.
 
 ## How it works
 
-Your orchestrator POSTs raw conversation **episodes**; Elephant chunks,
-summarizes, and embeds them. Extraction (inline or during dreaming) turns
-episodes into **facts** and **preferences**, which link to auto-upserted
-**entities** — the hubs of the knowledge graph. Recall queries the whole
+Your orchestrator POSTs raw conversation **episodes**; Elephant chunks and
+embeds them. Writes never wait on a model: the summary of a long transcript
+and the contradiction check on a directly-written fact both happen in the
+dream cycle, not in the request. Extraction turns episodes into **facts** and
+**preferences**, which link to auto-upserted **entities** — the hubs of the
+knowledge graph. Recall queries the whole
 structure hybridly and returns a ranked, scoped working set. Everything is
 auditable: fact creation, supersession, and deletion all record audit events
 with revision snapshots.

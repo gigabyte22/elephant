@@ -29,6 +29,7 @@ function toFact(node: Record<string, unknown>, extras: { entityIds?: string[] } 
     sourceEpisodeId: (node.sourceEpisodeId as string | undefined) ?? undefined,
     referenceCount: (node.referenceCount as number | undefined) ?? 0,
     lastReferencedAt: toJsDateOrNull(node.lastReferencedAt),
+    supersedeCheckedAt: toJsDateOrNull(node.supersedeCheckedAt),
     agentId: (node.agentId as string | null | undefined) ?? undefined,
     sessionId: (node.sessionId as string | null | undefined) ?? undefined,
     ...readScope(node),
@@ -56,6 +57,8 @@ export const FactRepository = {
            f.embedding = $embedding,
            f.sourceEpisodeId = $sourceEpisodeId,
            f.mergedFromFactIds = $mergedFromFactIds,
+           f.supersedeCheckedAt = CASE
+             WHEN $supersedeCheckedAt IS NULL THEN NULL ELSE datetime($supersedeCheckedAt) END,
            f.agentId = $agentId,
            f.sessionId = $sessionId
        RETURN f {.*} AS f`,
@@ -71,6 +74,7 @@ export const FactRepository = {
         embedding: fact.embedding,
         sourceEpisodeId: fact.sourceEpisodeId ?? null,
         mergedFromFactIds: fact.mergedFromFactIds ?? null,
+        supersedeCheckedAt: nullableDateParam(fact.supersedeCheckedAt ?? null),
         agentId: fact.agentId ?? null,
         sessionId: fact.sessionId ?? null,
         ...memoryItemParams('fact', fact),
@@ -438,6 +442,44 @@ export const FactRepository = {
     return result.records.map((r) =>
       toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),
     );
+  },
+
+  // Live facts whose contradiction check has not run: everything written
+  // through POST /facts (which no longer waits on an LLM) plus anything that
+  // predates the property. Ordered oldest-first so a backlog drains in the
+  // order it arrived. `before` excludes facts written moments ago, so a fact
+  // still being written when the cycle started is left for the next one.
+  async listPendingSupersedeCheck(
+    tx: ManagedTransaction,
+    input: { limit: number; before: Date },
+  ): Promise<Fact[]> {
+    const result = await tx.run(
+      `MATCH (f:Fact)
+       WHERE f.supersedeCheckedAt IS NULL
+         AND f.deletedAt IS NULL
+         AND f.validTo IS NULL
+         AND f.recordedAt <= datetime($before)
+       OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(f)
+       WITH f, collect(e.id) AS entityIds
+       RETURN f {.*} AS f, entityIds
+       ORDER BY f.recordedAt ASC
+       LIMIT toInteger($limit)`,
+      { limit: input.limit, before: dateParam(input.before) },
+    );
+    return result.records.map((r) =>
+      toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),
+    );
+  },
+
+  // Mark the check as done, whatever its outcome. A fact that survived the
+  // check and one that superseded something are equally finished with it; only
+  // an error leaves the stamp unset, which is what makes the sweep retry it.
+  async markSupersedeChecked(tx: ManagedTransaction, ids: string[], at: Date): Promise<void> {
+    if (ids.length === 0) return;
+    await tx.run(`MATCH (f:Fact) WHERE f.id IN $ids SET f.supersedeCheckedAt = datetime($at)`, {
+      ids,
+      at: dateParam(at),
+    });
   },
 
   async incrementReferenceCount(tx: ManagedTransaction, id: string): Promise<void> {

@@ -122,6 +122,19 @@ beforeEach(async () => {
   });
 });
 
+/** Run the dream cycle's supersede sweep over everything written so far. The
+ *  backdate clears the settling window that otherwise defers a just-written
+ *  fact to the following cycle. */
+async function sweepUncheckedFacts(): Promise<void> {
+  await txWrite((tx) =>
+    tx.run(
+      `MATCH (f:Fact) WHERE f.supersedeCheckedAt IS NULL
+       SET f.recordedAt = datetime() - duration({minutes: 5})`,
+    ),
+  );
+  await container.dreaming.runCycle();
+}
+
 async function postEpisode(rawTranscript: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
@@ -340,7 +353,7 @@ describe('dream cycle robustness', () => {
     expect(tombstone).not.toBeNull();
   });
 
-  test('ingest supersede check cannot cross into another project', async () => {
+  test('the supersede sweep cannot cross into another project', async () => {
     // Preseed a fact in proj-Q lexically close to the incoming proj-P fact
     // (5 of 6 shared tokens → cosine ≈0.91, above the supersede floor).
     const now = new Date(Date.now() - 60_000);
@@ -364,6 +377,9 @@ describe('dream cycle robustness', () => {
       content: 'alpha beta gamma delta epsilon',
       projectId: 'proj-P',
     });
+    // The check runs in the dream cycle now, not in saveFact — the scope guard
+    // travelled with it, and that is what this pins.
+    await sweepUncheckedFacts();
 
     // The scope filter kept proj-Q out of the candidate set → still live.
     const stillLive = await read(async (tx) => {
@@ -387,6 +403,7 @@ describe('dream cycle robustness', () => {
       content: 'alpha beta gamma delta epsilon',
       projectId: 'proj-P',
     });
+    await sweepUncheckedFacts();
     const superseded = await read(async (tx) => {
       const r = await tx.run('MATCH (f:Fact {id: $id}) RETURN f.validTo AS validTo', {
         id: personal.id,

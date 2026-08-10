@@ -12,6 +12,7 @@ import { InsightRepository } from '../repositories/InsightRepository.ts';
 import { newId } from '../utils/ids.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
+import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import { type Chunker, createChunker } from './Chunker.ts';
 
 const INGEST_ACTOR = 'memory-ingest';
@@ -52,6 +53,23 @@ interface Deps {
     summaryThresholdTokens: number;
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
+    /**
+     * Where the contradiction check for an explicitly-written fact runs.
+     *
+     * 'dream' (default) leaves the fact unchecked and lets the dreamer's
+     * supersede sweep claim it, so POST /facts returns without an LLM call in
+     * the request. 'inline' restores the old behaviour for a deployment that
+     * wants a contradiction closed the instant it is written and can afford
+     * the latency.
+     */
+    supersedeMode: 'dream' | 'inline';
+    /**
+     * Write a clipped-head summary for an oversized transcript and let the
+     * dream cycle install the real one, rather than summarizing in the request.
+     * False restores the blocking behaviour for a deployment whose recall leans
+     * on episode-level summaries and cannot wait a cycle for them.
+     */
+    deferSummary: boolean;
   };
 }
 
@@ -86,48 +104,9 @@ interface SaveFactInput {
 
 const SUPERSEDE_VECTOR_THRESHOLD = 0.85;
 
-// Fraction of the LLM context usable as summarizer INPUT — the rest covers the
-// system prompt, the instruction wrapper, and the response budget. Mirrors the
-// dreamer's EXTRACTION_CONTEXT_USABLE stance.
-const SUMMARY_CONTEXT_USABLE = 0.6;
-// Map-reduce rounds before giving up and hard-truncating: each round shrinks
-// the text by ~an order of magnitude, so 3 covers any sane transcript.
-const SUMMARY_MAX_ROUNDS = 3;
-
-/**
- * Map-reduce summarize that never exceeds the LLM context: oversized text is
- * chunked (in LLM tokens, not embedder tokens), each piece summarized, and the
- * joined piece-summaries reduced again until they fit. A giant transcript used
- * to go up as ONE prompt — a guaranteed "context exceeded" after minutes of
- * prefill, which wedged every slot of the shared llama.cpp server (2026-07-11
- * starvation incident).
- */
-export function createBoundedSummarizer(
-  llm: LLMAdapter,
-  targetTokens: number,
-): (text: string, tokens: number) => Promise<string> {
-  const chunker = createChunker({ countTokens: (t) => llm.countTokens(t) });
-  return async function summarizeBounded(text: string, tokens: number): Promise<string> {
-    const inputBudget = Math.floor(llm.maxContextTokens * SUMMARY_CONTEXT_USABLE);
-    let current = text;
-    let currentTokens = tokens;
-    for (let round = 0; round < SUMMARY_MAX_ROUNDS; round++) {
-      if (currentTokens <= inputBudget) {
-        return llm.summarize({ text: current, targetTokens });
-      }
-      const pieces = await chunker.chunk(current, { maxTokens: inputBudget, overlapTokens: 0 });
-      const partials: string[] = [];
-      for (const piece of pieces) {
-        partials.push(await llm.summarize({ text: piece.text, targetTokens }));
-      }
-      current = partials.join('\n');
-      currentTokens = await llm.countTokens(current);
-    }
-    console.warn(
-      `[ingest] summary map-reduce did not converge after ${SUMMARY_MAX_ROUNDS} rounds; truncating input`,
-    );
-    return llm.summarize({ text: current.slice(0, inputBudget * 4), targetTokens });
-  };
+/** The first ~targetTokens of a transcript, as a stand-in summary. */
+function clipHead(text: string, targetTokens: number): string {
+  return text.slice(0, targetTokens * 4);
 }
 
 // Defaults differ between the single-write and batch paths:
@@ -167,30 +146,7 @@ export function createMemoryIngestionService(deps: Deps) {
     }
 
     // 2. Episode-level summary for top-level recall.
-    let summary: string;
-    if (input.summary) {
-      const sumTokens = await embedder.countTokens(input.summary);
-      if (sumTokens > embedderLimit) {
-        throw badRequest(
-          `summary exceeds embedder limit of ${embedderLimit} tokens (got ~${sumTokens}). Supply a shorter summary or omit it and let the service generate one.`,
-        );
-      }
-      summary = input.summary;
-    } else if (rawTokens > config.summaryThresholdTokens) {
-      try {
-        summary = await summarizeBounded(input.rawTranscript, rawTokens);
-      } catch (err) {
-        // A failed summarize must not fail the ingestion — the caller retries
-        // the identical oversized payload forever (poison pill). Degrade to a
-        // clipped head; the full transcript still lands in chunks for the
-        // dreamer to distill.
-        console.warn('[ingest] summarize failed, using clipped head:', (err as Error).message);
-        summary = input.rawTranscript.slice(0, config.summaryTargetTokens * 4);
-      }
-    } else {
-      // Short enough to embed directly — no LLM call, no truncation.
-      summary = input.rawTranscript;
-    }
+    const { summary, summaryProvisional } = await resolveSummary(input, rawTokens);
 
     // 3. Batched embed: summary + all chunks in one adapter call.
     const texts = [summary, ...pieces.map((p) => p.text)];
@@ -210,6 +166,7 @@ export function createMemoryIngestionService(deps: Deps) {
       embedding: summaryVec,
       origin: input.origin,
       isolated: input.isolated,
+      summaryProvisional,
       projectId: input.projectId,
       userId: input.userId,
     };
@@ -240,6 +197,60 @@ export function createMemoryIngestionService(deps: Deps) {
       await ChunkRepository.createForEpisode(tx, { episodeId: created.id, chunks });
       return created;
     });
+  }
+
+  /**
+   * The episode-level summary, and whether it is a stand-in the dreamer still
+   * owes a real one for. A caller-supplied summary and a transcript short
+   * enough to embed whole are both already final; only an oversized transcript
+   * needs a decision.
+   */
+  async function resolveSummary(
+    input: IngestEpisodeInput,
+    rawTokens: number,
+  ): Promise<{ summary: string; summaryProvisional: boolean }> {
+    if (input.summary) {
+      const sumTokens = await embedder.countTokens(input.summary);
+      if (sumTokens > embedderLimit) {
+        throw badRequest(
+          `summary exceeds embedder limit of ${embedderLimit} tokens (got ~${sumTokens}). Supply a shorter summary or omit it and let the service generate one.`,
+        );
+      }
+      return { summary: input.summary, summaryProvisional: false };
+    }
+
+    // Short enough to embed directly — no LLM call, no truncation.
+    if (rawTokens <= config.summaryThresholdTokens) {
+      return { summary: input.rawTranscript, summaryProvisional: false };
+    }
+
+    if (config.deferSummary) {
+      // Take the clipped head now and let the dreamer write the real summary.
+      // Summarizing here is the last blocking LLM call on the write path, and
+      // the expensive one: map-reduce over a long transcript is several
+      // sequential calls inside one POST. The transcript is already chunked and
+      // embedded, so recall over the content is unaffected meanwhile — only the
+      // episode-level summary vector is head-biased until the next cycle.
+      return {
+        summary: clipHead(input.rawTranscript, config.summaryTargetTokens),
+        summaryProvisional: true,
+      };
+    }
+
+    try {
+      const summary = await summarizeBounded(input.rawTranscript, rawTokens);
+      return { summary, summaryProvisional: false };
+    } catch (err) {
+      // A failed summarize must not fail the ingestion — the caller retries the
+      // identical oversized payload forever (poison pill). Degrade to a clipped
+      // head; the full transcript still lands in chunks for the dreamer to
+      // distill, and the flag has the dreamer finish the summary too.
+      console.warn('[ingest] summarize failed, using clipped head:', (err as Error).message);
+      return {
+        summary: clipHead(input.rawTranscript, config.summaryTargetTokens),
+        summaryProvisional: true,
+      };
+    }
   }
 
   async function saveFact(input: SaveFactInput): Promise<Fact> {
@@ -330,6 +341,9 @@ export function createMemoryIngestionService(deps: Deps) {
       userId: input.userId,
       agentId: input.agentId,
       sessionId: input.sessionId,
+      // Inline mode checks below, so the fact is already spoken for; 'dream'
+      // leaves it null, which is exactly what the sweep selects on.
+      supersedeCheckedAt: config.supersedeMode === 'inline' ? now : null,
     };
 
     const created = await write(async (tx) => {
@@ -349,7 +363,11 @@ export function createMemoryIngestionService(deps: Deps) {
       });
       return c;
     });
-    await runSupersedeCheck(created);
+    // In 'dream' mode the fact is left with supersedeCheckedAt unset and the
+    // dreamer's sweep runs the same check off the request path. This call was
+    // ungated: every POST /facts paid a vector search plus a blocking LLM
+    // round-trip, on the same provider the dream cycle is using.
+    if (config.supersedeMode === 'inline') await runSupersedeCheck(created);
     return created;
   }
 

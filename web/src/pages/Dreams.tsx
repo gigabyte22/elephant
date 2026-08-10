@@ -272,6 +272,7 @@ function DreamRunBody({ run }: { run: DreamRunSummary }) {
         rows={[
           ['processed', run.episodesProcessed],
           ['failed', run.episodesFailed, run.episodesFailed > 0],
+          ['summaries installed', run.summariesInstalled],
         ]}
       />
       <CounterSection
@@ -279,6 +280,7 @@ function DreamRunBody({ run }: { run: DreamRunSummary }) {
         rows={[
           ['created', run.factsCreated],
           ['superseded', run.factsSuperseded],
+          ['supersede-checked', run.factsSupersedeSwept],
           ['merged', run.factsMerged],
           ['pruned', run.factsPruned],
           ['insights promoted', run.insightsPromoted],

@@ -473,6 +473,8 @@ describe('/dashboard/api/dreams', () => {
         episodesFailed: 1,
         factsCreated: 12,
         factsSuperseded: 3,
+        factsSupersedeSwept: 8,
+        summariesInstalled: 3,
         factsPruned: 4,
         factsMerged: 2,
         insightsPromoted: 1,
@@ -495,6 +497,7 @@ describe('/dashboard/api/dreams', () => {
     expect(run!.episodesFailed).toBe(1);
     expect(run!.factsCreated).toBe(12);
     expect(run!.factsSuperseded).toBe(3);
+    expect(run!.factsSupersedeSwept).toBe(8);
     expect(run!.factsPruned).toBe(4);
     expect(run!.factsMerged).toBe(2);
     expect(run!.insightsPromoted).toBe(1);

@@ -188,6 +188,8 @@ export interface DreamRunSummary {
   episodesFailed: number;
   factsCreated: number;
   factsSuperseded: number;
+  factsSupersedeSwept: number;
+  summariesInstalled: number;
   factsPruned: number;
   factsMerged: number;
   insightsPromoted: number;

@@ -821,6 +821,8 @@ export const DashboardRepository = {
       episodesFailed: number;
       factsCreated: number;
       factsSuperseded: number;
+      factsSupersedeSwept: number;
+      summariesInstalled: number;
       factsPruned: number;
       factsMerged: number;
       insightsPromoted: number;
@@ -850,6 +852,8 @@ export const DashboardRepository = {
         episodesFailed: (d.episodesFailed as number) ?? 0,
         factsCreated: (d.factsCreated as number) ?? 0,
         factsSuperseded: (d.factsSuperseded as number) ?? 0,
+        factsSupersedeSwept: (d.factsSupersedeSwept as number) ?? 0,
+        summariesInstalled: (d.summariesInstalled as number) ?? 0,
         factsPruned: (d.factsPruned as number) ?? 0,
         factsMerged: (d.factsMerged as number) ?? 0,
         insightsPromoted: (d.insightsPromoted as number) ?? 0,
