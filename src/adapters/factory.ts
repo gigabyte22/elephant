@@ -135,7 +135,10 @@ function resolveTranscribeEnabled(env: Env): boolean {
 // configured, and otherwise register a disabled stand-in so the attachment is
 // recorded as 'skipped' with a reason rather than an ambiguous 'unsupported'.
 export function buildExtractionService(env: Env): ExtractionService {
-  const extractors: Extractor[] = [createTextExtractor(), createPdfExtractor()];
+  const extractors: Extractor[] = [
+    createTextExtractor({ maxBytes: env.KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES }),
+    createPdfExtractor(),
+  ];
 
   const vision = resolveVisionProvider(env);
   if (vision) {
@@ -151,6 +154,7 @@ export function buildExtractionService(env: Env): ExtractionService {
         timeoutMs: env.KNOWLEDGE_VISION_TIMEOUT_MS,
         maxDim: env.KNOWLEDGE_VISION_MAX_DIM,
         jpegQuality: env.KNOWLEDGE_VISION_JPEG_QUALITY,
+        maxTokens: env.KNOWLEDGE_VISION_MAX_TOKENS,
       }),
     );
   } else {
