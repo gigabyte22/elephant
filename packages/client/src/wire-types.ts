@@ -181,6 +181,12 @@ export interface WireHealth {
     // do not report it.
     deadLetteredEpisodes?: number | null;
   };
+  // Attachment text extraction queue. Optional: older servers do not report it.
+  extraction?: {
+    pending: number | null;
+    /** Spent their retries; recoverable only via the backfill script. */
+    deadLettered: number | null;
+  };
 }
 
 // ── Recall ──────────────────────────────────────────────────────────────────

@@ -24,6 +24,7 @@ import { KnowledgeAttachmentRepository } from '../repositories/KnowledgeAttachme
 import { KnowledgeChunkRepository } from '../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../repositories/KnowledgeDocumentRepository.ts';
 import { newId } from '../utils/ids.ts';
+import { nextRetryAt } from '../utils/retry.ts';
 import { AuditService } from './AuditService.ts';
 import { type Chunker, type ChunkPiece, createChunker } from './Chunker.ts';
 
@@ -41,6 +42,9 @@ interface Deps {
     summaryTargetTokens: number;
     embedderMaxInputTokens?: number;
     maxAttachmentBytes?: number;
+    /** Attempts an attachment's extraction gets before it is dead-lettered. */
+    maxExtractionAttempts: number;
+    extractionRetryBackoffBaseMs: number;
   };
 }
 
@@ -488,21 +492,58 @@ export function createKnowledgeIngestionService(deps: Deps) {
     });
   }
 
-  /** Oldest attachments still awaiting extraction. Drives the async worker. */
+  /** Oldest pending attachments that are due a try. Drives the async worker. */
   async function listPendingAttachments(limit: number): Promise<KnowledgeAttachment[]> {
-    return read((tx) => KnowledgeAttachmentRepository.listByStatus(tx, ['pending'], limit));
-  }
-
-  /** Record a structural failure (missing blob, embedder down) so the worker
-   *  stops re-picking the same row every tick. Recoverable via the backfill. */
-  async function markAttachmentFailed(attachmentId: string, detail: string): Promise<void> {
-    await write((tx) =>
-      KnowledgeAttachmentRepository.update(tx, attachmentId, {
-        extractionStatus: 'failed',
-        extractedChars: 0,
-        detail,
+    return read((tx) =>
+      KnowledgeAttachmentRepository.listDueForExtraction(tx, {
+        limit,
+        maxAttempts: config.maxExtractionAttempts,
       }),
     );
+  }
+
+  /**
+   * Record a structural failure — a missing blob, an embedder outage — that the
+   * extractors could not map to a status themselves.
+   *
+   * The attachment goes back on the queue behind an exponential backoff and is
+   * only dead-lettered to 'failed' once its attempts are spent. It used to fail
+   * terminally on the first error, which made a five-minute provider outage
+   * permanent: recovery needed someone to notice and run the backfill by hand.
+   * Returns the resulting status so the worker can log which happened.
+   */
+  async function markAttachmentFailed(
+    attachmentId: string,
+    detail: string,
+  ): Promise<{ attempts: number; deadLettered: boolean }> {
+    const attachment = await read((tx) => KnowledgeAttachmentRepository.getById(tx, attachmentId));
+    const priorAttempts = attachment?.extractionAttempts ?? 0;
+    const nextAttemptAt = nextRetryAt(priorAttempts, {
+      maxAttempts: config.maxExtractionAttempts,
+      baseMs: config.extractionRetryBackoffBaseMs,
+    });
+    const attempts = await write((tx) =>
+      KnowledgeAttachmentRepository.recordExtractionFailure(tx, {
+        id: attachmentId,
+        nextAttemptAt,
+        error: detail,
+      }),
+    );
+    return { attempts, deadLettered: nextAttemptAt === null };
+  }
+
+  /** Extraction backlog + dead letters, for /health. */
+  async function extractionQueueDepth(): Promise<{ pending: number; deadLettered: number }> {
+    return read(async (tx) => ({
+      pending: await KnowledgeAttachmentRepository.countPendingExtraction(
+        tx,
+        config.maxExtractionAttempts,
+      ),
+      deadLettered: await KnowledgeAttachmentRepository.countDeadLetteredExtraction(
+        tx,
+        config.maxExtractionAttempts,
+      ),
+    }));
   }
 
   async function deleteAttachment(
@@ -582,6 +623,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     reextractAttachment,
     listPendingAttachments,
     markAttachmentFailed,
+    extractionQueueDepth,
     deleteAttachment,
     purgeAttachmentBlobs,
     getAttachment,

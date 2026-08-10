@@ -1,6 +1,6 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { KnowledgeAttachment } from '../models/types.ts';
-import { dateParam, toJsDate } from '../utils/neo4j-conv.ts';
+import { dateParam, nullableDateParam, toJsDate } from '../utils/neo4j-conv.ts';
 import { readScope } from './scope.ts';
 
 function toKnowledgeAttachment(node: Record<string, unknown>): KnowledgeAttachment {
@@ -16,6 +16,10 @@ function toKnowledgeAttachment(node: Record<string, unknown>): KnowledgeAttachme
     extractedChars: (node.extractedChars as number) ?? 0,
     detail: (node.detail as string | undefined) ?? undefined,
     createdAt: toJsDate(node.createdAt),
+    extractionAttempts: (node.extractionAttempts as number | undefined) ?? 0,
+    extractionNextAttemptAt: node.extractionNextAttemptAt
+      ? toJsDate(node.extractionNextAttemptAt)
+      : null,
     ...readScope(node),
   };
 }
@@ -74,10 +78,16 @@ export const KnowledgeAttachmentRepository = {
     },
   ): Promise<KnowledgeAttachment | null> {
     const result = await tx.run(
+      // Clearing the retry state here is what makes a recovered attachment a
+      // clean row again: this method records the outcome of an extraction that
+      // ran to completion, so whatever backoff got it here is spent. Failures
+      // go through recordExtractionFailure instead.
       `MATCH (a:KnowledgeAttachment {id: $id})
        SET a.extractionStatus = $extractionStatus,
            a.extractedChars = $extractedChars,
-           a.detail = $detail
+           a.detail = $detail,
+           a.extractionAttempts = 0,
+           a.extractionNextAttemptAt = NULL
        RETURN a {.*} AS a`,
       {
         id,
@@ -90,22 +100,83 @@ export const KnowledgeAttachmentRepository = {
     return row ? toKnowledgeAttachment(row.get('a')) : null;
   },
 
-  // Oldest-first ids whose extraction still needs to run. Drives the async
-  // worker; the backfill uses its own wider predicate.
-  async listByStatus(
+  // The worker's claim query: pending attachments that are due. A row backing
+  // off after a failure stays out of the way until its next attempt time,
+  // which is what stops one broken attachment from consuming every tick and
+  // starving the queue behind it. Mirrors EpisodeRepository.listPendingDream.
+  async listDueForExtraction(
     tx: ManagedTransaction,
-    statuses: string[],
-    limit: number,
+    input: { limit: number; maxAttempts: number; now?: Date },
   ): Promise<KnowledgeAttachment[]> {
     const result = await tx.run(
       `MATCH (a:KnowledgeAttachment)
-       WHERE a.extractionStatus IN $statuses
+       WHERE a.extractionStatus = 'pending'
+         AND coalesce(a.extractionAttempts, 0) < $maxAttempts
+         AND (a.extractionNextAttemptAt IS NULL OR a.extractionNextAttemptAt <= datetime($now))
        RETURN a {.*} AS a
        ORDER BY a.createdAt ASC
        LIMIT toInteger($limit)`,
-      { statuses, limit },
+      {
+        limit: input.limit,
+        maxAttempts: input.maxAttempts,
+        now: dateParam(input.now ?? new Date()),
+      },
     );
     return result.records.map((r) => toKnowledgeAttachment(r.get('a')));
+  },
+
+  // Outstanding extraction work, for /health. Ignores the backoff: an operator
+  // wants the total still owed, not the subset due this instant.
+  async countPendingExtraction(tx: ManagedTransaction, maxAttempts: number): Promise<number> {
+    const result = await tx.run(
+      `MATCH (a:KnowledgeAttachment)
+       WHERE a.extractionStatus = 'pending' AND coalesce(a.extractionAttempts, 0) < $maxAttempts
+       RETURN count(a) AS n`,
+      { maxAttempts },
+    );
+    return Number(result.records[0]?.get('n') ?? 0);
+  },
+
+  // Attachments that will not be retried and now need the backfill. Counting
+  // spent attempts as well as the 'failed' status covers the row that is still
+  // 'pending' because maxAttempts was *lowered* after it failed: the claim
+  // query already refuses it, so without this it would be owed by nobody and
+  // reported by nothing.
+  async countDeadLetteredExtraction(tx: ManagedTransaction, maxAttempts: number): Promise<number> {
+    const result = await tx.run(
+      `MATCH (a:KnowledgeAttachment)
+       WHERE a.extractionStatus = 'failed'
+          OR (a.extractionStatus = 'pending' AND coalesce(a.extractionAttempts, 0) >= $maxAttempts)
+       RETURN count(a) AS n`,
+      { maxAttempts },
+    );
+    return Number(result.records[0]?.get('n') ?? 0);
+  },
+
+  // Stamp a failed attempt. `nextAttemptAt` null means the attempts are spent,
+  // so the row is dead-lettered to 'failed' and only the backfill will pick it
+  // up again; otherwise it stays 'pending' and comes back when it is due.
+  // Mirrors EpisodeRepository.recordDreamFailure.
+  async recordExtractionFailure(
+    tx: ManagedTransaction,
+    input: { id: string; nextAttemptAt: Date | null; error: string },
+  ): Promise<number> {
+    const result = await tx.run(
+      `MATCH (a:KnowledgeAttachment {id: $id})
+       SET a.extractionAttempts = coalesce(a.extractionAttempts, 0) + 1,
+           a.detail = $error,
+           a.extractionNextAttemptAt = CASE
+             WHEN $nextAttemptAt IS NULL THEN NULL ELSE datetime($nextAttemptAt) END,
+           a.extractionStatus = CASE
+             WHEN $nextAttemptAt IS NULL THEN 'failed' ELSE 'pending' END
+       RETURN a.extractionAttempts AS attempts`,
+      {
+        id: input.id,
+        error: input.error.slice(0, 500),
+        nextAttemptAt: nullableDateParam(input.nextAttemptAt),
+      },
+    );
+    return Number(result.records[0]?.get('attempts') ?? 0);
   },
 
   async getById(tx: ManagedTransaction, id: string): Promise<KnowledgeAttachment | null> {

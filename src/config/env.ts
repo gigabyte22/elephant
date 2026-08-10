@@ -123,6 +123,10 @@ const EnvSchema = z
     // minutes; the backfill script raises this since it runs off the request path.
     KNOWLEDGE_VISION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
     KNOWLEDGE_TRANSCRIBE_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+    // What the transcription endpoint will accept. OpenAI's Whisper caps at
+    // 25 MB; a local faster-whisper may allow more. Oversized audio is refused
+    // up front rather than spending the timeout to earn a 413.
+    KNOWLEDGE_TRANSCRIBE_MAX_BYTES: z.coerce.number().int().positive().default(26_214_400),
     // Images are downscaled before OCR: vision token cost is proportional to
     // pixels, and a 12 MP phone photo is ~10x slower than the 1024px version
     // that transcribes just as accurately.
@@ -141,6 +145,11 @@ const EnvSchema = z
     KNOWLEDGE_PDF_OCR_MAX_PAGES: z.coerce.number().int().positive().default(10),
     // How often the async worker drains 'pending' attachments.
     KNOWLEDGE_EXTRACTION_CRON: z.string().default('*/2 * * * *'),
+    // A structural failure (provider outage, missing blob) retries on an
+    // exponential backoff rather than dead-lettering on the first error, which
+    // used to make a brief outage permanent until someone ran the backfill.
+    KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(4),
+    KNOWLEDGE_EXTRACTION_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(300_000),
 
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),

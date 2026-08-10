@@ -2,6 +2,19 @@ import { Cron } from 'croner';
 import type { Container } from '../index.ts';
 import type { SchedulerHandle } from './DreamScheduler.ts';
 
+// What became of a structurally failed attachment, for the log line. A null
+// outcome means recording the failure itself failed, so nothing was stamped and
+// the row is still due — worth saying, because it reads otherwise as a retry
+// that was scheduled.
+function describeDisposition(
+  outcome: { attempts: number; deadLettered: boolean } | null,
+  maxAttempts: number,
+): string {
+  if (!outcome) return 'failure not recorded, re-claimed next tick';
+  if (outcome.deadLettered) return `dead-lettered after ${outcome.attempts} attempt(s)`;
+  return `attempt ${outcome.attempts}/${maxAttempts}, will retry`;
+}
+
 // Drains attachments parked as 'pending' by the upload path.
 //
 // Why this exists at all: a vision or transcription call takes seconds to
@@ -39,16 +52,27 @@ export function startAttachmentExtractionWorker(container: Container): Scheduler
       );
     } catch (err) {
       // Extractors map their own errors to a 'failed' result, so reaching here
-      // means something structural broke (missing blob, embedder down). Record
-      // it rather than leaving the row 'pending' — otherwise this same
-      // attachment is retried every tick forever, starving the queue behind it.
-      // 'failed' is still recoverable: the backfill script re-runs those.
+      // means something structural broke (missing blob, embedder down). Stamp
+      // the attempt so the row backs off instead of being re-claimed every tick
+      // and starving the queue behind it — and so a provider that is down for
+      // five minutes does not permanently strand everything uploaded during it.
+      // Only once the attempts are spent is it dead-lettered to 'failed', which
+      // the backfill script re-runs.
       const detail = err instanceof Error ? err.message : String(err);
+      const outcome = await container.knowledge
+        .markAttachmentFailed(next.id, detail)
+        .catch((markErr) => {
+          // eslint-disable-next-line no-console
+          console.error('[extraction-worker] could not record failure', markErr);
+          return null;
+        });
+      const disposition = describeDisposition(
+        outcome,
+        container.env.KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS,
+      );
       // eslint-disable-next-line no-console
-      console.error(`[extraction-worker] ${next.filename} failed structurally: ${detail}`);
-      await container.knowledge.markAttachmentFailed(next.id, detail).catch((markErr) =>
-        // eslint-disable-next-line no-console
-        console.error('[extraction-worker] could not record failure', markErr),
+      console.error(
+        `[extraction-worker] ${next.filename} failed structurally (${disposition}): ${detail}`,
       );
     }
   });

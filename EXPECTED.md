@@ -47,7 +47,10 @@ GET    /health                      liveness + config readback (no auth required
       schemaVectorDim: number | null,   // read back from SHOW VECTOR INDEX;
                                         // compare to embedder.dim to catch a
                                         // migrate/EMBED_DIM mismatch
-      dream: { lastRun, lastRunDurationMs, running, runningJobId, backlogEstimate }
+      dream: { lastRun, lastRunDurationMs, running, runningJobId, backlogEstimate,
+               deadLetteredEpisodes },
+      extraction: { pending, deadLettered }  // attachment text extraction queue;
+                                             // deadLettered needs the backfill
     }
 
 # v1.2 — knowledge / procedural / research / working-state / audit

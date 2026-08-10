@@ -24,6 +24,7 @@ import { clusterForConsolidation } from '../utils/consolidation.ts';
 import { cosine } from '../utils/cosine.ts';
 import { shouldPrune } from '../utils/decay.ts';
 import { newId } from '../utils/ids.ts';
+import { nextRetryAt } from '../utils/retry.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
 import type { GraphProjectionService } from './graph/GraphProjectionService.ts';
@@ -171,13 +172,10 @@ async function retireInsights(
 export function createDreamingService(deps: Deps) {
   const { llm, embedder, config } = deps;
 
-  // Exponential backoff, capped so a long-lived backlog still drains. Returns
-  // null on the final attempt: there is no next attempt to schedule.
-  function nextRetryAt(priorAttempts: number): Date | null {
-    if (priorAttempts + 1 >= config.maxDreamAttempts) return null;
-    const delay = config.retryBackoffBaseMs * 2 ** priorAttempts;
-    return new Date(Date.now() + Math.min(delay, 6 * 60 * 60_000));
-  }
+  const backoff = {
+    maxAttempts: config.maxDreamAttempts,
+    baseMs: config.retryBackoffBaseMs,
+  };
 
   // Serializes /dream invocations + the cron. Second caller gets thrown
   // DreamInProgressError, which HTTP maps to 409.
@@ -307,7 +305,7 @@ export function createDreamingService(deps: Deps) {
           const attempts = await write((tx) =>
             EpisodeRepository.recordDreamFailure(tx, {
               id: ep.id,
-              nextAttemptAt: nextRetryAt(ep.dreamAttempts ?? 0),
+              nextAttemptAt: nextRetryAt(ep.dreamAttempts ?? 0, backoff),
               error: message,
             }),
           );
