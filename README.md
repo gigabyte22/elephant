@@ -196,6 +196,13 @@ comfortable operating a Neo4j.
 - Memory content is sensitive by nature. The knowledge blob store
   (`KNOWLEDGE_BLOB_DIR`, default `./.knowledge-blobs`) holds raw uploaded
   documents on disk and is gitignored — keep it that way.
+- Attachment OCR and transcription send file bytes to a model provider, so they
+  are off until you say where: `KNOWLEDGE_VISION_PROVIDER=auto` (the default)
+  enables image OCR only when `KNOWLEDGE_VISION_BASE_URL`/`_API_KEY` are set, and
+  the same for `KNOWLEDGE_TRANSCRIBE_*` and audio. Naming a provider
+  (`anthropic`/`openai`) opts into the shared `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
+  instead. The service logs which of these is live at boot. PDF and text
+  extraction are local and always on.
 
 - Found a vulnerability? Please report it privately — see
   [SECURITY.md](SECURITY.md), not the public issue tracker.

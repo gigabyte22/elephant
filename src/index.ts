@@ -10,6 +10,7 @@ import {
   buildLLMAdapter,
   buildVaultWriter,
   buildWorkingStateAdapter,
+  describeExtractionCapabilities,
   isDeferredExtraction,
 } from './adapters/factory.ts';
 import type { LLMAdapter } from './adapters/llm/types.ts';
@@ -197,6 +198,14 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
 export async function bootstrap(overrides?: ContainerOverrides): Promise<Container> {
   await verifyConnectivity();
   const container = await buildContainer(overrides);
+  // Announce where attachments go. Silence here is what let a key set for
+  // dreaming quietly become the OCR provider for every uploaded image.
+  if (!overrides?.extraction) {
+    for (const line of describeExtractionCapabilities(container.env)) {
+      // eslint-disable-next-line no-console
+      console.log(line);
+    }
+  }
   await reconcileStaleDreamRuns(container.env.DREAM_DEADLINE_MS);
   return container;
 }
