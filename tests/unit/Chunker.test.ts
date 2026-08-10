@@ -72,6 +72,36 @@ describe('Chunker', () => {
     expect(shared.length).toBeGreaterThan(0);
   });
 
+  test('overlapChars measures the prefix, so chunks stitch back without repeats', async () => {
+    const c = createChunker({ countTokens });
+    const sentences = Array.from({ length: 30 }, (_, i) => `Sentence ${i}.`).join(' ');
+    const chunks = await c.chunk(sentences, { maxTokens: 30, overlapTokens: 10 });
+    expect(chunks.length).toBeGreaterThan(1);
+
+    expect(chunks[0]!.overlapChars).toBe(0);
+    for (const piece of chunks.slice(1)) {
+      expect(piece.overlapChars).toBeGreaterThan(0);
+    }
+
+    // The property callers depend on: dropping each prefix yields every
+    // sentence exactly once. A naive join repeats the overlap at every seam.
+    const stitched = chunks
+      .map((p, i) => (i === 0 ? p.text : p.text.slice(p.overlapChars)))
+      .join(' ');
+    const seen = stitched.match(/Sentence \d+/g) ?? [];
+    expect(seen).toEqual(Array.from({ length: 30 }, (_, i) => `Sentence ${i}`));
+  });
+
+  test('overlapChars is zero throughout when overlap is off', async () => {
+    const c = createChunker({ countTokens });
+    const chunks = await c.chunk('One two three four five. '.repeat(30), {
+      maxTokens: 40,
+      overlapTokens: 0,
+    });
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((p) => p.overlapChars === 0)).toBe(true);
+  });
+
   test('respects maxTokens ceiling even with overlap', async () => {
     const c = createChunker({ countTokens });
     const paragraph = 'One two three four five. '.repeat(30);

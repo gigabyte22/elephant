@@ -34,7 +34,7 @@ export function createAudioExtractor(config: AudioConfig): Extractor {
         const res = await client.audio.transcriptions.create({ model: config.model, file });
         const text = (res.text ?? '').trim();
         return text.length > 0
-          ? { status: 'done', text, detail: `openai:${config.model}` }
+          ? { status: 'done', text, detail: `openai:${config.model}`, derivation: 'model' }
           : { status: 'empty', text: '' };
       } catch (err) {
         return {

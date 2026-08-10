@@ -19,8 +19,17 @@ export interface VisionConfig {
   maxTokens: number;
 }
 
-const PROMPT =
-  'Transcribe verbatim any text visible in this image (OCR). Then add one short line describing the image. Output plain text only — no preamble.';
+// The two halves are labelled because they are different kinds of claim: the
+// OCR block is what the image says, the description is what the model thinks it
+// depicts. A reader — human or agent — pulling this text out of recall should
+// not have to guess which one they are quoting.
+const PROMPT = [
+  'Read this image and reply with exactly two labelled sections and nothing else:',
+  'OCR:',
+  'the text visible in the image, transcribed verbatim; leave this section empty if there is none',
+  'DESCRIPTION:',
+  'one short line describing the image',
+].join('\n');
 
 /** What a provider gave back: the text, plus whether the model stopped because
  *  it hit the output ceiling rather than because it was finished. */
@@ -58,9 +67,10 @@ export function mapVisionResponse(
       status: 'truncated',
       text,
       detail: `${source} — output stopped at max_tokens; transcription is incomplete`,
+      derivation: 'model',
     };
   }
-  return { status: 'done', text, detail: source };
+  return { status: 'done', text, detail: source, derivation: 'model' };
 }
 
 /** The MIME types this extractor claims. Exported so the factory can register a
