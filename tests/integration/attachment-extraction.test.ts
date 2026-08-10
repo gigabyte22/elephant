@@ -71,7 +71,7 @@ async function attach(documentId: string, mimeType = 'image/jpeg'): Promise<stri
 beforeAll(async () => {
   blobStore = createFakeBlobStore();
   extraction = createFakeExtractionService({
-    'image/': { status: 'done', text: OCR_TEXT, detail: 'fake-vision' },
+    'image/': { status: 'done', text: OCR_TEXT, detail: 'fake-vision', derivation: 'model' },
   });
   container = await bootstrap({
     llm: createFakeLLMAdapter({}),
@@ -170,6 +170,50 @@ describe('reextractAttachment', () => {
 
     expect(updated.extractedChars).toBe(REVISED_TEXT.length);
     expect(await chunkCount(attachmentId)).toBeLessThan(long);
+  });
+});
+
+describe('provenance and reassembly', () => {
+  test('marks attachment chunks as model-derived, leaving body chunks verbatim', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    const derivations = await read(async (tx) => {
+      const r = await tx.run(
+        `MATCH (c:KnowledgeChunk {documentId: $documentId})
+         RETURN c.attachmentId IS NOT NULL AS fromAttachment,
+                collect(DISTINCT c.derivation) AS derivations`,
+        { documentId },
+      );
+      return Object.fromEntries(
+        r.records.map((rec) => [
+          rec.get('fromAttachment') ? 'attachment' : 'body',
+          rec.get('derivations') as string[],
+        ]),
+      );
+    });
+
+    // OCR is the model's reading of an image, not the image's own words. A
+    // consumer quoting recalled text needs to be able to tell the difference.
+    expect(derivations.attachment).toEqual(['model']);
+    expect(derivations.body).toEqual(['verbatim']);
+    expect(attachmentId).toBeTruthy();
+  });
+
+  test('reassembles attachment text without repeating the chunk overlap', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    const loaded = await container.knowledge.getWithAttachments(documentId);
+    const text = loaded?.attachmentTexts[attachmentId] ?? '';
+
+    // Chunks are written with CHUNK_OVERLAP_TOKENS of their predecessor
+    // prepended, so joining them naively repeated a stretch of every seam.
+    // Each source line must appear exactly once.
+    expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
+    for (let i = 0; i < 40; i++) {
+      expect(text.match(new RegExp(`Line ${i}:`, 'g')) ?? []).toHaveLength(1);
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import type { ManagedTransaction } from 'neo4j-driver';
-import type { KnowledgeChunk } from '../models/types.ts';
+import type { ChunkDerivation, KnowledgeChunk } from '../models/types.ts';
 import { toJsDate } from '../utils/neo4j-conv.ts';
 import { createChunkRepository, deleteChunksWhere } from './chunk-repository-factory.ts';
 import { type RetrievalScope, readScope } from './scope.ts';
@@ -14,6 +14,11 @@ function toKnowledgeChunk(node: Record<string, unknown>): KnowledgeChunk {
     tokenCount: node.tokenCount as number,
     embedding: (node.embedding as number[]) ?? [],
     createdAt: toJsDate(node.createdAt),
+    // Absent on chunks written before these properties existed: body text was
+    // always verbatim, and an unrecorded overlap is the one the caller cannot
+    // strip anyway.
+    derivation: (node.derivation as ChunkDerivation | undefined) ?? 'verbatim',
+    overlapChars: (node.overlapChars as number | undefined) ?? 0,
     ...readScope(node),
   };
 }
@@ -35,8 +40,16 @@ const core = createChunkRepository<KnowledgeChunk>({
   mapNode: toKnowledgeChunk,
   parentLivenessGuard: true,
   extraChunkProps: {
-    set: 'ch.attachmentId = c.attachmentId',
-    params: (c) => ({ attachmentId: c.attachmentId ?? null }),
+    set: [
+      'ch.attachmentId = c.attachmentId',
+      'ch.derivation = c.derivation',
+      'ch.overlapChars = c.overlapChars',
+    ],
+    params: (c) => ({
+      attachmentId: c.attachmentId ?? null,
+      derivation: c.derivation,
+      overlapChars: c.overlapChars,
+    }),
   },
 });
 

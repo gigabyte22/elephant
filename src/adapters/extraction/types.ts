@@ -11,11 +11,28 @@ export type ExtractionStatus =
   | 'skipped' // extractor exists but declined: no provider configured, or input it cannot read
   | 'failed'; // extractor threw
 
+/**
+ * Where the extracted text came from.
+ *
+ * 'verbatim' — bytes that were already text (a .txt file, a PDF's text layer).
+ * 'model'    — a model's rendering of non-text bytes: OCR, a transcription, a
+ *              description of a photo. It may be wrong in ways verbatim text
+ *              cannot be, and it is the model's words, not the source's.
+ *
+ * The distinction survives into the chunk so recall can tell a consumer which
+ * it is holding. Without it, "a screenshot of a dashboard showing revenue down
+ * 12%" reads exactly like a sentence someone wrote.
+ */
+export type ExtractionDerivation = 'verbatim' | 'model';
+
 export interface ExtractionResult {
   status: ExtractionStatus;
   text: string;
   /** Optional human-readable note (e.g. provider name, error summary). */
   detail?: string;
+  /** Defaults to 'verbatim' when absent — the empty-text results (unsupported,
+   *  failed, skipped) have no derivation to speak of. */
+  derivation?: ExtractionDerivation;
 }
 
 export interface ExtractionInput {

@@ -219,6 +219,9 @@ export const WireKnowledgeChunkSchema = z.object({
   position: z.number().int().nonnegative(),
   text: z.string(),
   createdAt: z.string(),
+  // 'model' marks text a model produced from non-text bytes (OCR, transcription,
+  // an image description) rather than the source's own words.
+  derivation: z.enum(['verbatim', 'model']),
   ...ScopeFields,
 });
 

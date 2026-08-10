@@ -9,6 +9,9 @@ describe('mapVisionResponse', () => {
       status: 'done',
       text: 'INVOICE 4471',
       detail: 'anthropic:claude-sonnet-4-6',
+      // OCR and the description are both the model's rendering of the image,
+      // not the image's own words, and the chunks say so.
+      derivation: 'model',
     });
   });
 
@@ -20,6 +23,7 @@ describe('mapVisionResponse', () => {
     expect(result.status).toBe('truncated');
     expect(result.text).toBe('line one\nline t');
     expect(result.detail).toContain('max_tokens');
+    expect(result.derivation).toBe('model');
   });
 
   it('reports empty output as empty, noting truncation when that is why', () => {
