@@ -10,6 +10,10 @@ updates:
       # One PR per week for the routine churn; majors still come in alone.
       minor-and-patch:
         update-types: [minor, patch]
+        exclude-patterns:
+          # For a 0.x package a semver-minor bump is breaking by convention, so
+          # grouping it as routine churn is misleading. Let it arrive alone.
+          - '@anthropic-ai/sdk'
 
   - package-ecosystem: github-actions
     directory: /
