@@ -9,6 +9,10 @@ bytes. All writes idempotent via client-supplied id.
 POST   /episodes                    ingest raw conversation turn → returns episodeId
 POST   /facts                       save one fact (explicit, from user or agent)
                                     // optional validFrom; if omitted + sourceEpisodeId → episode.timestamp
+                                    // returns without an LLM call: the contradiction check runs in
+                                    // the next dream cycle's supersede sweep, so a fact that
+                                    // supersedes another is not closed the instant it is written.
+                                    // INGEST_SUPERSEDE_MODE=inline restores the blocking check.
 POST   /facts/batch                 save many (for dreaming pipeline)
 POST   /facts/:id/supersede         explicit supersede (reason, newFactId)
                                     // old.validTo = max(old.validFrom, new.validFrom); edge supersededAt = now

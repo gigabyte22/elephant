@@ -152,6 +152,14 @@ export function buildStatements(embedDim: number): Statement[] {
     // read guard (that is a property check on an already-materialised row).
     // They accelerate the IS NOT NULL paths: dashboard counts, the lifecycle
     // backfill, and any future garbage collection of redacted rows.
+    // Supersede sweep selector. Like the dream queue this cannot accelerate the
+    // `IS NULL` predicate itself — Neo4j does not index NULLs — but it serves
+    // the ORDER BY recordedAt that decides which unchecked facts drain first.
+    {
+      name: 'index:fact_supersede_queue',
+      cypher:
+        'CREATE INDEX fact_supersede_queue IF NOT EXISTS FOR (f:Fact) ON (f.supersedeCheckedAt, f.recordedAt)',
+    },
     {
       name: 'index:fact_deleted',
       cypher: 'CREATE INDEX fact_deleted IF NOT EXISTS FOR (f:Fact) ON (f.deletedAt)',
