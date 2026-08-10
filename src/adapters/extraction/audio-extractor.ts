@@ -8,14 +8,19 @@ export interface AudioConfig {
   timeoutMs: number;
 }
 
+/** The MIME types this extractor claims. Exported so the factory can register a
+ *  disabled stand-in over exactly the same set when no provider is configured,
+ *  and decide from the same predicate which uploads to defer. */
+export function supportsAudio(mime: string): boolean {
+  return mime.startsWith('audio/') || mime === 'video/webm' || mime === 'video/mp4';
+}
+
 // Speech-to-text for audio attachments via an OpenAI-compatible transcription
 // endpoint (Whisper). Construct only when an API key is available; callers pass
 // `null` to disable (→ audio is stored but not transcribed).
 export function createAudioExtractor(config: AudioConfig): Extractor {
   return {
-    supports(mime: string): boolean {
-      return mime.startsWith('audio/') || mime === 'video/webm' || mime === 'video/mp4';
-    },
+    supports: supportsAudio,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
       try {
         const { default: OpenAI, toFile } = await import('openai');

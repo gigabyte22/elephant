@@ -3,12 +3,12 @@ import { createOllamaEmbeddingAdapter } from './embeddings/ollama.ts';
 import { createOpenAIEmbeddingAdapter } from './embeddings/openai.ts';
 import type { EmbeddingAdapter } from './embeddings/types.ts';
 import { createVoyageEmbeddingAdapter } from './embeddings/voyage.ts';
-import { createAudioExtractor } from './extraction/audio-extractor.ts';
+import { createAudioExtractor, supportsAudio } from './extraction/audio-extractor.ts';
 import { createPdfExtractor } from './extraction/pdf-extractor.ts';
 import { createDisabledExtractor, createExtractionService } from './extraction/service.ts';
 import { createTextExtractor } from './extraction/text-extractor.ts';
 import type { ExtractionService, Extractor } from './extraction/types.ts';
-import { createVisionExtractor } from './extraction/vision-extractor.ts';
+import { createVisionExtractor, supportsImage } from './extraction/vision-extractor.ts';
 import { createAnthropicLLMAdapter } from './llm/anthropic.ts';
 import { createLlamaCppLLMAdapter } from './llm/llamacpp.ts';
 import { createOpenAILLMAdapter } from './llm/openai.ts';
@@ -129,13 +129,6 @@ function resolveTranscribeEnabled(env: Env): boolean {
   if (env.KNOWLEDGE_TRANSCRIBE_PROVIDER === 'none') return false;
   return transcribeOpenAICreds(env) !== null;
 }
-
-/** MIME predicates the vision and audio extractors claim. Shared with their
- *  disabled stand-ins so a missing provider reports 'skipped' on exactly the
- *  same inputs the real extractor would have handled. */
-export const supportsImage = (mime: string): boolean => mime.startsWith('image/');
-export const supportsAudio = (mime: string): boolean =>
-  mime.startsWith('audio/') || mime === 'video/webm' || mime === 'video/mp4';
 
 // Build the MIME-routed extraction service. Text + PDF are always available;
 // image (vision) and audio (transcription) call out to a provider when one is

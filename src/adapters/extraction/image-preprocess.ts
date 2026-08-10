@@ -34,6 +34,9 @@ const UNDECODABLE = new Set(['image/svg+xml', 'image/heic', 'image/heif', 'image
 // but both ollama and Anthropic read it natively.
 const PROVIDER_READABLE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
+// jimp exports no image type of its own; this is what Jimp.read resolves to.
+type JimpImage = Awaited<ReturnType<typeof Jimp.read>>;
+
 /**
  * Returns bytes ready for a vision model, or `null` when the format cannot be
  * read by anything downstream (caller should record 'skipped', not call a model).
@@ -46,7 +49,7 @@ export async function prepareImageForVision(
   const mime = mimeType.split(';')[0]!.trim().toLowerCase();
   if (UNDECODABLE.has(mime)) return null;
 
-  let image: Awaited<ReturnType<typeof Jimp.read>>;
+  let image: JimpImage;
   try {
     image = await Jimp.read(data);
   } catch {
@@ -57,24 +60,20 @@ export async function prepareImageForVision(
 
   const { width, height } = image.bitmap;
   const longest = Math.max(width, height);
-  // Already small enough: return the original bytes rather than re-encoding, to
-  // avoid a pointless generation of JPEG loss.
-  if (longest <= opts.maxDim) {
-    return PROVIDER_READABLE.has(mime)
-      ? { data, mimeType: mime }
-      : // Decodable but in a format providers may reject (bmp/tiff) — normalise.
-        { data: await toJpeg(image, opts.quality), mimeType: 'image/jpeg' };
+  if (longest > opts.maxDim) {
+    const scale = opts.maxDim / longest;
+    image.resize({ w: Math.round(width * scale), h: Math.round(height * scale) });
+    return { data: await toJpeg(image, opts.quality), mimeType: 'image/jpeg' };
   }
 
-  const scale = opts.maxDim / longest;
-  image.resize({ w: Math.round(width * scale), h: Math.round(height * scale) });
+  // Small enough to skip the resize. Hand back the original bytes when a
+  // provider reads them — re-encoding would spend a generation of JPEG loss for
+  // nothing — and otherwise normalise the format alone (bmp/tiff).
+  if (PROVIDER_READABLE.has(mime)) return { data, mimeType: mime };
   return { data: await toJpeg(image, opts.quality), mimeType: 'image/jpeg' };
 }
 
-async function toJpeg(
-  image: Awaited<ReturnType<typeof Jimp.read>>,
-  quality: number,
-): Promise<Buffer> {
+async function toJpeg(image: JimpImage, quality: number): Promise<Buffer> {
   const out = await image.getBuffer('image/jpeg', { quality });
   return Buffer.from(out);
 }

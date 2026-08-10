@@ -19,14 +19,19 @@ export interface VisionConfig {
 const PROMPT =
   'Transcribe verbatim any text visible in this image (OCR). Then add one short line describing the image. Output plain text only — no preamble.';
 
+/** The MIME types this extractor claims. Exported so the factory can register a
+ *  disabled stand-in over exactly the same set when no provider is configured,
+ *  and decide from the same predicate which uploads to defer. */
+export function supportsImage(mime: string): boolean {
+  return mime.startsWith('image/');
+}
+
 // Vision OCR/description for image attachments. Produces searchable text via
 // the configured multimodal LLM. Construct only when a provider is available;
 // callers pass `null` to disable (→ images are stored but not text-extracted).
 export function createVisionExtractor(config: VisionConfig): Extractor {
   return {
-    supports(mime: string): boolean {
-      return mime.startsWith('image/');
-    },
+    supports: supportsImage,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
       // Downscale first: vision prefill cost scales with pixel count, and a
       // full-size phone photo costs minutes of GPU for no accuracy gain over the
