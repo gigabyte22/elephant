@@ -123,6 +123,26 @@ Don't reach for a per-package `minimumReleaseAgeExclude`: the offending package
 is different every time, so the exclusion list grows without ever fixing the
 cause.
 
+## Upgrade notes
+
+**Attachment OCR/transcription became explicit opt-in.** `KNOWLEDGE_VISION_PROVIDER=auto`
+and `KNOWLEDGE_TRANSCRIBE_PROVIDER=auto` used to enable themselves off any
+available key, so a deployment that set `ANTHROPIC_API_KEY` for dreaming got
+image OCR it never asked for. `auto` now requires the dedicated
+`KNOWLEDGE_VISION_*` / `KNOWLEDGE_TRANSCRIBE_*` credentials.
+
+A deployment that was relying on the old behaviour keeps it by naming the
+provider it was implicitly using:
+
+```bash
+KNOWLEDGE_VISION_PROVIDER=anthropic      # or =openai, or set KNOWLEDGE_VISION_BASE_URL
+```
+
+Restart afterwards and check the two `[extraction]` lines the service logs at
+boot; they say which provider and endpoint (if any) each capability resolved to.
+Attachments uploaded while the capability was off are recorded `skipped` and are
+repaired by `scripts/backfill-attachment-extraction.ts` once it is on.
+
 ## Security
 
 Please don't file security problems as public issues — see

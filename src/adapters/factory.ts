@@ -96,38 +96,108 @@ export function buildVaultWriter(env: Env): VaultWriter | undefined {
   return env.OKF_ENABLED ? createFsVaultWriter(env.OKF_DIR) : undefined;
 }
 
-// Resolve the vision provider for image extraction. 'auto' prefers Anthropic,
-// then OpenAI, based on which API key is present; returns null when none.
-// Dedicated KNOWLEDGE_VISION_* credentials win over the shared OPENAI_* pair, so
-// pointing OCR at a local vision server never drags the LLM, embedding, or
-// transcription adapters along with it.
-function visionOpenAICreds(env: Env): { key?: string; baseUrl?: string } | null {
-  const key = env.KNOWLEDGE_VISION_API_KEY || env.OPENAI_API_KEY;
-  const baseUrl = env.KNOWLEDGE_VISION_BASE_URL || env.OPENAI_BASE_URL;
+// Credentials for OCR and transcription.
+//
+// Dedicated KNOWLEDGE_VISION_* / KNOWLEDGE_TRANSCRIBE_* values are the opt-in:
+// setting one says "send attachments to this endpoint". The shared OPENAI_* pair
+// is a fallback that only applies once a provider has been named explicitly,
+// because those keys are set for the LLM and embedding adapters and carry no
+// statement about uploading a user's images to anyone.
+export interface Creds {
+  key?: string;
+  baseUrl?: string;
+}
+
+/** An OpenAI-compatible endpoint is usable once it has either a key or a URL —
+ *  a local server needs no key, a hosted one needs no URL. `shared` is the
+ *  OPENAI_* pair, passed only when the operator opted into spending it here. */
+function pickCreds(dedicated: Creds, shared: Creds | null): Creds | null {
+  const key = dedicated.key || shared?.key;
+  const baseUrl = dedicated.baseUrl || shared?.baseUrl;
   return key || baseUrl ? { key, baseUrl } : null;
 }
 
-function transcribeOpenAICreds(env: Env): { key?: string; baseUrl?: string } | null {
-  const key = env.KNOWLEDGE_TRANSCRIBE_API_KEY || env.OPENAI_API_KEY;
-  const baseUrl = env.KNOWLEDGE_TRANSCRIBE_BASE_URL || env.OPENAI_BASE_URL;
-  return key || baseUrl ? { key, baseUrl } : null;
+function sharedOpenAICreds(env: Env): Creds {
+  return { key: env.OPENAI_API_KEY, baseUrl: env.OPENAI_BASE_URL };
 }
 
-function resolveVisionProvider(env: Env): 'openai' | 'anthropic' | null {
-  if (env.KNOWLEDGE_VISION_PROVIDER === 'none') return null;
-  if (env.KNOWLEDGE_VISION_PROVIDER === 'openai') return visionOpenAICreds(env) ? 'openai' : null;
-  if (env.KNOWLEDGE_VISION_PROVIDER === 'anthropic')
-    return env.ANTHROPIC_API_KEY ? 'anthropic' : null;
-  // auto
-  if (env.KNOWLEDGE_VISION_BASE_URL || env.KNOWLEDGE_VISION_API_KEY) return 'openai';
-  if (env.ANTHROPIC_API_KEY) return 'anthropic';
-  if (env.OPENAI_API_KEY || env.OPENAI_BASE_URL) return 'openai';
-  return null;
+/** Where images are sent for OCR, or null when the capability is off. Only the
+ *  OpenAI-compatible path carries credentials; Anthropic uses ANTHROPIC_API_KEY,
+ *  which `buildExtractionService` passes separately. */
+export type VisionTarget = Creds & { provider: 'anthropic' | 'openai' };
+
+/**
+ * Resolve the vision capability.
+ *
+ * 'auto' means "on when I have been given somewhere to send images" — dedicated
+ * KNOWLEDGE_VISION_* credentials only. It used to mean "on when any API key
+ * exists", so the ANTHROPIC_API_KEY configured for dreaming silently enrolled
+ * every uploaded image in a third-party vision call nobody asked for. Naming a
+ * provider explicitly is how you opt into spending the shared OPENAI_* pair (or
+ * the Anthropic key) on OCR.
+ */
+export function resolveVisionTarget(env: Env): VisionTarget | null {
+  const dedicated: Creds = {
+    key: env.KNOWLEDGE_VISION_API_KEY,
+    baseUrl: env.KNOWLEDGE_VISION_BASE_URL,
+  };
+  switch (env.KNOWLEDGE_VISION_PROVIDER) {
+    case 'none':
+      return null;
+    case 'anthropic':
+      return env.ANTHROPIC_API_KEY ? { provider: 'anthropic' } : null;
+    default: {
+      // 'openai' names the provider, which is the opt-in to spend the shared
+      // pair; 'auto' falls through here on dedicated credentials alone.
+      const shared = env.KNOWLEDGE_VISION_PROVIDER === 'openai' ? sharedOpenAICreds(env) : null;
+      const creds = pickCreds(dedicated, shared);
+      return creds ? { provider: 'openai', ...creds } : null;
+    }
+  }
 }
 
-function resolveTranscribeEnabled(env: Env): boolean {
-  if (env.KNOWLEDGE_TRANSCRIBE_PROVIDER === 'none') return false;
-  return transcribeOpenAICreds(env) !== null;
+/** Resolve the transcription capability. Same opt-in rule as vision. */
+export function resolveTranscribeTarget(env: Env): Creds | null {
+  if (env.KNOWLEDGE_TRANSCRIBE_PROVIDER === 'none') return null;
+  const dedicated: Creds = {
+    key: env.KNOWLEDGE_TRANSCRIBE_API_KEY,
+    baseUrl: env.KNOWLEDGE_TRANSCRIBE_BASE_URL,
+  };
+  const shared = env.KNOWLEDGE_TRANSCRIBE_PROVIDER === 'openai' ? sharedOpenAICreds(env) : null;
+  return pickCreds(dedicated, shared);
+}
+
+function defaultVisionModel(env: Env, target: VisionTarget): string {
+  return target.provider === 'anthropic' ? env.ANTHROPIC_EXTRACTION_MODEL : 'gpt-4o-mini';
+}
+
+function describeEndpoint(creds: Creds): string {
+  return creds.baseUrl ?? 'the provider API';
+}
+
+function describeDisabled(capability: string, envPrefix: string): string {
+  return `[extraction] ${capability} disabled (set ${envPrefix}_* credentials, or name a provider to use the shared keys)`;
+}
+
+function describeVision(env: Env): string {
+  const target = resolveVisionTarget(env);
+  if (!target) return describeDisabled('image OCR', 'KNOWLEDGE_VISION');
+  const model = env.KNOWLEDGE_VISION_MODEL ?? defaultVisionModel(env, target);
+  const endpoint = target.provider === 'anthropic' ? 'the Anthropic API' : describeEndpoint(target);
+  return `[extraction] image OCR → ${target.provider} ${model} at ${endpoint}`;
+}
+
+function describeTranscribe(env: Env): string {
+  const target = resolveTranscribeTarget(env);
+  if (!target) return describeDisabled('audio transcription', 'KNOWLEDGE_TRANSCRIBE');
+  return `[extraction] audio transcription → ${env.KNOWLEDGE_TRANSCRIBE_MODEL} at ${describeEndpoint(target)}`;
+}
+
+/** One line per multimodal capability at boot. Whether a user's attachments
+ *  leave the machine, and for where, should not be something you have to derive
+ *  from four environment variables. */
+export function describeExtractionCapabilities(env: Env): string[] {
+  return [describeVision(env), describeTranscribe(env)];
 }
 
 // Build the MIME-routed extraction service. Text + PDF are always available;
@@ -140,16 +210,14 @@ export function buildExtractionService(env: Env): ExtractionService {
     createPdfExtractor(),
   ];
 
-  const vision = resolveVisionProvider(env);
+  const vision = resolveVisionTarget(env);
   if (vision) {
-    const creds = visionOpenAICreds(env);
-    const defaultModel = vision === 'anthropic' ? env.ANTHROPIC_EXTRACTION_MODEL : 'gpt-4o-mini';
     extractors.push(
       createVisionExtractor({
-        provider: vision,
-        model: env.KNOWLEDGE_VISION_MODEL ?? defaultModel,
-        openaiApiKey: creds?.key,
-        openaiBaseUrl: creds?.baseUrl,
+        provider: vision.provider,
+        model: env.KNOWLEDGE_VISION_MODEL ?? defaultVisionModel(env, vision),
+        openaiApiKey: vision.key,
+        openaiBaseUrl: vision.baseUrl,
         anthropicApiKey: env.ANTHROPIC_API_KEY,
         timeoutMs: env.KNOWLEDGE_VISION_TIMEOUT_MS,
         maxDim: env.KNOWLEDGE_VISION_MAX_DIM,
@@ -161,13 +229,13 @@ export function buildExtractionService(env: Env): ExtractionService {
     extractors.push(createDisabledExtractor(supportsImage, 'no vision provider configured'));
   }
 
-  if (resolveTranscribeEnabled(env)) {
-    const creds = transcribeOpenAICreds(env);
+  const transcribe = resolveTranscribeTarget(env);
+  if (transcribe) {
     extractors.push(
       createAudioExtractor({
         model: env.KNOWLEDGE_TRANSCRIBE_MODEL,
-        openaiApiKey: creds?.key,
-        openaiBaseUrl: creds?.baseUrl,
+        openaiApiKey: transcribe.key,
+        openaiBaseUrl: transcribe.baseUrl,
         timeoutMs: env.KNOWLEDGE_TRANSCRIBE_TIMEOUT_MS,
       }),
     );
@@ -184,7 +252,7 @@ export function buildExtractionService(env: Env): ExtractionService {
  *  rather than run inline. Text and PDF stay synchronous; they are milliseconds. */
 export function isDeferredExtraction(env: Env, mimeType: string): boolean {
   const mime = mimeType.split(';')[0]!.trim().toLowerCase();
-  if (supportsImage(mime)) return resolveVisionProvider(env) !== null;
-  if (supportsAudio(mime)) return resolveTranscribeEnabled(env);
+  if (supportsImage(mime)) return resolveVisionTarget(env) !== null;
+  if (supportsAudio(mime)) return resolveTranscribeTarget(env) !== null;
   return false;
 }

@@ -93,8 +93,12 @@ const EnvSchema = z
     KNOWLEDGE_BLOB_DIR: z.string().default('./.knowledge-blobs'),
     KNOWLEDGE_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(26_214_400), // 25 MiB
     // Vision/transcription providers for extracting searchable text from
-    // image/audio attachments. 'auto' picks an available provider by API key;
-    // 'none' stores+serves the blob but skips text extraction.
+    // image/audio attachments. 'auto' enables the capability only when
+    // dedicated KNOWLEDGE_VISION_*/KNOWLEDGE_TRANSCRIBE_* credentials say where
+    // to send the bytes; naming a provider opts into the shared OPENAI_* pair or
+    // ANTHROPIC_API_KEY instead. 'none' stores+serves the blob but skips
+    // extraction. Sending a user's attachments to a third party should be a
+    // decision, not a side effect of having configured an LLM.
     KNOWLEDGE_VISION_PROVIDER: z.enum(['auto', 'none', 'openai', 'anthropic']).default('auto'),
     KNOWLEDGE_VISION_MODEL: z.string().optional(),
     KNOWLEDGE_TRANSCRIBE_PROVIDER: z.enum(['auto', 'none', 'openai']).default('auto'),
