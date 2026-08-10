@@ -272,6 +272,7 @@ function DreamRunBody({ run }: { run: DreamRunSummary }) {
         rows={[
           ['processed', run.episodesProcessed],
           ['failed', run.episodesFailed, run.episodesFailed > 0],
+          ['summaries installed', run.summariesInstalled],
         ]}
       />
       <CounterSection

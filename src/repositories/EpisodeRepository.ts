@@ -14,6 +14,7 @@ function toEpisode(node: Record<string, unknown>): Episode {
     embedding: (node.embedding as number[]) ?? [],
     origin: (node.origin as EpisodeOrigin | undefined) ?? undefined,
     isolated: (node.isolated as boolean | undefined) ?? undefined,
+    summaryProvisional: (node.summaryProvisional as boolean | undefined) ?? undefined,
     recordedAt: node.recordedAt != null ? toJsDate(node.recordedAt) : undefined,
     dreamedAt: toJsDateOrNull(node.dreamedAt),
     dreamAttempts: (node.dreamAttempts as number | undefined) ?? 0,
@@ -36,6 +37,7 @@ export const EpisodeRepository = {
            e.embedding = $embedding,
            e.origin = $origin,
            e.isolated = $isolated,
+           e.summaryProvisional = $summaryProvisional,
            e.recordedAt = coalesce(e.recordedAt, datetime($recordedAt))
        RETURN e {.*} AS e`,
       {
@@ -48,6 +50,7 @@ export const EpisodeRepository = {
         embedding: ep.embedding,
         origin: ep.origin ?? null,
         isolated: ep.isolated ?? null,
+        summaryProvisional: ep.summaryProvisional ?? null,
         // coalesce above: a re-POST must not reset the original write time.
         recordedAt: dateParam(ep.recordedAt ?? new Date()),
         ...memoryItemParams('episode', ep),
@@ -107,6 +110,42 @@ export const EpisodeRepository = {
       },
     );
     return result.records.map((r) => toEpisode(r.get('e')));
+  },
+
+  // Episodes still carrying a clipped-head summary. Oldest first, so a backlog
+  // drains in arrival order. Deliberately not joined to the dream queue: an
+  // episode whose facts are extracted still needs its summary upgraded, and one
+  // that is dead-lettered for extraction still deserves a searchable summary.
+  async listProvisionalSummaries(
+    tx: ManagedTransaction,
+    limit: number,
+  ): Promise<Array<Pick<Episode, 'id' | 'rawTranscript'>>> {
+    const result = await tx.run(
+      `MATCH (e:Episode)
+       WHERE e.summaryProvisional = true
+       RETURN e.id AS id, e.rawTranscript AS rawTranscript
+       ORDER BY coalesce(e.recordedAt, e.timestamp) ASC
+       LIMIT toInteger($limit)`,
+      { limit },
+    );
+    return result.records.map((r) => ({
+      id: r.get('id') as string,
+      rawTranscript: r.get('rawTranscript') as string,
+    }));
+  },
+
+  /** Replace a provisional summary with the real one and its fresh embedding. */
+  async installSummary(
+    tx: ManagedTransaction,
+    input: { id: string; summary: string; embedding: number[] },
+  ): Promise<void> {
+    await tx.run(
+      `MATCH (e:Episode {id: $id})
+       SET e.summary = $summary,
+           e.embedding = $embedding,
+           e.summaryProvisional = false`,
+      input,
+    );
   },
 
   // Backlog for /health: episodes still eligible for a dream attempt,

@@ -7,6 +7,12 @@ bytes. All writes idempotent via client-supplied id.
 
 
 POST   /episodes                    ingest raw conversation turn → returns episodeId
+                                    // returns without an LLM call: a transcript over
+                                    // SUMMARY_THRESHOLD_TOKENS gets a clipped-head summary that the
+                                    // next dream cycle replaces and re-embeds. Chunks are always
+                                    // fully embedded, so content recall is unaffected meanwhile.
+                                    // Supply `summary` yourself, or INGEST_DEFER_SUMMARY=false, to
+                                    // get a finished summary at write time.
 POST   /facts                       save one fact (explicit, from user or agent)
                                     // optional validFrom; if omitted + sourceEpisodeId → episode.timestamp
                                     // returns without an LLM call: the contradiction check runs in

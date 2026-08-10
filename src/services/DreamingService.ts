@@ -27,6 +27,7 @@ import { newId } from '../utils/ids.ts';
 import { nextRetryAt } from '../utils/retry.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
+import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import type { GraphProjectionService } from './graph/GraphProjectionService.ts';
 
 const DREAMER_ACTOR = 'dreamer';
@@ -59,6 +60,10 @@ interface Deps {
     supersedeVectorThreshold: number;
     /** Facts the supersede sweep claims per cycle; 0 disables the pass. */
     supersedeSweepMaxFacts: number;
+    /** Episodes whose provisional summary is upgraded per cycle; 0 disables. */
+    summarySweepMaxEpisodes: number;
+    /** Target length for an installed summary, matching ingestion's. */
+    summaryTargetTokens: number;
     promoteInsightImportance: number;
     insightDedupThreshold: number;
     insightRetireBatchLimit: number;
@@ -107,6 +112,7 @@ function newDreamRun(id?: string): DreamRun {
     factsCreated: 0,
     factsSuperseded: 0,
     factsSupersedeSwept: 0,
+    summariesInstalled: 0,
     factsPruned: 0,
     factsMerged: 0,
     insightsPromoted: 0,
@@ -184,6 +190,10 @@ export function createDreamingService(deps: Deps) {
     maxAttempts: config.maxDreamAttempts,
     baseMs: config.retryBackoffBaseMs,
   };
+
+  // Same map-reduce ingestion uses, so a summary written here is the one that
+  // POST /episodes would have produced had it waited.
+  const summarize = createBoundedSummarizer(llm, config.summaryTargetTokens);
 
   // Serializes /dream invocations + the cron. Second caller gets thrown
   // DreamInProgressError, which HTTP maps to 409.
@@ -281,6 +291,15 @@ export function createDreamingService(deps: Deps) {
           maxAttempts: config.maxDreamAttempts,
         }),
       );
+
+      // Repay the write path's debt first: an episode whose summary is still a
+      // clipped head is under-searchable at the episode level, and this cycle
+      // may not reach its later passes if the backlog is deep.
+      try {
+        await installEpisodeSummaries(run, deadline);
+      } catch (err) {
+        logLLMError(`[dream ${run.id}] summary install failed, skipping`, err);
+      }
 
       // Chronological processing. Within one episode, facts are siblings
       // (no mutual supersede); across episodes, later facts CAN supersede
@@ -694,6 +713,42 @@ export function createDreamingService(deps: Deps) {
     opts.supersededInCycle.add(decision.oldFactId);
     run.factsSuperseded += 1;
     return true;
+  }
+
+  /**
+   * Replace the clipped-head summaries ingestion wrote in place of a real one.
+   *
+   * Summarizing a long transcript is a map-reduce of several sequential LLM
+   * calls; doing it inside POST /episodes was the last blocking model call on
+   * the write path. Until this runs, the episode's summary vector matches on
+   * its opening lines only — the transcript's chunks are fully embedded either
+   * way, so content recall is unaffected, but episode-level recall is
+   * head-biased for one cycle.
+   *
+   * Runs before fact extraction so a cycle that later hits its deadline has
+   * still repaid the write path's debt.
+   */
+  async function installEpisodeSummaries(run: DreamRun, deadline: number): Promise<void> {
+    if (config.summarySweepMaxEpisodes === 0) return;
+    const pending = await read((tx) =>
+      EpisodeRepository.listProvisionalSummaries(tx, config.summarySweepMaxEpisodes),
+    );
+    for (const ep of pending) {
+      if (Date.now() >= deadline) break;
+      try {
+        const tokens = await llm.countTokens(ep.rawTranscript);
+        const summary = await summarize(ep.rawTranscript, tokens);
+        const embedding = await embedder.embed(summary);
+        await write((tx) =>
+          EpisodeRepository.installSummary(tx, { id: ep.id, summary, embedding }),
+        );
+        run.summariesInstalled += 1;
+      } catch (err) {
+        // The clipped head stays in place and the episode stays claimable, so
+        // the next cycle tries again. Best-effort like every other sub-pass.
+        logLLMError(`[dream ${run.id}] summarize failed for episode=${ep.id}, keeping head`, err);
+      }
+    }
   }
 
   /**
