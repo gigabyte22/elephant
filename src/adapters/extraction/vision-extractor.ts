@@ -1,3 +1,4 @@
+import type AnthropicNS from '@anthropic-ai/sdk';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
 
 export interface VisionConfig {
@@ -86,8 +87,11 @@ async function viaAnthropic(config: VisionConfig, mime: string, b64: string): Pr
       },
     ],
   });
+  // Narrow with the SDK's own type, not a structural literal: TextBlock grows
+  // required fields across releases (0.115 added `citations`), and a hand-written
+  // shape stops being assignable the moment it does.
   return res.content
-    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+    .filter((b): b is AnthropicNS.TextBlock => b.type === 'text')
     .map((b) => b.text)
     .join('\n');
 }
