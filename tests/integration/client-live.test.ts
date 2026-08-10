@@ -16,7 +16,7 @@ import { ElephantClient } from '@elephant/client';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';

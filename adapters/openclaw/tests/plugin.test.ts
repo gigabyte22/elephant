@@ -2,7 +2,7 @@
 // registrations, then invokes the handlers against a stubbed fetch to assert
 // elephant payloads, prependContext shape, and episode capture.
 
-import { type MockInstance, afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, type MockInstance, test, vi } from 'vitest';
 import plugin from '../index.ts';
 import manifest from '../openclaw.plugin.json' with { type: 'json' };
 

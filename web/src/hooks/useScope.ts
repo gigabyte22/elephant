@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useLocation } from 'wouter';
-import { parseScope } from '../lib/scope.ts';
 import type { Scope } from '../lib/scope.ts';
+import { parseScope } from '../lib/scope.ts';
 
 // Reads the scope filter out of the current location's query string.
 // Wouter's useLocation returns just the path; we read window.location.search

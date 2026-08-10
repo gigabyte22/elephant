@@ -2,7 +2,7 @@ import { type FormEvent, useState } from 'react';
 import { useLocation } from 'wouter';
 import { useIsDesktop } from '../../hooks/useMediaQuery.ts';
 import { useScope } from '../../hooks/useScope.ts';
-import { type Scope, activeScopeAxes, scopeToQueryString } from '../../lib/scope.ts';
+import { activeScopeAxes, type Scope, scopeToQueryString } from '../../lib/scope.ts';
 
 // Global scope filter. The user can pin one or more axes (project, user,
 // agent, session); the values ride on the URL query string so deep-links

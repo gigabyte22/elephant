@@ -17,9 +17,9 @@ import { join, resolve } from 'node:path';
 import { read } from '../../config/neo4j.ts';
 import { toJsDate, toJsDateOrNull } from '../../utils/neo4j-conv.ts';
 import {
-  type NarrativeItem,
   bodyFor,
   frontmatterFor,
+  type NarrativeItem,
   parseVaultDoc,
   pathFor,
 } from './frontmatter.ts';

@@ -5,7 +5,7 @@ import { toWireIntention } from '../../models/wire.ts';
 import type { RetrievalScope } from '../../repositories/scope.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
-import { WireIntentionSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireIntentionSchema } from '../wire-schemas.ts';
 
 const StatusEnum = z.enum(['pending', 'completed', 'cancelled', 'expired']);
 

@@ -34,11 +34,11 @@ import { ResearchVectorSource } from './stages/ResearchVectorSource.ts';
 import { RrfFusionStage } from './stages/RrfFusionStage.ts';
 import { TopKStage } from './stages/TopKStage.ts';
 import {
+  emptyState,
   type Pipeline,
   type PipelineState,
   type RetrievalContext,
   type RetrievalStage,
-  emptyState,
 } from './types.ts';
 
 export function composePipeline(stages: RetrievalStage[]): Pipeline {

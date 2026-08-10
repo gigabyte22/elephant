@@ -2,7 +2,7 @@
 // per request, no session ids. Suitable for remote hosts; stdio remains the
 // default for local use.
 
-import { type IncomingMessage, type Server, createServer } from 'node:http';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { McpConfig } from './config.ts';
 import { buildServer } from './server.ts';

@@ -9,7 +9,7 @@ import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adap
 import { JsonExtractionError } from '../../src/adapters/llm/json-prompt.ts';
 import { read, write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { ExtractedFact, Fact } from '../../src/models/types.ts';
 import { FactRepository } from '../../src/repositories/FactRepository.ts';
 import { newId } from '../../src/utils/ids.ts';

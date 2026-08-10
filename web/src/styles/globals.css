@@ -49,14 +49,15 @@
     /* Layer 1: the projection light. A soft pink vignette from the top
        blended with a fainter cyan from the lower edge. Subtle enough that
        it reads as atmosphere, not gradient. */
-    background-image: radial-gradient(
-        ellipse 90% 60% at 50% -10%,
-        rgba(255, 92, 138, 0.1) 0%,
-        transparent 60%
-      ), radial-gradient(ellipse 80% 50% at 50% 110%, rgba(94, 227, 216, 0.05) 0%, transparent 55%),
+    background-image:
+      radial-gradient(ellipse 90% 60% at 50% -10%, rgba(255, 92, 138, 0.1) 0%, transparent 60%),
+      radial-gradient(ellipse 80% 50% at 50% 110%, rgba(94, 227, 216, 0.05) 0%, transparent 55%),
       /* Layer 2: the dot-grid, now tinted toward magenta-violet. */
       radial-gradient(circle at 1px 1px, rgba(255, 180, 215, 0.05) 1px, transparent 0);
-    background-size: 100% 100%, 100% 100%, 28px 28px;
+    background-size:
+      100% 100%,
+      100% 100%,
+      28px 28px;
     background-attachment: fixed, fixed, fixed;
     min-height: 100vh;
     position: relative;
@@ -235,7 +236,9 @@
 
   .num {
     @apply font-mono tabular-nums;
-    font-feature-settings: "tnum" on, "cv09" on;
+    font-feature-settings:
+      "tnum" on,
+      "cv09" on;
   }
 
   /*
@@ -244,7 +247,9 @@
     smear the glyphs.
   */
   .chroma {
-    text-shadow: 1px 0 0 rgba(255, 92, 138, 0.2), -1px 0 0 rgba(94, 227, 216, 0.14);
+    text-shadow:
+      1px 0 0 rgba(255, 92, 138, 0.2),
+      -1px 0 0 rgba(94, 227, 216, 0.14);
   }
 
   /*
@@ -265,9 +270,9 @@
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(255, 92, 138, 0.0) 10%,
+      rgba(255, 92, 138, 0) 10%,
       rgba(255, 92, 138, 0.4) 50%,
-      rgba(255, 92, 138, 0.0) 90%,
+      rgba(255, 92, 138, 0) 90%,
       transparent 100%
     );
     animation: drift 7s linear infinite;
@@ -275,10 +280,14 @@
   }
 
   .halo {
-    box-shadow: 0 0 14px rgba(255, 92, 138, 0.4), 0 0 36px rgba(255, 92, 138, 0.14);
+    box-shadow:
+      0 0 14px rgba(255, 92, 138, 0.4),
+      0 0 36px rgba(255, 92, 138, 0.14);
   }
   .halo-cyan {
-    box-shadow: 0 0 14px rgba(94, 227, 216, 0.4), 0 0 36px rgba(94, 227, 216, 0.14);
+    box-shadow:
+      0 0 14px rgba(94, 227, 216, 0.4),
+      0 0 36px rgba(94, 227, 216, 0.14);
   }
 }
 

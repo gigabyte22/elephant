@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { FactSort, TopFact } from '../api/types.ts';
+import { FactDetailPanel } from '../components/facts/FactDetailPanel.tsx';
 import { LedgerScroll } from '../components/LedgerScroll.tsx';
 import { PageHeading } from '../components/PageHeading.tsx';
 import { RefBar } from '../components/RefBar.tsx';
 import { SegBtnGroup } from '../components/SegButtons.tsx';
 import { ErrorBanner, LoadingBanner } from '../components/StateBanner.tsx';
-import { FactDetailPanel } from '../components/facts/FactDetailPanel.tsx';
 import { useFactCategories } from '../hooks/useFactCategories.ts';
 import { useScope } from '../hooks/useScope.ts';
 import { useTopFacts } from '../hooks/useTopFacts.ts';

@@ -21,9 +21,9 @@ import { connect } from 'node:net';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 
-const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
+// No TOKEN here on purpose — every probe in this file is unauthenticated.
 const EMBED_DIM = Number(process.env.__TEST_EMBED_DIM ?? 256);
 
 let container: Container;

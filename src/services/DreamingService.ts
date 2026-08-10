@@ -839,7 +839,7 @@ export function createDreamingService(deps: Deps) {
           );
           continue;
         }
-        if (!decision || decision.decision !== 'merge') continue;
+        if (decision?.decision !== 'merge') continue;
 
         // Validate the LLM's subset: ids must come from this cluster, unmerged,
         // and at least 2 of them; content must be a plausible single fact.

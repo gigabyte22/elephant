@@ -19,37 +19,37 @@ import type { Env } from './config/env.ts';
 import { loadEnv } from './config/env.ts';
 import { closeDriver, verifyConnectivity, write } from './config/neo4j.ts';
 import { DreamRunRepository } from './repositories/DreamRunRepository.ts';
-import { type DashboardService, createDashboardService } from './services/DashboardService.ts';
-import { type DreamingService, createDreamingService } from './services/DreamingService.ts';
-import { type IntentionService, createIntentionService } from './services/IntentionService.ts';
+import { createDashboardService, type DashboardService } from './services/DashboardService.ts';
+import { createDreamingService, type DreamingService } from './services/DreamingService.ts';
 import {
-  type KnowledgeIngestionService,
+  createGraphProjectionService,
+  type GraphProjectionService,
+} from './services/graph/GraphProjectionService.ts';
+import { createIntentionService, type IntentionService } from './services/IntentionService.ts';
+import {
   createKnowledgeIngestionService,
+  type KnowledgeIngestionService,
 } from './services/KnowledgeIngestionService.ts';
 import {
-  type MemoryIngestionService,
   createMemoryIngestionService,
+  type MemoryIngestionService,
 } from './services/MemoryIngestionService.ts';
 import {
-  type ObservationService,
   createObservationService,
+  type ObservationService,
 } from './services/ObservationService.ts';
-import { type PreferenceService, createPreferenceService } from './services/PreferenceService.ts';
-import { type ProcedureService, createProcedureService } from './services/ProcedureService.ts';
-import { type ResearchService, createResearchService } from './services/ResearchService.ts';
-import { type RetrievalService, createRetrievalService } from './services/RetrievalService.ts';
-import { type TemporalService, createTemporalService } from './services/TemporalService.ts';
-import {
-  type WorkingStateService,
-  createWorkingStateService,
-} from './services/WorkingStateService.ts';
-import {
-  type GraphProjectionService,
-  createGraphProjectionService,
-} from './services/graph/GraphProjectionService.ts';
+import { createPreferenceService, type PreferenceService } from './services/PreferenceService.ts';
+import { createProcedureService, type ProcedureService } from './services/ProcedureService.ts';
+import { createResearchService, type ResearchService } from './services/ResearchService.ts';
+import { createRetrievalService, type RetrievalService } from './services/RetrievalService.ts';
 import { buildRetrievalConfigFromEnv } from './services/retrieval/config.ts';
 import { buildDefaultRetrievalPipeline } from './services/retrieval/pipeline.ts';
 import type { Pipeline } from './services/retrieval/types.ts';
+import { createTemporalService, type TemporalService } from './services/TemporalService.ts';
+import {
+  createWorkingStateService,
+  type WorkingStateService,
+} from './services/WorkingStateService.ts';
 
 export interface Container {
   env: Env;
@@ -217,9 +217,9 @@ export async function shutdown(): Promise<void> {
   await closeDriver();
 }
 
-export type { Env } from './config/env.ts';
 export type { EmbeddingAdapter } from './adapters/embeddings/types.ts';
 export type { LLMAdapter } from './adapters/llm/types.ts';
 export type { WorkingStateAdapter } from './adapters/working-state/types.ts';
+export type { Env } from './config/env.ts';
 export * from './models/types.ts';
 export * from './models/wire.ts';

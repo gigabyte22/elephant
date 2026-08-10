@@ -2,9 +2,9 @@ import type { ManagedTransaction } from 'neo4j-driver';
 import type { Intention, IntentionStatus } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import {
-  type RetrievalScope,
   memoryItemParams,
   memoryItemSetClause,
+  type RetrievalScope,
   readScope,
   scopeAndClause,
   scopeWhereClause,

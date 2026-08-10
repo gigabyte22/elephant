@@ -13,8 +13,8 @@ import type { ScopeMode } from '../../src/models/types.ts';
 import { scopeFilterClause } from '../../src/repositories/scope.ts';
 import { axisAllows } from '../../src/services/retrieval/stages/PostFilterStage.ts';
 import {
-  PROJECT_USER_AXES,
   buildRetrievalScope,
+  PROJECT_USER_AXES,
 } from '../../src/services/retrieval/stages/scope-helpers.ts';
 import type { RecallQuery } from '../../src/services/retrieval/types.ts';
 

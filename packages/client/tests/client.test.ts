@@ -27,7 +27,7 @@ describe('envelope handling', () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('http://elephant.test/facts');
     expect(init?.method).toBe('POST');
-    expect((init?.headers as Record<string, string>).authorization).toBe('Bearer tok-12345678');
+    expect((init!.headers as Record<string, string>).authorization).toBe('Bearer tok-12345678');
   });
 
   test('4xx throws ElephantError with status and body, no retry', async () => {

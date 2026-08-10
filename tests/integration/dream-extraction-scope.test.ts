@@ -12,7 +12,7 @@ import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adap
 import type { LLMAdapter } from '../../src/adapters/llm/types.ts';
 import { write } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { Fact } from '../../src/models/types.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 

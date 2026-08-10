@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireObservation } from '../../models/wire.ts';
 import type { App } from '../types.ts';
-import { WireObservationSchema, okEnvelope } from '../wire-schemas.ts';
+import { okEnvelope, WireObservationSchema } from '../wire-schemas.ts';
 
 export function registerObservationsRoutes(app: App, container: Container): void {
   app.route({

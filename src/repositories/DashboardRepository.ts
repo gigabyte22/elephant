@@ -38,11 +38,10 @@ function buildScopeClause(
 // Shared WHERE fragment for the facts ledger (top list + count): scope plus
 // optional content substring and exact-category match. CONTAINS rather than
 // the fulltext index so the three sorts stay stable under offset pagination.
-function buildFactListFilter(input: {
-  q?: string;
-  category?: string;
-  scope: ScopeFilter;
-}): { clause: string; params: Record<string, string> } {
+function buildFactListFilter(input: { q?: string; category?: string; scope: ScopeFilter }): {
+  clause: string;
+  params: Record<string, string>;
+} {
   const scoped = buildScopeClause('f', input.scope);
   const parts = scoped.clause ? [scoped.clause] : [];
   const params = { ...scoped.params };

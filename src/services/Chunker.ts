@@ -21,7 +21,7 @@ export interface Chunker {
 type CountTokens = (text: string) => Promise<number>;
 
 const PARAGRAPH_SEP = /\n\s*\n/g;
-const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z"'(\[])/g;
+const SENTENCE_SPLIT = /(?<=[.!?])\s+(?=[A-Z"'([])/g;
 const WORD_SPLIT = /\s+/g;
 
 // Splits a string on `separator`, keeping the separator by recombining with

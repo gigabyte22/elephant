@@ -5,12 +5,12 @@ import { toWireKnowledgeAttachment, toWireKnowledgeDocument } from '../../models
 import { KnowledgeChunkRepository } from '../../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../../repositories/KnowledgeDocumentRepository.ts';
 import { notFound } from '../errors.ts';
-import { ScopeGuardQuery, assertInScope } from '../scope-guard.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import {
+  okEnvelope,
   WireKnowledgeAttachmentSchema,
   WireKnowledgeDocumentSchema,
-  okEnvelope,
 } from '../wire-schemas.ts';
 
 const ScopeBody = z.object({

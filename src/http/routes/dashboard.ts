@@ -1,9 +1,9 @@
 import { basename } from 'node:path';
 import { z } from 'zod';
 import {
-  type NarrativeItem,
   bodyFor,
   frontmatterFor,
+  type NarrativeItem,
   pathFor,
   serializeVaultDoc,
 } from '../../adapters/vault/frontmatter.ts';
@@ -15,7 +15,9 @@ import { toWireAuditEvent } from '../../models/wire.ts';
 import { AuditService } from '../../services/AuditService.ts';
 import { notFound } from '../errors.ts';
 import type { App } from '../types.ts';
+import { WireAuditEventSchema } from '../wire-schemas.ts';
 import {
+  okEnvelope,
   ScopeQuerySchema,
   WireDocumentSortEnum,
   WireDocumentsSchema,
@@ -36,9 +38,7 @@ import {
   WireTimelineSchema,
   WireTopEntitiesSchema,
   WireTopFactsSchema,
-  okEnvelope,
 } from '../wire-schemas-dashboard.ts';
-import { WireAuditEventSchema } from '../wire-schemas.ts';
 
 type WireNarrativeMarkdown = z.infer<typeof WireNarrativeMarkdownSchema>;
 

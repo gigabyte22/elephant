@@ -13,7 +13,7 @@ import { createFsVaultWriter } from '../../src/adapters/vault/fs-vault-writer.ts
 import type { VaultWriter } from '../../src/adapters/vault/types.ts';
 import { write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
-import { type Container, bootstrap, shutdown } from '../../src/index.ts';
+import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
