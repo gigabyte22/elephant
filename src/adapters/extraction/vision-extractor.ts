@@ -1,5 +1,6 @@
 import type AnthropicNS from '@anthropic-ai/sdk';
 import { prepareImageForVision } from './image-preprocess.ts';
+import { deferred } from './service.ts';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
 
 export interface VisionConfig {
@@ -87,6 +88,10 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
   return {
     supports: supportsImage,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
+      // Every image needs a model call, so this extractor is always the slow
+      // path. Say so rather than making the upload request wait on it.
+      if (!input.allowSlow) return deferred('vision extraction');
+
       // Downscale first: vision prefill cost scales with pixel count, and a
       // full-size phone photo costs minutes of GPU for no accuracy gain over the
       // 1024px version. This also normalises whatever it re-encodes to JPEG,

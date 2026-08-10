@@ -1,3 +1,4 @@
+import { deferred } from './service.ts';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
 
 export interface AudioConfig {
@@ -22,6 +23,9 @@ export function createAudioExtractor(config: AudioConfig): Extractor {
   return {
     supports: supportsAudio,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
+      // Transcription is minutes for a long recording; never inline.
+      if (!input.allowSlow) return deferred('transcription');
+
       try {
         const { default: OpenAI, toFile } = await import('openai');
         const client = new OpenAI({

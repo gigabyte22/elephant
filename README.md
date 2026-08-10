@@ -201,8 +201,10 @@ comfortable operating a Neo4j.
   enables image OCR only when `KNOWLEDGE_VISION_BASE_URL`/`_API_KEY` are set, and
   the same for `KNOWLEDGE_TRANSCRIBE_*` and audio. Naming a provider
   (`anthropic`/`openai`) opts into the shared `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
-  instead. The service logs which of these is live at boot. PDF and text
-  extraction are local and always on.
+  instead. The service logs which of these is live at boot. Text extraction and
+  a PDF's text layer are local and always on; a PDF with *no* text layer is a
+  scan, and its pages are rendered and sent to the vision provider like any
+  other image (bounded by `KNOWLEDGE_PDF_OCR_MAX_PAGES`).
 
 - Found a vulnerability? Please report it privately — see
   [SECURITY.md](SECURITY.md), not the public issue tracker.

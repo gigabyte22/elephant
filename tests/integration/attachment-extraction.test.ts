@@ -71,7 +71,10 @@ async function attach(documentId: string, mimeType = 'image/jpeg'): Promise<stri
 beforeAll(async () => {
   blobStore = createFakeBlobStore();
   extraction = createFakeExtractionService({
+    // derivation 'model' also marks this as a provider-backed extractor in the
+    // fake, so uploads defer it exactly as vision does.
     'image/': { status: 'done', text: OCR_TEXT, detail: 'fake-vision', derivation: 'model' },
+    'text/': { status: 'done', text: 'Verbatim text needs no provider.' },
   });
   container = await bootstrap({
     llm: createFakeLLMAdapter({}),
@@ -97,16 +100,15 @@ describe('reextractAttachment', () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
 
-    const before = await chunkCount(attachmentId);
+    // The upload defers a provider-backed extraction, so this is the run that
+    // first produces chunks.
+    expect(await chunkCount(attachmentId)).toBe(0);
     const updated = await container.knowledge.reextractAttachment(attachmentId);
 
     expect(updated.extractionStatus).toBe('done');
     expect(updated.extractedChars).toBe(OCR_TEXT.length);
     expect(updated.detail).toBe('fake-vision');
     expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
-    // Sanity: the first extraction already produced these, so re-running is
-    // replacing a populated set, not filling an empty one.
-    expect(before).toBeGreaterThan(0);
   });
 
   test('replaces rather than accumulates chunks when run repeatedly', async () => {
@@ -153,6 +155,7 @@ describe('reextractAttachment', () => {
   test('shrinking output drops the chunks the longer text had created', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
     const long = await chunkCount(attachmentId);
 
     // A second reading of the same bytes — a different model, or a prompt
@@ -173,10 +176,45 @@ describe('reextractAttachment', () => {
   });
 });
 
+describe('the upload path', () => {
+  test('parks a slow extraction as pending instead of running it in the request', async () => {
+    const documentId = await makeDocument();
+    const attachmentId = await attach(documentId);
+
+    // The upload passes allowSlow: false, and an extractor that needs a model
+    // answers 'pending' rather than making the request wait minutes for a
+    // provider — the client aborts at 30s and its retry creates a second
+    // attachment. Which extractions are slow is the extractor's call, not a
+    // MIME list the composition root has to keep in sync.
+    const parked = await container.knowledge.getAttachment(attachmentId);
+    expect(parked?.extractionStatus).toBe('pending');
+    expect(await chunkCount(attachmentId)).toBe(0);
+
+    // ...and the worker's re-run, which allows the slow path, indexes it.
+    await container.knowledge.reextractAttachment(attachmentId);
+    const done = await container.knowledge.getAttachment(attachmentId);
+    expect(done?.extractionStatus).toBe('done');
+    expect(await chunkCount(attachmentId)).toBeGreaterThan(1);
+  });
+
+  test('extracts text attachments inline — they cost milliseconds', async () => {
+    const documentId = await makeDocument();
+    const att = await container.knowledge.addAttachment(documentId, {
+      filename: 'notes.txt',
+      mimeType: 'text/plain',
+      dataBase64: Buffer.from('Verbatim text needs no provider.').toString('base64'),
+    });
+
+    expect(att.extractionStatus).toBe('done');
+    expect(await chunkCount(att.id)).toBeGreaterThan(0);
+  });
+});
+
 describe('provenance and reassembly', () => {
   test('marks attachment chunks as model-derived, leaving body chunks verbatim', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
 
     const derivations = await read(async (tx) => {
       const r = await tx.run(
@@ -203,6 +241,7 @@ describe('provenance and reassembly', () => {
   test('reassembles attachment text without repeating the chunk overlap', async () => {
     const documentId = await makeDocument();
     const attachmentId = await attach(documentId);
+    await container.knowledge.reextractAttachment(attachmentId);
 
     const loaded = await container.knowledge.getWithAttachments(documentId);
     const text = loaded?.attachmentTexts[attachmentId] ?? '';

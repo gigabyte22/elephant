@@ -205,15 +205,11 @@ export function describeExtractionCapabilities(env: Env): string[] {
 // configured, and otherwise register a disabled stand-in so the attachment is
 // recorded as 'skipped' with a reason rather than an ambiguous 'unsupported'.
 export function buildExtractionService(env: Env): ExtractionService {
-  const extractors: Extractor[] = [
-    createTextExtractor({ maxBytes: env.KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES }),
-    createPdfExtractor(),
-  ];
-
   const vision = resolveVisionTarget(env);
-  if (vision) {
-    extractors.push(
-      createVisionExtractor({
+  // The vision extractor doubles as the PDF extractor's OCR fallback, so a
+  // scanned PDF is read by whatever reads screenshots.
+  const visionExtractor = vision
+    ? createVisionExtractor({
         provider: vision.provider,
         model: env.KNOWLEDGE_VISION_MODEL ?? defaultVisionModel(env, vision),
         openaiApiKey: vision.key,
@@ -223,11 +219,21 @@ export function buildExtractionService(env: Env): ExtractionService {
         maxDim: env.KNOWLEDGE_VISION_MAX_DIM,
         jpegQuality: env.KNOWLEDGE_VISION_JPEG_QUALITY,
         maxTokens: env.KNOWLEDGE_VISION_MAX_TOKENS,
-      }),
-    );
-  } else {
-    extractors.push(createDisabledExtractor(supportsImage, 'no vision provider configured'));
-  }
+      })
+    : null;
+
+  const extractors: Extractor[] = [
+    createTextExtractor({ maxBytes: env.KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES }),
+    createPdfExtractor({
+      ocrPage: visionExtractor ? (page) => visionExtractor.extract(page) : undefined,
+      renderWidth: env.KNOWLEDGE_VISION_MAX_DIM,
+      maxOcrPages: env.KNOWLEDGE_PDF_OCR_MAX_PAGES,
+    }),
+  ];
+
+  extractors.push(
+    visionExtractor ?? createDisabledExtractor(supportsImage, 'no vision provider configured'),
+  );
 
   const transcribe = resolveTranscribeTarget(env);
   if (transcribe) {
@@ -244,15 +250,4 @@ export function buildExtractionService(env: Env): ExtractionService {
   }
 
   return createExtractionService(extractors);
-}
-
-/** Whether an attachment's text extraction should be deferred to the async
- *  worker. Vision and transcription calls take seconds to minutes — far past the
- *  30s timeout dobby's client applies to the upload request — so they are queued
- *  rather than run inline. Text and PDF stay synchronous; they are milliseconds. */
-export function isDeferredExtraction(env: Env, mimeType: string): boolean {
-  const mime = mimeType.split(';')[0]!.trim().toLowerCase();
-  if (supportsImage(mime)) return resolveVisionTarget(env) !== null;
-  if (supportsAudio(mime)) return resolveTranscribeTarget(env) !== null;
-  return false;
 }

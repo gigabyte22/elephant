@@ -39,6 +39,19 @@ export interface ExtractionInput {
   data: Buffer;
   mimeType: string;
   filename: string;
+  /**
+   * Whether this caller can afford an extractor that takes seconds to minutes.
+   *
+   * False on the upload request — a vision or transcription call runs far past
+   * the 30s timeout a client puts on the POST, and its retries each create
+   * another attachment. An extractor that needs the slow path returns 'pending'
+   * instead, and the background worker (which passes true) picks it up.
+   *
+   * The extractor decides, not the caller: only the PDF extractor knows whether
+   * this particular file has a text layer it can read in milliseconds or needs
+   * page rasterisation and OCR.
+   */
+  allowSlow?: boolean;
 }
 
 export interface Extractor {
