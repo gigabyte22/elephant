@@ -107,11 +107,13 @@ async function registerDashboardStatic(app: FastifyInstance): Promise<void> {
     // Disable the plugin's built-in `public, max-age=0` so our per-file
     // Cache-Control below is authoritative rather than being overridden.
     cacheControl: false,
-    setHeaders: (res, pathName) => {
+    // v10 hands this callback a FastifyReply, where v9 passed the raw
+    // ServerResponse — hence `.header()` rather than `.setHeader()`.
+    setHeaders: (reply, pathName) => {
       if (pathName.endsWith('index.html')) {
-        res.setHeader('Cache-Control', 'no-cache');
+        void reply.header('Cache-Control', 'no-cache');
       } else if (pathName.includes('/assets/')) {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        void reply.header('Cache-Control', 'public, max-age=31536000, immutable');
       }
     },
   });

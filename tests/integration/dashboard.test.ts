@@ -619,3 +619,30 @@ describe('/dashboard/api/facts/retention', () => {
     expect(data.summary.atRisk).toBe(0);
   });
 });
+
+// The static shell is served by @fastify/static, not by our routes, so its
+// cache headers come from the plugin's `setHeaders` callback. That callback's
+// signature is version-dependent — v10 passes a FastifyReply where v9 passed
+// the raw ServerResponse — and nothing else asserts the result, so a bump can
+// silently drop these headers. The consequence is not cosmetic: a cached
+// index.html referencing a deleted bundle hash breaks the SPA with a MIME
+// error until the browser is hard-reloaded.
+describe('dashboard static shell caching', () => {
+  test('the shell always revalidates', async () => {
+    const res = await app.inject({ method: 'GET', url: '/dashboard/' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-cache');
+  });
+
+  test('hashed assets are immutable', async () => {
+    const shell = await app.inject({ method: 'GET', url: '/dashboard/' });
+    // Pull a real hashed filename out of the shell rather than pinning one —
+    // every rebuild changes it.
+    const asset = shell.body.match(/\/dashboard\/assets\/[\w.-]+\.js/)?.[0];
+    expect(asset, 'no hashed asset referenced by the shell').toBeTruthy();
+
+    const res = await app.inject({ method: 'GET', url: asset as string });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+  });
+});
