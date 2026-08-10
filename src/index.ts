@@ -123,7 +123,11 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     ingestion: createMemoryIngestionService({
       llm,
       embedder,
-      config: { ...sharedConfig, supersedeMode: env.INGEST_SUPERSEDE_MODE },
+      config: {
+        ...sharedConfig,
+        supersedeMode: env.INGEST_SUPERSEDE_MODE,
+        deferSummary: env.INGEST_DEFER_SUMMARY,
+      },
     }),
     retrieval: createRetrievalService({
       pipeline: overrides.retrievalPipeline ?? buildDefaultRetrievalPipeline({ embedder, llm }),
@@ -150,6 +154,8 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         dedupThreshold: env.DREAM_DEDUP_THRESHOLD,
         supersedeVectorThreshold: env.DREAM_SUPERSEDE_VECTOR_THRESHOLD,
         supersedeSweepMaxFacts: env.DREAM_SUPERSEDE_SWEEP_MAX_FACTS,
+        summarySweepMaxEpisodes: env.DREAM_SUMMARY_SWEEP_MAX_EPISODES,
+        summaryTargetTokens: env.SUMMARY_TARGET_TOKENS,
         promoteInsightImportance: env.DREAM_PROMOTE_INSIGHT_IMPORTANCE,
         insightDedupThreshold: env.DREAM_INSIGHT_DEDUP_THRESHOLD,
         insightRetireBatchLimit: env.DREAM_INSIGHT_RETIRE_BATCH_LIMIT,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
-import { createBoundedSummarizer } from '../../src/services/MemoryIngestionService.ts';
+import { createBoundedSummarizer } from '../../src/services/BoundedSummarizer.ts';
 import { approxTokens } from '../../src/utils/tokens.ts';
 
 // maxContextTokens 1000 → input budget = 600 tokens (SUMMARY_CONTEXT_USABLE 0.6).

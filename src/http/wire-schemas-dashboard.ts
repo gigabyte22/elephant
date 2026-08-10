@@ -274,6 +274,8 @@ export const WireDreamRunSummarySchema = z.object({
   // Facts the supersede sweep checked this cycle — most find nothing, which
   // is the healthy case; factsSuperseded counts the ones it actually closed.
   factsSupersedeSwept: z.number().int().nonnegative().default(0),
+  // Episodes whose clipped-head summary this cycle replaced with a real one.
+  summariesInstalled: z.number().int().nonnegative().default(0),
   factsPruned: z.number().int().nonnegative(),
   factsMerged: z.number().int().nonnegative().default(0),
   insightsPromoted: z.number().int().nonnegative(),
