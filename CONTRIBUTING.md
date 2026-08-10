@@ -94,6 +94,35 @@ is worth reading before a non-trivial change. The deeper references are
 - New behaviour needs a test. Unit tests are cheap; use the testcontainer suite
   when the behaviour is really about Cypher.
 
+## Dependency updates
+
+pnpm quarantines packages published in the last 24 hours (`minimumReleaseAge`),
+which is the cheap defence against a compromised release being pulled in before
+anyone notices. Dependabot writes `pnpm-lock.yaml` with its own resolver, which
+does not know about that policy and always takes absolute-latest — so most
+Dependabot npm PRs land a lockfile that then fails `pnpm install
+--frozen-lockfile` in CI, usually on a transitive dependency that has nothing
+to do with the bump.
+
+Rebasing does not converge: each rebase re-resolves to whatever is newest at
+that moment. Repair the lockfile instead:
+
+```bash
+gh pr checkout <n>
+pnpm clean --lockfile && pnpm install
+git commit -am 'chore(deps): re-resolve the lockfile within the release-age policy'
+git push
+```
+
+pnpm's resolver picks the newest version *older* than the cutoff, so this
+produces an in-policy lockfile. The direct bumps in `package.json` are
+untouched — only the lockfile differs. Note that pushing to a Dependabot branch
+stops Dependabot from rebasing that PR, which is what you want here.
+
+Don't reach for a per-package `minimumReleaseAgeExclude`: the offending package
+is different every time, so the exclusion list grows without ever fixing the
+cause.
+
 ## Security
 
 Please don't file security problems as public issues — see

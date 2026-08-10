@@ -4,14 +4,6 @@ packages:
   - packages/client
   - adapters/mcp
   - adapters/openclaw
-# pnpm quarantines packages published within the last 24h (minimumReleaseAge).
-# Keep that on — it is the cheap defence against a compromised release — but
-# exempt electron-to-chromium: it is a generated browser-version table pulled in
-# transitively by browserslist, it publishes most days, and it runs no install
-# scripts. Left in, every Dependabot rebase re-resolves a copy too fresh to pass
-# and CI fails on supply-chain grounds that have nothing to do with the PR.
-minimumReleaseAgeExclude:
-  - electron-to-chromium
 allowBuilds:
   '@biomejs/biome': true
   cpu-features: false
