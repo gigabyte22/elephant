@@ -35,6 +35,22 @@ Categories supported in v1.2 (existing + new):
 
 Cross-cutting scope axes on every memory item: `projectId`, `userId`, plus the existing `agentId` / `sessionId`. Each axis runs in retrieval mode `boost` (default when a value is supplied), `filter` (hard match, but a null scope is a shared global and still matches), `strict` (like `filter`, and also excludes nulls), or `none`.
 
+One rule (`axisAllows`, mirrored by the Cypher pushdown emitter) applies
+to all four axes; what varies per category is which value feeds an axis:
+
+- `projectId` / `userId` — persisted on every `:MemoryItem`; row-level
+  everywhere.
+- `agentId` / `sessionId` on **facts** — judged by origin lineage: the
+  source episode's values, falling back to the fact's own props on
+  direct writes; null origin = shared content.
+- `agentId` / `sessionId` on **observations** — per-row required props.
+- Every other category (preferences, insights, chunks, procedures,
+  research, intentions from the caller's view) carries no agent/session
+  prop and counts as **null** on those axes: shared under `filter`,
+  excluded under `strict`. (Historically `agentScope='filter'` wiped
+  these categories wholesale; the null-means-shared rule now holds
+  uniformly.)
+
 Audit / revision history: every mutating write to a Fact / Preference /
 Procedure / KnowledgeDocument / Research routes through a shared `revise()`
 helper that snapshots the prior state into an `:ArchivedRevision` node and
