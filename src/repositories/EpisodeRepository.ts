@@ -1,7 +1,22 @@
 import type { ManagedTransaction } from 'neo4j-driver';
-import type { Episode, EpisodeOrigin } from '../models/types.ts';
+import type { Episode, EpisodeOrigin, EpisodeParticipant } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
+
+// Participants persist as a JSON-string prop: Neo4j properties hold only
+// primitives and homogeneous arrays without nulls, so an array of
+// {label, userId?} objects has no native encoding. Parsed defensively —
+// a hand-edited or corrupted prop degrades to "no participants" (legacy
+// attribution) rather than failing every read of the episode.
+function parseParticipants(raw: unknown): EpisodeParticipant[] | undefined {
+  if (typeof raw !== 'string') return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function toEpisode(node: Record<string, unknown>): Episode {
   return {
@@ -13,6 +28,7 @@ function toEpisode(node: Record<string, unknown>): Episode {
     summary: node.summary as string,
     embedding: (node.embedding as number[]) ?? [],
     origin: (node.origin as EpisodeOrigin | undefined) ?? undefined,
+    participants: parseParticipants(node.participants),
     isolated: (node.isolated as boolean | undefined) ?? undefined,
     summaryProvisional: (node.summaryProvisional as boolean | undefined) ?? undefined,
     recordedAt: node.recordedAt != null ? toJsDate(node.recordedAt) : undefined,
@@ -36,6 +52,7 @@ export const EpisodeRepository = {
            e.summary = $summary,
            e.embedding = $embedding,
            e.origin = $origin,
+           e.participants = $participants,
            e.isolated = $isolated,
            e.summaryProvisional = $summaryProvisional,
            e.recordedAt = coalesce(e.recordedAt, datetime($recordedAt))
@@ -49,6 +66,7 @@ export const EpisodeRepository = {
         summary: ep.summary,
         embedding: ep.embedding,
         origin: ep.origin ?? null,
+        participants: ep.participants?.length ? JSON.stringify(ep.participants) : null,
         isolated: ep.isolated ?? null,
         summaryProvisional: ep.summaryProvisional ?? null,
         // coalesce above: a re-POST must not reset the original write time.

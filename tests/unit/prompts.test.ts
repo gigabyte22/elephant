@@ -43,4 +43,38 @@ describe('buildExtractFactsUserPrompt', () => {
     const p = buildExtractFactsUserPrompt({ ...episode, origin: 'user' }, []);
     expect(p).not.toContain('NOTE:');
   });
+
+  describe('participants', () => {
+    const group = {
+      ...episode,
+      rawTranscript: 'USER(alice): hello\n\nUSER(bob): hey\n\nASSISTANT: hi both',
+      participants: [{ label: 'alice', userId: 'u:alice' }, { label: 'bob' }],
+    };
+
+    test('lists labels and the subject instruction', () => {
+      const p = buildExtractFactsUserPrompt(group, []);
+      expect(p).toContain(
+        'Participants (human speakers in this transcript, by label): alice, bob.',
+      );
+      expect(p).toContain('Attribute each fact\'s "subject"');
+    });
+
+    test('never leaks userId scope strings into the prompt', () => {
+      const p = buildExtractFactsUserPrompt(group, []);
+      expect(p).not.toContain('u:alice');
+    });
+
+    test('absent without participants, and never as a NOTE', () => {
+      expect(buildExtractFactsUserPrompt(episode, [])).not.toContain('Participants');
+      // The origin notes own the NOTE: prefix; the participants block must not
+      // collide with the origin=user assertion above.
+      expect(buildExtractFactsUserPrompt(group, [])).not.toContain('NOTE:');
+    });
+
+    test('composes with an origin note', () => {
+      const p = buildExtractFactsUserPrompt({ ...group, origin: 'ingest' }, []);
+      expect(p).toContain('ingested content');
+      expect(p).toContain('Participants');
+    });
+  });
 });

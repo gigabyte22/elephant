@@ -48,6 +48,24 @@ export type Scope = z.infer<typeof ScopeSchema>;
 export const EpisodeOriginSchema = z.enum(['user', 'cron', 'event', 'system', 'ingest']);
 export type EpisodeOrigin = z.infer<typeof EpisodeOriginSchema>;
 
+// A declared human speaker in a multi-party transcript. `label` is the name
+// used in `USER(<label>):` turn markers; `userId` is that person's scope
+// string. A participant may be declared without a userId (a known speaker with
+// no memory identity) — facts attributed to them land in the shared bucket,
+// never in another participant's.
+export const EpisodeParticipantSchema = z.object({
+  label: z.string().min(1),
+  userId: z.string().min(1).optional(),
+});
+export type EpisodeParticipant = z.infer<typeof EpisodeParticipantSchema>;
+
+// Labels match case- and whitespace-insensitively. The route's uniqueness
+// check and resolveFactUserId's lookup must normalize identically, or a
+// payload that validated could still resolve ambiguously.
+export function normalizeParticipantLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
 export const EpisodeSchema = z
   .object({
     id: z.string().uuid(),
@@ -58,6 +76,11 @@ export const EpisodeSchema = z
     summary: z.string(),
     embedding: EmbeddingSchema,
     origin: EpisodeOriginSchema.optional(),
+    // Declared human speakers for multi-party transcripts. Absent (the 1:1
+    // case) means extraction attributes to "the user" and facts inherit the
+    // episode's userId exactly as before; when present, per-fact attribution
+    // applies (see resolveFactUserId).
+    participants: z.array(EpisodeParticipantSchema).optional(),
     // Isolated projects opt out of cross-scope dedup/supersede against the
     // personal bucket, keeping their facts fully self-contained.
     isolated: z.boolean().optional(),
@@ -536,6 +559,15 @@ export const ExtractedFactSchema = z.object({
   // object literals satisfy the type without restating it.
   entities: z.array(ExtractedEntitySchema).optional(),
   entityNames: z.array(z.string().min(1)).default([]),
+  // Who the fact is about, for multi-party episodes. Tri-state, and each state
+  // is load-bearing (see resolveFactUserId):
+  //   "<label>"  — a declared participant; the fact scopes to their userId.
+  //   null       — attributable to no participant (objective/world facts,
+  //                group decisions, assistant state, non-present third
+  //                parties); the fact lands in the shared bucket.
+  //   absent     — legacy/non-compliant model output; falls back to the
+  //                episode's own userId, i.e. exactly the pre-subject behavior.
+  subject: z.string().nullable().optional(),
 });
 export type ExtractedFact = z.infer<typeof ExtractedFactSchema>;
 
@@ -567,6 +599,28 @@ export function resolveExtractedEntities(fact: ExtractedFact): ExtractedEntity[]
     }
   }
   return out;
+}
+
+// Which userId an extracted fact scopes to. Only episodes that DECLARE
+// participants get per-fact attribution; everything else keeps the exact
+// legacy inheritance (fact.userId = episode.userId), so single-user
+// orchestrators are unaffected even if a model emits `subject` unprompted.
+//
+// A matched participant without a userId resolves to the shared bucket
+// (undefined), NOT the episode's userId — scoping speaker B's facts into
+// speaker A's personal bucket would be a cross-user leak, the worse failure.
+// Unknown labels fall back to the episode's userId: attribution the model
+// invented must not grant the shared bucket, only the legacy default.
+export function resolveFactUserId(
+  ep: Pick<Episode, 'userId' | 'participants'>,
+  ext: Pick<ExtractedFact, 'subject'>,
+): string | undefined {
+  if (!ep.participants?.length) return ep.userId;
+  if (ext.subject === null) return undefined;
+  if (ext.subject === undefined) return ep.userId;
+  const label = normalizeParticipantLabel(ext.subject);
+  const match = ep.participants.find((p) => normalizeParticipantLabel(p.label) === label);
+  return match ? match.userId : ep.userId;
 }
 
 // --- ScopeMode -------------------------------------------------------------

@@ -3,7 +3,7 @@ import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { read, write } from '../config/neo4j.ts';
 import { badRequest, conflict } from '../http/errors.ts';
-import type { Chunk, Episode, Fact } from '../models/types.ts';
+import type { Chunk, Episode, EpisodeParticipant, Fact } from '../models/types.ts';
 import { ChunkRepository } from '../repositories/ChunkRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
 import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
@@ -83,6 +83,7 @@ interface IngestEpisodeInput {
   projectId?: string;
   userId?: string;
   origin?: 'user' | 'cron' | 'event' | 'system' | 'ingest';
+  participants?: EpisodeParticipant[];
   isolated?: boolean;
 }
 
@@ -165,6 +166,8 @@ export function createMemoryIngestionService(deps: Deps) {
       summary,
       embedding: summaryVec,
       origin: input.origin,
+      // [] normalizes to absent so "participants present" is one truthy check.
+      participants: input.participants?.length ? input.participants : undefined,
       isolated: input.isolated,
       summaryProvisional,
       projectId: input.projectId,

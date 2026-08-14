@@ -79,6 +79,12 @@ export class ElephantClient {
       projectId?: string;
       userId?: string;
       origin?: 'user' | 'cron' | 'event' | 'system' | 'ingest';
+      /**
+       * Declared human speakers for multi-party transcripts (turns labeled
+       * `USER(<label>):`). Omit for 1:1 conversations — the service then
+       * attributes facts to the episode's userId exactly as before.
+       */
+      participants?: Array<{ label: string; userId?: string }>;
       isolated?: boolean;
     },
     opts?: RequestOpts,
