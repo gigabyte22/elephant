@@ -309,16 +309,19 @@ export const FactRepository = {
       // future-dated validFrom and historical as-of queries are correct.
       asOf?: Date | null;
       // When provided, confine the search to a single scope bucket: a project's
-      // own facts (projectId === value) or the unscoped "personal" bucket
-      // (projectId === null). Used by dreaming so one project's facts can't
-      // dedup-skip or supersede another's. Omit for global searches (recall).
+      // own facts (projectId === value) or the unscoped bucket (projectId ===
+      // null). Used by dreaming so one project's facts can't dedup-skip or
+      // supersede another's. Omit for global searches (recall).
       //
-      // includeUnscoped widens a project bucket to ALSO see the personal
+      // includeUnscoped widens a project bucket to ALSO see the unscoped
       // (projectId IS NULL) bucket — so a project episode can dedup/supersede
-      // against personal facts, but never another project's. userId acts as a
-      // compatibility guard on that widened branch only (a project owned by
-      // one human must not dedup against another human's personal facts); it
-      // is NOT a bucket axis.
+      // against shared facts, but never another project's.
+      //
+      // userId guards EVERY branch: a caller with a userId sees shared
+      // (null-user) facts and its own, never another user's, so one human's
+      // facts can't dedup-skip or supersede another's. A caller without a
+      // userId is shared context and sees the whole bucket — the same null
+      // semantics 'filter' mode uses at recall.
       dedupScope?: { projectId?: string | null; includeUnscoped?: boolean; userId?: string | null };
       // Four-axis retrieval scope, same shape every other repository calls
       // `scope`. Distinct from dedupScope above, which is the dream BUCKET
@@ -335,13 +338,18 @@ export const FactRepository = {
     const includeUnscoped = (input.dedupScope?.includeUnscoped ?? false) && projectId !== null;
     let scopeClause = '';
     if (hasScope) {
-      scopeClause = includeUnscoped
-        ? `AND (node.projectId = $projectId
-               OR (node.projectId IS NULL
-                   AND ($userId IS NULL OR node.userId IS NULL OR node.userId = $userId)))`
-        : projectId === null
-          ? 'AND node.projectId IS NULL'
-          : 'AND node.projectId = $projectId';
+      // includeUnscoped is already false when projectId is null, so the three
+      // branches are exclusive.
+      let projectClause: string;
+      if (includeUnscoped) {
+        projectClause = '(node.projectId = $projectId OR node.projectId IS NULL)';
+      } else if (projectId === null) {
+        projectClause = 'node.projectId IS NULL';
+      } else {
+        projectClause = 'node.projectId = $projectId';
+      }
+      const userGuard = '($userId IS NULL OR node.userId IS NULL OR node.userId = $userId)';
+      scopeClause = `AND ${projectClause} AND ${userGuard}`;
     }
     const retrieval = scopeAndClause('node', input.scope);
     const result = await tx.run(
