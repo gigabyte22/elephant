@@ -32,13 +32,20 @@ export function registerObservationsRoutes(app: App, container: Container): void
       querystring: z.object({
         sessionId: z.string().min(1),
         limit: z.coerce.number().int().positive().max(500).optional(),
+        // Separate one participant's working memory inside a shared session.
+        // Filter semantics: null-user observations are shared and still match.
+        userId: z.string().min(1).optional(),
       }),
       response: {
         200: okEnvelope(z.object({ observations: z.array(WireObservationSchema) })),
       },
     },
     handler: async (req) => {
-      const obs = await container.observations.listForSession(req.query.sessionId, req.query.limit);
+      const obs = await container.observations.listForSession(
+        req.query.sessionId,
+        req.query.limit,
+        req.query.userId,
+      );
       return {
         ok: true as const,
         data: { observations: obs.map(toWireObservation) },

@@ -40,8 +40,12 @@ export function createObservationService(deps: Deps) {
     return write((tx) => ObservationRepository.create(tx, obs));
   }
 
-  async function listForSession(sessionId: string, limit = 100): Promise<Observation[]> {
-    return read((tx) => ObservationRepository.listForSession(tx, sessionId, limit));
+  async function listForSession(
+    sessionId: string,
+    limit = 100,
+    userId?: string,
+  ): Promise<Observation[]> {
+    return read((tx) => ObservationRepository.listForSession(tx, sessionId, limit, userId));
   }
 
   async function reapExpired(): Promise<number> {
