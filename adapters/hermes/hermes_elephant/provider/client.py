@@ -152,20 +152,26 @@ class ElephantClient:
         query = _qs({"includeSuperseded": include_superseded})
         return self._request("GET", f"/entities/{_seg(entity_id)}?{query}")
 
-    def list_preferences(self) -> Dict[str, Any]:
-        return self._request("GET", "/preferences")
+    # A preference is identified by (key, projectId, userId) server-side, so an
+    # unscoped call reads and writes a DIFFERENT row from the caller's own —
+    # every method here takes the scope; unset axes drop out in _qs/_drop_none.
 
-    def get_preference(self, key: str) -> Dict[str, Any]:
-        return self._request("GET", f"/preferences/{_seg(key)}")
+    def list_preferences(self, **scope: Any) -> Dict[str, Any]:
+        return self._request("GET", f"/preferences?{_qs(scope)}")
+
+    def get_preference(self, key: str, **scope: Any) -> Dict[str, Any]:
+        return self._request("GET", f"/preferences/{_seg(key)}?{_qs(scope)}")
 
     def put_preference(
-        self, key: str, value: str, *, confidence: Optional[float] = None, actor: Optional[str] = None
+        self,
+        key: str,
+        value: str,
+        *,
+        confidence: Optional[float] = None,
+        actor: Optional[str] = None,
+        **scope: Any,
     ) -> Dict[str, Any]:
-        body: Dict[str, Any] = {"value": value}
-        if confidence is not None:
-            body["confidence"] = confidence
-        if actor is not None:
-            body["actor"] = actor
+        body = _drop_none({"value": value, "confidence": confidence, "actor": actor, **scope})
         return self._request("PUT", f"/preferences/{_seg(key)}", body)
 
     def write_observation(self, *, agent_id: str, session_id: str, content: str) -> Dict[str, Any]:

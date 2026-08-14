@@ -76,6 +76,28 @@ def provider(fake_http, monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def make_provider(fake_http, monkeypatch, tmp_path):
+    """Build providers from an ad-hoc elephant.json plus `initialize` kwargs —
+    the identity tests each need a different pairing of the two. Everything
+    built is shut down at teardown."""
+    built = []
+
+    def build(file_cfg=None, **init_kwargs):
+        monkeypatch.setenv(elephant.TOKEN_ENV, "tok-12345678")
+        if file_cfg is not None:
+            (tmp_path / "elephant.json").write_text(json.dumps(file_cfg))
+        fake_http.respond("GET", "/health", {"neo4j": True})
+        p = ElephantMemoryProvider()
+        p.initialize("session-1", hermes_home=str(tmp_path), **init_kwargs)
+        built.append(p)
+        return p
+
+    yield build
+    for p in built:
+        p.shutdown()
+
+
+@pytest.fixture
 def scoped_provider(fake_http, monkeypatch, tmp_path):
     """Provider with project/user scope configured — research and the scope
     bodies only exercise their real shape when those axes are set."""
@@ -553,3 +575,110 @@ def test_client_raises_elephant_error_on_4xx(monkeypatch):
         client.save_fact(content="")
     assert excinfo.value.status == 400
     assert "bad input" in str(excinfo.value)
+
+
+# ─ runtime identity + multi-speaker attribution ──────────────────────────────
+
+
+def _turn_episode(provider, fake_http, user_content, assistant_content):
+    """The episode body the daemon worker actually posted for one turn."""
+    fake_http.posted.clear()
+    provider.sync_turn(user_content, assistant_content, session_id="session-1")
+    assert fake_http.posted.wait(timeout=5), "worker never posted the episode"
+    provider._queue.join()
+    return next(r for r in fake_http.requests if r["path"] == "/episodes")["body"]
+
+
+def test_runtime_user_id_overrides_file_config(make_provider, fake_http):
+    # The config file must be the single-user FALLBACK, never an override —
+    # a config value that beat runtime identity would merge every human on
+    # the gateway into one memory bucket.
+    p = make_provider({"user_id": "configured"}, user_id="U123")
+    body = _turn_episode(
+        p,
+        fake_http,
+        "remember that I moved the retro to wednesday mornings",
+        "Noted — retro is on Wednesday now.",
+    )
+    assert body["userId"] == "U123"
+
+
+def test_user_id_alt_resolves_through_alias_map(make_provider):
+    p = make_provider({"user_aliases": {"platform-uuid-1": "dana"}}, user_id_alt="platform-uuid-1")
+    assert p._config["user_id"] == "dana"
+
+
+def test_absent_runtime_identity_falls_back_to_file_config(make_provider):
+    p = make_provider({"user_id": "configured"})
+    assert p._config["user_id"] == "configured"
+
+
+def test_shared_session_turn_becomes_labeled_participant(provider, fake_http):
+    # Hermes prefixes shared-session messages with "[DisplayName] ". That must
+    # become elephant's multi-speaker grammar with a label-only participant —
+    # an unrecognized speaker's facts belong in the SHARED bucket, not in
+    # whichever user's bucket this provider instance happens to be bound to.
+    body = _turn_episode(
+        provider,
+        fake_http,
+        "[Dana] the migration plan is ready for review whenever you are",
+        "Great — I'll take a look at the plan now.",
+    )
+    assert body["rawTranscript"].startswith("USER(Dana): the migration plan")
+    assert body["participants"] == [{"label": "Dana"}]
+
+
+def test_speaker_matching_bound_user_carries_their_id(make_provider, fake_http):
+    p = make_provider({}, user_id="U123", user_name="Dana")
+    body = _turn_episode(
+        p,
+        fake_http,
+        "[Dana] please remember I review PRs on friday afternoons",
+        "Got it — Friday afternoons it is.",
+    )
+    assert body["participants"] == [{"label": "Dana", "userId": "U123"}]
+
+
+def test_alias_map_resolves_other_speakers_display_name(make_provider, fake_http):
+    p = make_provider({"user_aliases": {"Ravi": "u:ravi"}}, user_id="U123")
+    body = _turn_episode(
+        p,
+        fake_http,
+        "[Ravi] I prefer squash merges over merge commits for this repo",
+        "Understood — I'll squash-merge going forward.",
+    )
+    assert body["participants"] == [{"label": "Ravi", "userId": "u:ravi"}]
+
+
+def test_plain_turn_stays_single_user_shaped(provider, fake_http):
+    body = _turn_episode(
+        provider,
+        fake_http,
+        "remember that I switched the deploy day to thursday",
+        "Noted — deploys now happen on Thursday.",
+    )
+    assert body["rawTranscript"].startswith("USER: remember")
+    assert "participants" not in body
+
+
+def test_preference_calls_carry_configured_scope(scoped_provider, fake_http):
+    # A preference is identified by (key, projectId, userId) server-side;
+    # unscoped calls read/write the global bucket — a DIFFERENT preference
+    # from the configured user's own.
+    fake_http.respond(
+        "PUT", "/preferences/", {"key": "tone", "value": "concise", "validFrom": "2026-01-01"}
+    )
+    scoped_provider.handle_tool_call("memory_preference_set", {"key": "tone", "value": "concise"})
+    put = next(r for r in fake_http.requests if r["method"] == "PUT")
+    assert put["body"]["projectId"] == "proj-1"
+    assert put["body"]["userId"] == "u-1"
+
+    fake_http.respond("GET", "/preferences/", {"key": "tone", "value": "concise", "confidence": 0.9})
+    scoped_provider.handle_tool_call("memory_preference_get", {"key": "tone"})
+    got = next(
+        r
+        for r in fake_http.requests
+        if r["method"] == "GET" and r["path"].startswith("/preferences/")
+    )
+    assert got["query"]["projectId"] == "proj-1"
+    assert got["query"]["userId"] == "u-1"

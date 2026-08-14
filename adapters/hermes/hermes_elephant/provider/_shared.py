@@ -17,12 +17,40 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 CONFIG_FILE = "elephant.json"
 TOKEN_ENV = "ELEPHANT_SERVICE_TOKEN"
 DEFAULT_URL = "http://127.0.0.1:18790"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _user_aliases(config: Dict[str, Any]) -> Dict[str, str]:
+    """The ``user_aliases`` map from elephant.json: platform user id (or display
+    name) -> canonical elephant userId. Lets one human's Slack, Telegram, and
+    display-name identities land in a single memory bucket. Defensive: anything
+    that isn't a str->str dict collapses to empty."""
+    raw = config.get("user_aliases")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if k and v}
+
+
+def _resolve_user_id(
+    file_cfg: Dict[str, Any],
+    runtime_user_id: Any = None,
+    runtime_user_id_alt: Any = None,
+) -> Optional[str]:
+    """The elephant userId for this provider instance: runtime identity from the
+    hermes gateway (the ``initialize`` kwargs), alias-mapped, else the config
+    file. Runtime always wins — a config value that overrode it would silently
+    merge every human on the gateway into one memory bucket. The file's
+    ``user_id`` is the fallback for single-user installs and the CLI, which have
+    no runtime identity at all."""
+    runtime = str(runtime_user_id or runtime_user_id_alt or "")
+    if runtime:
+        return _user_aliases(file_cfg).get(runtime, runtime)
+    return file_cfg.get("user_id") or None
 
 
 def _scope_of(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,6 +64,21 @@ def _scope_of(config: Dict[str, Any]) -> Dict[str, Any]:
     if config.get("user_id"):
         scope["userId"] = config["user_id"]
     return scope
+
+
+# The gateway's shared-session marker: "[Dana] actual message". Bounded and
+# anchored so ordinary bracketed text deeper in a message never matches.
+_SPEAKER_PREFIX_RE = re.compile(r"^\[([^\[\]\n]{1,64})\]\s+(.+)$", re.S)
+
+
+def _split_speaker_prefix(text: str) -> Optional[Tuple[str, str]]:
+    """(label, rest) when ``text`` opens with hermes's shared-session speaker
+    prefix, else None — the single-user path must stay byte-identical."""
+    match = _SPEAKER_PREFIX_RE.match(text or "")
+    if not match:
+        return None
+    label = match.group(1).strip()
+    return (label, match.group(2)) if label else None
 
 
 def _detail(header: str, item: Dict[str, Any]) -> str:

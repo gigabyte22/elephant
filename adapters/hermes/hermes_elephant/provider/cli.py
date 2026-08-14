@@ -131,7 +131,9 @@ def _run(args) -> None:  # noqa: ANN001 — argparse namespace
         print(f"Soft-deleted fact {args.fact_id}")
 
     elif cmd == "prefs":
-        for pref in client.list_preferences().get("preferences") or []:
+        # Scoped like every other CLI read: the unscoped listing is a different
+        # bucket from the configured project/user's preferences.
+        for pref in client.list_preferences(**scope).get("preferences") or []:
             print(f"{pref.get('key')}: {pref.get('value')}")
 
     elif cmd == "dream":

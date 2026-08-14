@@ -13,6 +13,7 @@ hermes changes those shapes, the live check at the bottom is what catches it.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from dataclasses import dataclass, field as dataclass_field
@@ -164,3 +165,19 @@ def test_loads_against_a_real_hermes_checkout():
     # rest behind the full-config modal; an empty inline set means a blank panel.
     assert schema.inline_fields()
     assert [f.key for f in schema.fields if f.is_secret] == ["token"]
+
+
+def test_save_config_preserves_keys_the_wizard_does_not_know(tmp_path):
+    """user_aliases (and any hand-added setting) lives only in elephant.json;
+    a wizard re-run must merge over the file, not replace it."""
+    (tmp_path / "elephant.json").write_text(
+        json.dumps({"user_aliases": {"U1": "dana"}, "agent_id": "old"})
+    )
+    provider = ElephantMemoryProvider()
+    provider.save_config(
+        {"token": "tok-12345678", "url": "http://x", "agent_id": "new"}, str(tmp_path)
+    )
+    data = json.loads((tmp_path / "elephant.json").read_text(encoding="utf-8"))
+    assert data["user_aliases"] == {"U1": "dana"}
+    assert data["agent_id"] == "new"
+    assert data["url"] == "http://x"

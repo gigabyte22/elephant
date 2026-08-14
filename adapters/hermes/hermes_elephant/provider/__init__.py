@@ -50,7 +50,10 @@ from ._shared import (  # noqa: F401 — re-exported for back-compat
     _format_recall,
     _items,
     _load_file_config,
+    _resolve_user_id,
     _scope_of,
+    _split_speaker_prefix,
+    _user_aliases,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,7 +164,11 @@ class ElephantMemoryProvider(MemoryProvider):
             "url": os.environ.get("ELEPHANT_URL") or file_cfg.get("url") or DEFAULT_URL,
             "agent_id": file_cfg.get("agent_id") or "hermes",
             "project_id": file_cfg.get("project_id") or None,
-            "user_id": file_cfg.get("user_id") or None,
+            # Gateway identity first, config file only as the single-user
+            # fallback — never the other way around (see _resolve_user_id).
+            "user_id": _resolve_user_id(file_cfg, kwargs.get("user_id"), kwargs.get("user_id_alt")),
+            "user_name": str(kwargs.get("user_name") or "") or None,
+            "user_aliases": _user_aliases(file_cfg),
             "auto_recall_limit": int(file_cfg.get("auto_recall_limit") or 8),
         }
         self._session_id = session_id
@@ -205,7 +212,12 @@ class ElephantMemoryProvider(MemoryProvider):
                 self._queue.task_done()
 
     def _enqueue_episode(
-        self, transcript: str, session_id: str, *, origin: str = "user"
+        self,
+        transcript: str,
+        session_id: str,
+        *,
+        origin: str = "user",
+        participants: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         if not transcript.strip() or self._client is None:
             return
@@ -224,6 +236,8 @@ class ElephantMemoryProvider(MemoryProvider):
             episode["projectId"] = self._config["project_id"]
         if self._config.get("user_id"):
             episode["userId"] = self._config["user_id"]
+        if participants:
+            episode["participants"] = participants
         self._ensure_worker()
         self._queue.put(episode)
 
@@ -240,8 +254,33 @@ class ElephantMemoryProvider(MemoryProvider):
         # MUST be non-blocking: enqueue only, the daemon worker does the POST.
         if len(user_content) + len(assistant_content) < 50:
             return
+        # In a shared session hermes prefixes the trigger text with the speaker's
+        # display name ("[Dana] …"). Rewriting it into elephant's multi-speaker
+        # grammar — USER(<label>): plus a participants declaration — keeps the
+        # dreamer from attributing every speaker's facts to the one user this
+        # provider instance is bound to.
+        speaker = _split_speaker_prefix(user_content)
+        if speaker is not None:
+            label, text = speaker
+            transcript = f"USER({label}): {text}\n\nASSISTANT: {assistant_content}"
+            participants = [self._participant_for(label)]
+            self._enqueue_episode(transcript, session_id, participants=participants)
+            return
         transcript = f"USER: {user_content}\n\nASSISTANT: {assistant_content}"
         self._enqueue_episode(transcript, session_id)
+
+    def _participant_for(self, label: str) -> Dict[str, Any]:
+        # A label that maps through user_aliases — or names this instance's own
+        # bound user — carries that userId; anything else stays label-only and
+        # lands in the SHARED bucket. Guessing instead would file one human's
+        # facts under another's id.
+        participant: Dict[str, Any] = {"label": label}
+        user_id = (self._config.get("user_aliases") or {}).get(label)
+        if not user_id and self._config.get("user_name") == label:
+            user_id = self._config.get("user_id")
+        if user_id:
+            participant["userId"] = user_id
+        return participant
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
         # Turns already flowed through sync_turn; just give the queue a chance
@@ -764,9 +803,12 @@ class ElephantMemoryProvider(MemoryProvider):
                 return f"No entities matching \"{args['name']}\"."
             return "\n".join(f"- {e['name']} ({e['type']}) [{e['id']}]" for e in entities)
 
+        # Both calls carry the configured scope: recall applies it, so an
+        # unscoped set/get would touch a different row than the one recall
+        # surfaces — what you set and what you got back could disagree.
         if tool_name == "memory_preference_get":
             try:
-                pref = client.get_preference(args["key"])
+                pref = client.get_preference(args["key"], **_scope_of(self._config))
                 return f"{pref['key']}: {pref['value']} (confidence {pref.get('confidence')})"
             except ElephantError as err:
                 if err.status == 404:
@@ -775,7 +817,11 @@ class ElephantMemoryProvider(MemoryProvider):
 
         if tool_name == "memory_preference_set":
             pref = client.put_preference(
-                args["key"], args["value"], confidence=args.get("confidence"), actor=agent_id
+                args["key"],
+                args["value"],
+                confidence=args.get("confidence"),
+                actor=agent_id,
+                **_scope_of(self._config),
             )
             return f"Set {args['key']} = \"{args['value']}\" (validFrom {pref.get('validFrom')})"
 
@@ -1111,10 +1157,14 @@ class ElephantMemoryProvider(MemoryProvider):
 
     def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
         non_secret = {k: v for k, v in values.items() if k != "token" and v not in (None, "")}
+        # Merge over the existing file rather than replacing it: keys the
+        # wizard doesn't know about (user_aliases, hand-added settings) must
+        # survive a re-run of setup.
+        merged = {**_load_file_config(hermes_home), **non_secret}
         path = os.path.join(hermes_home, CONFIG_FILE)
         os.makedirs(hermes_home, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump(non_secret, fh, indent=2)
+            json.dump(merged, fh, indent=2)
             fh.write("\n")
 
     def backup_paths(self) -> List[str]:
