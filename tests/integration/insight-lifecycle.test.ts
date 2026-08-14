@@ -248,6 +248,45 @@ describe('the nightly sweep is the migration path', () => {
   });
 });
 
+describe('insight recall pushes scope into the vector query', () => {
+  // Same crowding failure the preference source had: the vector index returns
+  // the GLOBAL top-K, so without the pushed-down predicate another user's
+  // insights could fill the K before the post-filter ran.
+  test("listSimilar with a filter scope never returns other users' insights", async () => {
+    const vec = Array.from({ length: EMBED_DIM }, () => 0.01);
+    await write(async (tx) => {
+      for (const userId of ['dana', 'dana', 'dana', undefined, 'ravi']) {
+        await InsightRepository.create(tx, {
+          id: newId(),
+          content: `insight of ${userId ?? 'everyone'}`,
+          embedding: vec,
+          promotedFromFactIds: [],
+          createdAt: new Date(),
+          userId,
+        });
+      }
+    });
+
+    const filtered = await read((tx) =>
+      InsightRepository.listSimilar(tx, {
+        embedding: vec,
+        limit: 50,
+        scope: { userId: 'ravi', userScope: 'filter' },
+      }),
+    );
+    expect(filtered.map((i) => i.userId ?? null).sort()).toEqual([null, 'ravi']);
+
+    const strict = await read((tx) =>
+      InsightRepository.listSimilar(tx, {
+        embedding: vec,
+        limit: 50,
+        scope: { userId: 'ravi', userScope: 'strict' },
+      }),
+    );
+    expect(strict.map((i) => i.userId)).toEqual(['ravi']);
+  });
+});
+
 describe('promotion respects userId', () => {
   // The promotion dedup compares userId alongside projectId. Without it,
   // ravi's identical high-importance fact corroborated dana's insight — ravi

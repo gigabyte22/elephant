@@ -14,6 +14,7 @@ import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adap
 import { read, write } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
+import { PreferenceRepository } from '../../src/repositories/PreferenceRepository.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
@@ -155,6 +156,65 @@ describe('preferences are identified by (key, projectId, userId)', () => {
       return (r.records[0]?.get('n') as number) ?? 0;
     });
     expect(live).toBe(1);
+  });
+});
+
+describe('preference recall pushes scope into the vector query', () => {
+  // The vector index returns the GLOBAL top-K, so a fixed K plus a caller-side
+  // filter lets other users' semantically-similar rows crowd this user's out
+  // and recall silently returns nothing for them.
+  test("listSimilar with a filter scope never returns other users' rows", async () => {
+    for (let i = 0; i < 6; i++) {
+      await setPref(`style.${i}`, 'concise answers', { userId: 'dana' });
+    }
+    await setPref('style.mine', 'concise answers', { userId: 'ravi' });
+    await setPref('style.shared', 'concise answers');
+
+    const vec = await container.embedder.embed('style: concise answers');
+
+    // limit ≥ every seeded row, so the global top-K contains them all and the
+    // only thing separating users is the pushed-down predicate.
+    const filtered = await read((tx) =>
+      PreferenceRepository.listSimilar(tx, {
+        embedding: vec,
+        limit: 50,
+        scope: { userId: 'ravi', userScope: 'filter' },
+      }),
+    );
+    expect(filtered.map((p) => p.key).sort()).toEqual(['style.mine', 'style.shared']);
+
+    const strict = await read((tx) =>
+      PreferenceRepository.listSimilar(tx, {
+        embedding: vec,
+        limit: 50,
+        scope: { userId: 'ravi', userScope: 'strict' },
+      }),
+    );
+    expect(strict.map((p) => p.key)).toEqual(['style.mine']);
+
+    const unscoped = await read((tx) =>
+      PreferenceRepository.listSimilar(tx, { embedding: vec, limit: 50 }),
+    );
+    expect(unscoped).toHaveLength(8);
+  });
+
+  test("a user's preference survives recall despite other users' crowd", async () => {
+    for (let i = 0; i < 30; i++) {
+      await setPref(`noise.${i}`, 'prefers concise answers', { userId: 'dana' });
+    }
+    await setPref('style', 'prefers concise answers', { userId: 'ravi' });
+
+    const params = new URLSearchParams({
+      q: 'prefers concise answers',
+      includePreferences: 'true',
+      userId: 'ravi',
+      userScope: 'filter',
+      limit: '3',
+    });
+    const res = await app.inject({ method: 'GET', url: `/recall?${params}`, headers: auth });
+    expect(res.statusCode).toBe(200);
+    const prefs = (res.json().data.preferences ?? []) as Array<{ key: string }>;
+    expect(prefs.map((p) => p.key)).toContain('style');
   });
 });
 
