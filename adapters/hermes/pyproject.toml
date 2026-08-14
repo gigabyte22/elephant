@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-elephant"
-version = "0.1.0"
+version = "0.2.0"
 description = "Elephant memory provider for hermes-agent — hybrid GraphRAG recall, bi-temporal facts, and nightly consolidation on Neo4j"
 readme = "hermes_elephant/provider/README.md"
 license = { text = "MIT" }
