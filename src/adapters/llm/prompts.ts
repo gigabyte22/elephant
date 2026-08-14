@@ -25,6 +25,10 @@ NOT facts:
 
 Speaker attribution — the transcript labels each turn:
 - "USER:" is the human. Only USER turns state things about the user.
+- "USER(<label>):" is a specific named human, used when several humans share
+  the conversation; the caller declares the labels. Only that person's turns
+  state things about that person. When labels are present, name the person in
+  the fact itself ("alice prefers dark mode"), never "the user".
 - "ASSISTANT:" is the AI assistant; "TOOL:" is machine tool output.
 - "SYSTEM TRIGGER (CRON):" / "SYSTEM TRIGGER (EVENT):" are machine-generated
   triggers — not a human. A USER turn whose text begins with "[CRON_TRIGGER"
@@ -56,6 +60,7 @@ Return strict JSON only, matching this schema:
       "category": "string — optional, e.g. preference, attribute, decision, relationship",
       "confidence": 0.0..1.0,
       "importance": 0.0..1.0,
+      "subject": "string or null — the declared participant label this fact is about; null for objective/world facts, group decisions, assistant state, or people who are not declared participants. In a plain USER:/ASSISTANT: transcript with no declared participants, use null.",
       "entities": [
         { "name": "string", "type": "person|project|tool|organization|place|concept|..." },
         ...
@@ -76,6 +81,9 @@ export function buildExtractFactsUserPrompt(
     timestamp: Date;
     rawTranscript: string;
     origin?: 'user' | 'cron' | 'event' | 'system' | 'ingest';
+    // Labels only — never interpolate userId scope strings into an outbound
+    // LLM call (the same hygiene the scoped extraction sample exists for).
+    participants?: Array<{ label: string }>;
   },
   existing: Array<{ id: string; content: string }>,
 ): string {
@@ -93,9 +101,16 @@ export function buildExtractFactsUserPrompt(
     originNote =
       '\n\nNOTE: This is ingested content (a document, article, or media transcript), not a conversation with the user. Attribute claims to the content or its source, not to "the user", unless the content is explicitly the user\'s own first-person writing.';
   }
+  // Deliberately not prefixed "NOTE:" — the origin notes above own that prefix
+  // and tests pin that origin='user' adds none.
+  const participantsNote = episode.participants?.length
+    ? `\n\nParticipants (human speakers in this transcript, by label): ${episode.participants
+        .map((p) => p.label)
+        .join(', ')}.\nAttribute each fact's "subject" to the participant it is about, or null.`
+    : '';
   return `${ctx}Conversation turn (session=${episode.sessionId}, time=${episode.timestamp.toISOString()}):
 
-${episode.rawTranscript}${originNote}
+${episode.rawTranscript}${originNote}${participantsNote}
 
 Extract facts as JSON.`;
 }

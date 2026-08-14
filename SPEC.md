@@ -35,6 +35,21 @@ Categories supported in v1.2 (existing + new):
 
 Cross-cutting scope axes on every memory item: `projectId`, `userId`, plus the existing `agentId` / `sessionId`. Each axis runs in retrieval mode `boost` (default when a value is supplied), `filter` (hard match, but a null scope is a shared global and still matches), `strict` (like `filter`, and also excludes nulls), or `none`.
 
+Multi-speaker attribution: an episode may declare `participants` —
+`[{label, userId?}]`, persisted as a JSON-string prop because Neo4j
+properties cannot hold heterogeneous objects — and label its human turns
+`USER(<label>):`. Dream extraction then emits a tri-state `subject` per
+fact: a declared label scopes the fact to that participant's `userId`;
+`null` (objective/world facts, group decisions, assistant state,
+non-declared third parties) scopes it to the shared bucket (`userId`
+null, consistent with the null-means-shared rule above); a missing or
+unknown subject falls back to the episode's own `userId`. A declared
+participant *without* a `userId` maps to the shared bucket, never to the
+episode's — scoping one speaker's facts into another's personal bucket
+is the failure the field exists to prevent. Episodes without
+`participants` behave exactly as before: every extracted fact inherits
+the episode's `userId` and `subject` is ignored.
+
 Audit / revision history: every mutating write to a Fact / Preference /
 Procedure / KnowledgeDocument / Research routes through a shared `revise()`
 helper that snapshots the prior state into an `:ArchivedRevision` node and
@@ -116,7 +131,7 @@ Node Labels & Properties
 Entity (Person, Concept, Tool, etc.): id, name, type, embedding
 Fact (reified long-term memory): id, content, confidence, importance, validFrom, validTo, recordedAt, embedding, sourceEpisodeId
 Preference (user prefs): id, key, value, confidence, validFrom, validTo, recordedAt, embedding
-Episode (conversation turn): id, timestamp, rawTranscript, summary, embedding, sessionId
+Episode (conversation turn): id, timestamp, rawTranscript, summary, embedding, sessionId, participants (JSON string, optional)
 Insight (dreamed wisdom): id, content, embedding
 Observation (working memory, TTL 7 days)
 

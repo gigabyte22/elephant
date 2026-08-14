@@ -83,6 +83,8 @@ export interface WireEpisode extends WireScope {
   timestamp: string;
   rawTranscript: string;
   summary: string;
+  /** Declared human speakers for multi-party transcripts; absent = 1:1. */
+  participants?: Array<{ label: string; userId?: string }>;
 }
 
 export interface WireObservation extends WireScope {
