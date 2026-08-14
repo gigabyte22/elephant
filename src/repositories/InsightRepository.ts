@@ -1,7 +1,13 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Insight } from '../models/types.ts';
 import { dateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
-import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
+import {
+  memoryItemParams,
+  memoryItemSetClause,
+  type RetrievalScope,
+  readScope,
+  scopeAndClause,
+} from './scope.ts';
 
 function toInsight(node: Record<string, unknown>): Insight {
   return {
@@ -162,9 +168,21 @@ export const InsightRepository = {
 
   async listSimilar(
     tx: ManagedTransaction,
-    input: { embedding: number[]; limit: number; minScore?: number; includeRetired?: boolean },
+    input: {
+      embedding: number[];
+      limit: number;
+      minScore?: number;
+      includeRetired?: boolean;
+      // Retrieval scope pushdown, same shape every other repository calls
+      // `scope`. Belongs in the query rather than a caller-side filter:
+      // `queryNodes` returns the GLOBAL top-K, which other scopes' rows can
+      // fill entirely. The promotion dedup in DreamingService omits it on
+      // purpose — it compares scope in JS over an unscoped neighbourhood.
+      scope?: RetrievalScope;
+    },
   ): Promise<Array<Insight & { score: number }>> {
     const minScore = input.minScore ?? 0;
+    const retrieval = scopeAndClause('node', input.scope);
     const result = await tx.run(
       // Retired insights are excluded by default. Without this an insight
       // promoted from a fact that was later contradicted kept asserting the
@@ -173,6 +191,7 @@ export const InsightRepository = {
       `CALL db.index.vector.queryNodes('insight_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore
          AND ($includeRetired OR node.validTo IS NULL)
+       ${retrieval.clause}
        RETURN node {.*} AS i, score
        ORDER BY score DESC`,
       {
@@ -180,6 +199,7 @@ export const InsightRepository = {
         limit: input.limit,
         minScore,
         includeRetired: input.includeRetired ?? false,
+        ...retrieval.params,
       },
     );
     return result.records.map((r) => ({
