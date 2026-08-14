@@ -306,6 +306,15 @@ export class ElephantClient {
   // ─ Episodes ──
   // timestamp = event time for the turn (defaults to now). Dream-extracted
   // facts inherit this as validFrom; pass historical timestamps when backfilling.
+  //
+  // participants: declare the humans in a MULTI-PARTY transcript (a group
+  // thread, a shared channel). Label each human turn `USER(<label>):` instead
+  // of `USER:`, and list every speaker here — with their elephant userId when
+  // you know it. Extraction then attributes each fact to the person who is its
+  // subject: personal facts land in that person's userId bucket, objective /
+  // team facts land unscoped (shared). Declare only humans; the assistant and
+  // tools keep their fixed ASSISTANT:/TOOL: labels. Omit for 1:1 sessions —
+  // facts then inherit the episode's userId wholesale, exactly as before.
   ingestEpisode(input: {
     id?: string;
     agentId: string;
@@ -313,6 +322,7 @@ export class ElephantClient {
     rawTranscript: string;
     summary?: string;
     timestamp?: Date;
+    participants?: Array<{ label: string; userId?: string }>;
   }): Promise<{ episodeId: string }> {
     return this.post('/episodes', input);
   }

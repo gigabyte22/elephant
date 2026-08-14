@@ -13,6 +13,17 @@ POST   /episodes                    ingest raw conversation turn → returns epi
                                     // fully embedded, so content recall is unaffected meanwhile.
                                     // Supply `summary` yourself, or INGEST_DEFER_SUMMARY=false, to
                                     // get a finished summary at write time.
+                                    // participants?: [{label, userId?}] — declared human speakers
+                                    //   for a multi-party transcript whose turns are labeled
+                                    //   `USER(<label>):`. Labels unique case-insensitively (400
+                                    //   otherwise), max 32. Dream extraction then attributes each
+                                    //   fact: subject=<label> → that participant's userId;
+                                    //   subject=null (objective/world facts, group decisions,
+                                    //   assistant state, non-declared people) → shared bucket
+                                    //   (userId null); unknown/missing subject → episode userId.
+                                    //   A declared participant without a userId maps to the shared
+                                    //   bucket, never to the episode's userId. Omitted participants
+                                    //   = single-user behavior: every fact inherits episode userId.
 POST   /facts                       save one fact (explicit, from user or agent)
                                     // optional validFrom; if omitted + sourceEpisodeId → episode.timestamp
                                     // returns without an LLM call: the contradiction check runs in

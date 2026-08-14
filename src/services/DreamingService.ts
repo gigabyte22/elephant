@@ -12,7 +12,7 @@ import type {
   Insight,
   MemoryKind,
 } from '../models/types.ts';
-import { resolveExtractedEntities } from '../models/types.ts';
+import { resolveExtractedEntities, resolveFactUserId } from '../models/types.ts';
 import { ChunkRepository } from '../repositories/ChunkRepository.ts';
 import { DreamRunRepository } from '../repositories/DreamRunRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
@@ -25,6 +25,7 @@ import { cosine } from '../utils/cosine.ts';
 import { shouldPrune } from '../utils/decay.ts';
 import { newId } from '../utils/ids.ts';
 import { nextRetryAt } from '../utils/retry.ts';
+import { lastSpeakerLabel, startsWithSpeakerLabel } from '../utils/speaker-labels.ts';
 import { eventValidTo } from '../utils/temporal.ts';
 import { AuditService } from './AuditService.ts';
 import { createBoundedSummarizer } from './BoundedSummarizer.ts';
@@ -527,8 +528,11 @@ export function createDreamingService(deps: Deps) {
             sourceEpisodeId: ep.id,
             // Inherit the source episode's scope so isolated projects keep
             // their own dream-learned facts and don't leak into other scopes.
+            // userId goes through attribution: on multi-party episodes the
+            // extractor names who each fact is about, so one speaker's facts
+            // don't land in the posting user's personal bucket.
             projectId: ep.projectId,
-            userId: ep.userId,
+            userId: resolveFactUserId(ep, ext),
             // The contradiction pass below covers this fact, so the sweep that
             // picks up unchecked facts must not claim it a second time.
             supersedeCheckedAt: now,
@@ -826,10 +830,23 @@ export function createDreamingService(deps: Deps) {
     let bufText = '';
     const bufIds: string[] = [];
     let bufTokens = 0;
+    // Speaker carried into the buffer's first chunk when the split landed
+    // mid-turn. Only meaningful on multi-party episodes: a group whose text
+    // opens with unlabeled prose would otherwise leave the extractor guessing
+    // whose words it is reading. A bracketed machine note (the established
+    // `[CRON_TRIGGER…]` convention) is safer than synthesizing a fake turn
+    // header. Single-user episodes are left byte-identical.
+    let lastLabel: string | null = null;
+    let bufOpeningLabel: string | null = null;
+    const attributed = Boolean(ep.participants?.length);
 
     function flush(): void {
       if (!bufText) return;
-      groups.push({ episode: { ...ep, rawTranscript: bufText }, chunkIds: bufIds.slice() });
+      const text =
+        attributed && bufOpeningLabel && !startsWithSpeakerLabel(bufText)
+          ? `[continued mid-turn; current speaker: ${bufOpeningLabel}]\n\n${bufText}`
+          : bufText;
+      groups.push({ episode: { ...ep, rawTranscript: text }, chunkIds: bufIds.slice() });
       bufText = '';
       bufIds.length = 0;
       bufTokens = 0;
@@ -838,9 +855,11 @@ export function createDreamingService(deps: Deps) {
     for (const c of chunks) {
       const nextTokens = c.tokenCount + (bufText ? 2 : 0); // ~ "\n\n" between chunks
       if (bufTokens + nextTokens > contextBudget && bufText) flush();
+      if (!bufText) bufOpeningLabel = lastLabel;
       bufText = bufText ? `${bufText}\n\n${c.text}` : c.text;
       bufIds.push(c.id);
       bufTokens += nextTokens;
+      lastLabel = lastSpeakerLabel(c.text) ?? lastLabel;
     }
     flush();
     return groups;
@@ -1087,9 +1106,9 @@ export function createDreamingService(deps: Deps) {
       if (await read((tx) => InsightRepository.findBySourceFact(tx, f.id))) continue;
 
       // Semantic dedup within the fact's own scope bucket, mirroring the fact
-      // dedup rule so one project's insights can't dedup-skip against
-      // another's. Promotion was a verbatim copy per qualifying fact, so
-      // near-identical insights accumulated with a second copy of the
+      // dedup rule so one project's (or one user's) insights can't dedup-skip
+      // against another's. Promotion was a verbatim copy per qualifying fact,
+      // so near-identical insights accumulated with a second copy of the
       // embedding polluting the vector space.
       const similar = await read((tx) =>
         InsightRepository.listSimilar(tx, {
@@ -1101,6 +1120,7 @@ export function createDreamingService(deps: Deps) {
       const duplicate = similar.find(
         (candidate) =>
           (candidate.projectId ?? null) === (f.projectId ?? null) &&
+          (candidate.userId ?? null) === (f.userId ?? null) &&
           cosine(f.embedding, candidate.embedding) > config.insightDedupThreshold,
       );
       if (duplicate) {

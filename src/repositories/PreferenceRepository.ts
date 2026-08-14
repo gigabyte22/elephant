@@ -3,7 +3,13 @@ import type { Preference, Scope } from '../models/types.ts';
 import { newId } from '../utils/ids.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import { validAtClause } from '../utils/temporal.ts';
-import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
+import {
+  memoryItemParams,
+  memoryItemSetClause,
+  type RetrievalScope,
+  readScope,
+  scopeAndClause,
+} from './scope.ts';
 
 function toPreference(node: Record<string, unknown>): Preference {
   const validFrom = toJsDate(node.validFrom);
@@ -152,18 +158,31 @@ export const PreferenceRepository = {
       // the preference version whose interval covers this instant, so a
       // historical recall doesn't mix today's values in with older facts.
       asOf?: Date | null;
+      // Retrieval scope pushdown, same shape every other repository calls
+      // `scope`. Belongs in the query rather than a caller-side filter:
+      // `queryNodes` returns the GLOBAL top-K, which other scopes' rows can
+      // fill entirely.
+      scope?: RetrievalScope;
     },
   ): Promise<Array<Preference & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const includeSuperseded = input.includeSuperseded ?? false;
     const asOf = input.asOf ?? null;
+    const retrieval = scopeAndClause('node', input.scope);
     const result = await tx.run(
       `CALL db.index.vector.queryNodes('preference_vectors', toInteger($limit), $vec) YIELD node, score
        WHERE score >= $minScore
        ${validAtClause('node', { asOf, includeSuperseded })}
+       ${retrieval.clause}
        RETURN node {.*} AS p, score
        ORDER BY score DESC`,
-      { vec: input.embedding, limit: input.limit, minScore, asOf: nullableDateParam(asOf) },
+      {
+        vec: input.embedding,
+        limit: input.limit,
+        minScore,
+        asOf: nullableDateParam(asOf),
+        ...retrieval.params,
+      },
     );
     return result.records.map((r) => ({
       ...toPreference(r.get('p')),

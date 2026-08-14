@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { z } from 'zod';
 import {
   ConsolidateResponseSchema,
+  ExtractFactsResponseSchema,
   extractJson,
   JsonExtractionError,
   parseJsonResponse,
@@ -41,6 +42,21 @@ describe('parseJsonResponse', () => {
   test('throws on schema mismatch', () => {
     const schema = z.object({ n: z.number() });
     expect(() => parseJsonResponse('{"n":"oops"}', schema)).toThrow(JsonExtractionError);
+  });
+});
+
+describe('ExtractFactsResponseSchema', () => {
+  const fact = { content: 'alice prefers dark mode', confidence: 0.8, importance: 0.6 };
+
+  // `subject` is tri-state and every state must parse: a participant label, an
+  // explicit null (shared), and absent entirely (legacy model output).
+  test.each([
+    ['label', { ...fact, subject: 'alice' }],
+    ['null', { ...fact, subject: null }],
+    ['absent', fact],
+  ])('accepts subject as %s', (_name, payload) => {
+    const parsed = ExtractFactsResponseSchema.parse({ facts: [payload] });
+    expect(parsed.facts).toHaveLength(1);
   });
 });
 
