@@ -127,10 +127,9 @@ describe('extraction prompt sample is scoped', () => {
     expect(sampledContents()).toContain(SECRET);
   });
 
-  // userId is deliberately NOT a bucket axis (see FactRepository.listSimilar):
-  // it guards only the widened branch, where a project bucket also reaches into
-  // the unscoped personal bucket. That is the guarantee worth pinning — a
-  // project owned by one human must not sample another human's personal facts.
+  // userId guards every dedupScope branch (see FactRepository.listSimilar): an
+  // episode samples shared (null-user) facts and its own user's, never another
+  // human's — same project, unscoped bucket and widened branch alike.
   test("a project owned by one user does not sample another user's personal facts", async () => {
     await saveFact(OTHER_USER_SECRET, { userId: 'dana' });
     await ingestEpisode({ projectId: 'acme', userId: 'ravi' });
@@ -138,6 +137,33 @@ describe('extraction prompt sample is scoped', () => {
     await container.dreaming.runCycle();
 
     expect(sampledContents()).not.toContain(OTHER_USER_SECRET);
+  });
+
+  test("an unscoped episode from one user does not sample another user's facts", async () => {
+    await saveFact(OTHER_USER_SECRET, { userId: 'dana' });
+    await ingestEpisode({ userId: 'ravi' });
+
+    await container.dreaming.runCycle();
+
+    expect(sampledContents()).not.toContain(OTHER_USER_SECRET);
+  });
+
+  test("one user's project episode does not sample a teammate's facts in the same project", async () => {
+    await saveFact(SECRET, { projectId: 'acme', userId: 'dana' });
+    await ingestEpisode({ projectId: 'acme', userId: 'ravi' });
+
+    await container.dreaming.runCycle();
+
+    expect(sampledContents()).not.toContain(SECRET);
+  });
+
+  test("a user's episode still samples shared null-user facts", async () => {
+    await saveFact(SECRET, {});
+    await ingestEpisode({ userId: 'ravi' });
+
+    await container.dreaming.runCycle();
+
+    expect(sampledContents()).toContain(SECRET);
   });
 
   test('a project does sample its own owner’s personal facts', async () => {

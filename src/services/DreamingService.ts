@@ -1087,9 +1087,9 @@ export function createDreamingService(deps: Deps) {
       if (await read((tx) => InsightRepository.findBySourceFact(tx, f.id))) continue;
 
       // Semantic dedup within the fact's own scope bucket, mirroring the fact
-      // dedup rule so one project's insights can't dedup-skip against
-      // another's. Promotion was a verbatim copy per qualifying fact, so
-      // near-identical insights accumulated with a second copy of the
+      // dedup rule so one project's (or one user's) insights can't dedup-skip
+      // against another's. Promotion was a verbatim copy per qualifying fact,
+      // so near-identical insights accumulated with a second copy of the
       // embedding polluting the vector space.
       const similar = await read((tx) =>
         InsightRepository.listSimilar(tx, {
@@ -1101,6 +1101,7 @@ export function createDreamingService(deps: Deps) {
       const duplicate = similar.find(
         (candidate) =>
           (candidate.projectId ?? null) === (f.projectId ?? null) &&
+          (candidate.userId ?? null) === (f.userId ?? null) &&
           cosine(f.embedding, candidate.embedding) > config.insightDedupThreshold,
       );
       if (duplicate) {

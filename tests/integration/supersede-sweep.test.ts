@@ -61,8 +61,11 @@ beforeEach(async () => {
   });
 });
 
-async function writeFact(content: string): Promise<Fact> {
-  return container.ingestion.saveFact({ content, category: 'preference', projectId: PROJECT });
+async function writeFact(
+  content: string,
+  scope: { projectId?: string; userId?: string } = { projectId: PROJECT },
+): Promise<Fact> {
+  return container.ingestion.saveFact({ content, category: 'preference', ...scope });
 }
 
 /** Backdate a fact past the sweep's settling grace period. */
@@ -153,6 +156,51 @@ describe('the dream supersede sweep', () => {
     // Contrast with the stamping test above, where a second cycle asks nothing.
     expect(supersedeCalls.length).toBeGreaterThan(0);
     expect(retried.factsSuperseded).toBe(1);
+    expect((await getFact(old.id))?.validTo).not.toBeNull();
+  });
+
+  test("never closes one user's fact from another user's contradiction", async () => {
+    // Two humans, contradictory personal claims, same unscoped bucket. Before
+    // the userId guard covered every dedupScope branch, ravi's fact superseded
+    // dana's — the LLM judge saw them side by side with nothing saying they
+    // belong to different people.
+    const danaFact = await writeFact(OLD_CLAIM, { userId: 'dana' });
+    const raviFact = await writeFact(NEW_CLAIM, { userId: 'ravi' });
+    await age(danaFact.id);
+    await age(raviFact.id);
+
+    await container.dreaming.runCycle();
+
+    expect((await getFact(danaFact.id))?.validTo).toBeNull();
+    expect((await getFact(raviFact.id))?.validTo).toBeNull();
+    // The judge must never even see dana's claim among another user's candidates.
+    for (const call of supersedeCalls) {
+      expect(call.existing).not.toContain(OLD_CLAIM);
+    }
+  });
+
+  test("a user's fact still supersedes a shared null-user fact", async () => {
+    const sharedFact = await writeFact(OLD_CLAIM, {});
+    const raviFact = await writeFact(NEW_CLAIM, { userId: 'ravi' });
+    await age(sharedFact.id);
+    await age(raviFact.id);
+
+    const run = await container.dreaming.runCycle();
+
+    expect(run.factsSuperseded).toBe(1);
+    expect((await getFact(sharedFact.id))?.validTo).not.toBeNull();
+    expect((await getFact(raviFact.id))?.validTo).toBeNull();
+  });
+
+  test("a user's contradiction still closes their own earlier fact", async () => {
+    const old = await writeFact(OLD_CLAIM, { userId: 'dana' });
+    const fresh = await writeFact(NEW_CLAIM, { userId: 'dana' });
+    await age(old.id);
+    await age(fresh.id);
+
+    const run = await container.dreaming.runCycle();
+
+    expect(run.factsSuperseded).toBe(1);
     expect((await getFact(old.id))?.validTo).not.toBeNull();
   });
 

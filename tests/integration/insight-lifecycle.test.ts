@@ -58,12 +58,12 @@ beforeEach(async () => {
   });
 });
 
-async function dreamOne(text: string): Promise<void> {
+async function dreamOne(text: string, scope: { userId?: string } = {}): Promise<void> {
   const res = await app.inject({
     method: 'POST',
     url: '/episodes',
     headers: json,
-    payload: { agentId: 'a1', sessionId: 's1', rawTranscript: text },
+    payload: { agentId: 'a1', sessionId: 's1', rawTranscript: text, ...scope },
   });
   expect(res.statusCode).toBe(200);
   await container.dreaming.runCycle();
@@ -245,6 +245,38 @@ describe('the nightly sweep is the migration path', () => {
     const survivor = (await insights()).find((i) => i.id === id);
     expect(survivor).toBeDefined();
     expect(survivor?.validTo).toBeNull();
+  });
+});
+
+describe('promotion respects userId', () => {
+  // The promotion dedup compares userId alongside projectId. Without it,
+  // ravi's identical high-importance fact corroborated dana's insight — ravi
+  // never got his own, and dana's was kept alive by another human's fact.
+  test("one user's fact promotes their own insight, not a corroboration of another user's", async () => {
+    await dreamOne(CLAIM, { userId: 'dana' });
+    await dreamOne(CLAIM, { userId: 'ravi' });
+
+    const rows = await read(async (tx) => {
+      const r = await tx.run(
+        `MATCH (i:Insight)
+         OPTIONAL MATCH (i)-[:DERIVED_FROM]->(f:Fact)
+         RETURN i.userId AS userId, i.validTo AS validTo, count(f) AS sources
+         ORDER BY userId`,
+      );
+      return r.records.map((rec) => ({
+        userId: rec.get('userId') as string | null,
+        validTo: rec.get('validTo'),
+        sources: Number(rec.get('sources')),
+      }));
+    });
+
+    // Two independent insights, one per user, each backed only by its own
+    // user's fact — no cross-user DERIVED_FROM edge.
+    expect(rows.map((r) => r.userId)).toEqual(['dana', 'ravi']);
+    for (const row of rows) {
+      expect(row.validTo).toBeNull();
+      expect(row.sources).toBe(1);
+    }
   });
 });
 
