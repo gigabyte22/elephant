@@ -1,9 +1,13 @@
 // Applies the query's hard filters pre-scoring so rerank and blending
 // don't waste cycles on rows that would be dropped anyway.
-// Also enforces agent/session scope when agentScope='filter' /
-// sessionScope='filter' — null-origin facts (direct /facts POSTs) are
-// preserved as shared content even under a filter, matching the isolation
-// model's stance that facts themselves are global.
+//
+// All four axes go through one rule, axisAllows: 'filter' excludes only
+// cross-scope rows (a null/absent value is a shared global and passes),
+// 'strict' additionally excludes nulls. Categories that don't carry an
+// agent/session prop at all (preferences, insights, procedures, chunks, …)
+// are therefore SHARED under agent/session 'filter' and excluded under
+// 'strict' — they used to be wiped wholesale under 'filter', which silently
+// emptied every preference from a per-agent recall.
 //
 // v1.2: also enforces `kinds` filtering (drop categories not asked for)
 // and `projectScope`/`userScope` hard filters on every memory item that
@@ -54,37 +58,20 @@ export function PostFilterStage(): RetrievalStage {
           if (toT !== undefined && c.fact.validFrom.getTime() > toT) continue;
           if (entityId !== undefined && !c.fact.entityIds.includes(entityId)) continue;
 
-          if (agentScope === 'filter' && q.agentId) {
-            if (c.originAgentId != null && c.originAgentId !== q.agentId) continue;
-          }
-          if (sessionScope === 'filter' && q.sessionId) {
-            if (c.originSessionId != null && c.originSessionId !== q.sessionId) continue;
-          }
-          if (!scopeMatches(c.fact, q, projectScope, userScope)) continue;
+          // Facts take agent/session from origin lineage (stamped by
+          // AgentOriginAnnotationStage, which already falls back to the
+          // fact's own props for direct writes) — not from scopeMatches,
+          // which would read the raw props and double-judge the axis.
+          if (!axisAllows(c.originAgentId, q.agentId, agentScope)) continue;
+          if (!axisAllows(c.originSessionId, q.sessionId, sessionScope)) continue;
+          if (!axisAllows(c.fact.projectId, q.projectId, projectScope)) continue;
+          if (!axisAllows(c.fact.userId, q.userId, userScope)) continue;
           factsOut.set(id, c);
         }
         state.facts = factsOut;
       }
 
-      // Categories with no per-record origin lineage drop entirely under
-      // agent='filter' (preserving the pre-v1.2 contract). Project/user
-      // 'filter' is row-level on each map.
-      if (agentScope === 'filter' && q.agentId) {
-        state.chunks.clear();
-        state.preferences.clear();
-        state.insights.clear();
-        state.knowledgeChunks.clear();
-        state.procedures.clear();
-        state.research.clear();
-        state.researchChunks.clear();
-        // Observations do carry a per-record agentId (it's required on write),
-        // so they get a row-level filter rather than the blanket drop above.
-        for (const [id, c] of state.observations) {
-          if (c.observation.agentId !== q.agentId) state.observations.delete(id);
-        }
-      }
-
-      const filterArgs = { q, projectScope, userScope, kinds: kindSet };
+      const filterArgs = { q, projectScope, userScope, agentScope, sessionScope, kinds: kindSet };
       // Raw episode chunks carry scope too; enforce it so a sandboxed reader
       // can't recover personal content from another scope's transcript.
       filterByScope(state.chunks, (c) => c.chunk, 'chunk', filterArgs);
@@ -114,43 +101,55 @@ export function PostFilterStage(): RetrievalStage {
   };
 }
 
+interface ScopedItem {
+  projectId?: string | null;
+  userId?: string | null;
+  // Only observations (and fact origin lineage, handled in the facts loop)
+  // carry these; on every other category they are absent and axisAllows
+  // treats absent as a shared global.
+  agentId?: string | null;
+  sessionId?: string | null;
+}
+
 interface FilterArgs {
   q: RecallQuery;
   projectScope: ScopeMode;
   userScope: ScopeMode;
+  agentScope: ScopeMode;
+  sessionScope: ScopeMode;
   kinds: Set<MemoryKind> | null;
 }
 
 function filterByScope<TKey, TCandidate>(
   map: Map<TKey, TCandidate>,
-  pick: (c: TCandidate) => { projectId?: string | null; userId?: string | null },
+  pick: (c: TCandidate) => ScopedItem,
   kind: MemoryKind,
-  { q, projectScope, userScope, kinds }: FilterArgs,
+  args: FilterArgs,
 ): void {
-  if (kinds && !kinds.has(kind)) {
+  if (args.kinds && !args.kinds.has(kind)) {
     map.clear();
     return;
   }
   for (const [k, c] of map.entries()) {
-    if (!scopeMatches(pick(c), q, projectScope, userScope)) {
+    if (!scopeMatches(pick(c), args)) {
       map.delete(k);
     }
   }
 }
 
 function scopeMatches(
-  item: { projectId?: string | null; userId?: string | null },
-  q: RecallQuery,
-  projectScope: ScopeMode,
-  userScope: ScopeMode,
+  item: ScopedItem,
+  { q, projectScope, userScope, agentScope, sessionScope }: FilterArgs,
 ): boolean {
   return (
     axisAllows(item.projectId, q.projectId, projectScope) &&
-    axisAllows(item.userId, q.userId, userScope)
+    axisAllows(item.userId, q.userId, userScope) &&
+    axisAllows(item.agentId, q.agentId, agentScope) &&
+    axisAllows(item.sessionId, q.sessionId, sessionScope)
   );
 }
 
-// Decide whether a single scope axis (project or user) admits an item.
+// Decide whether a single scope axis admits an item. One rule for all four.
 // 'filter' excludes only cross-scope items (nulls are shared globals);
 // 'strict' additionally excludes nulls, so a sandboxed reader sees only
 // items carrying its own scope value. Any other mode (or no query value)

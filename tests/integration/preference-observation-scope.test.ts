@@ -209,4 +209,55 @@ describe('observations carry scope', () => {
     const res = await app.inject({ method: 'GET', url: `/recall?${params}`, headers: auth });
     expect(res.json().data.observations ?? []).toHaveLength(0);
   });
+
+  test('GET /observations?userId= separates participants in a shared session', async () => {
+    const post = (content: string, userId?: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/observations',
+        headers: json,
+        payload: { agentId: 'a1', sessionId: 's1', content, ...(userId ? { userId } : {}) },
+      });
+    await post('ravi is drafting the RFC', 'ravi');
+    await post('dana is bisecting the regression', 'dana');
+    await post('the build is red on main');
+
+    const list = async (query: string) => {
+      const res = await app.inject({ method: 'GET', url: `/observations?${query}`, headers: auth });
+      expect(res.statusCode).toBe(200);
+      return (res.json().data.observations as Array<{ content: string }>).map((o) => o.content);
+    };
+
+    // Filter semantics: the user's own rows plus null-user (session-shared).
+    const ravis = await list('sessionId=s1&userId=ravi');
+    expect(ravis.sort()).toEqual(['ravi is drafting the RFC', 'the build is red on main']);
+    // No userId → the whole session, unchanged.
+    expect((await list('sessionId=s1')).length).toBe(3);
+  });
+});
+
+describe("recall scope modes on the agent axis don't wipe shared categories", () => {
+  // agentScope='filter' used to clear every preference/insight/chunk map
+  // wholesale — a per-agent recall silently returned zero preferences. They
+  // carry no agent prop, so they count as null on that axis: shared under
+  // 'filter', excluded under 'strict'.
+  test('preferences survive agentScope=filter and drop under strict', async () => {
+    await setPref('tone', 'concise');
+
+    const recall = async (mode: string) => {
+      const params = new URLSearchParams({
+        q: 'tone',
+        includePreferences: 'true',
+        agentId: 'a1',
+        agentScope: mode,
+        limit: '10',
+      });
+      const res = await app.inject({ method: 'GET', url: `/recall?${params}`, headers: auth });
+      expect(res.statusCode).toBe(200);
+      return (res.json().data.preferences ?? []) as Array<{ key: string }>;
+    };
+
+    expect((await recall('filter')).map((p) => p.key)).toContain('tone');
+    expect(await recall('strict')).toHaveLength(0);
+  });
 });

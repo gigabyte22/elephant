@@ -46,6 +46,8 @@ GET    /preferences                 all active prefs
 
 POST   /observations                working memory write (TTL 7d)
 GET    /observations?sessionId=…    session-scoped recall
+                                    // &userId=… separates one participant's working memory in a
+                                    // shared session (filter semantics: null-user rows still match)
 
 POST   /dream                       trigger dream cycle (async, returns jobId)
 GET    /dream/:jobId                poll status
@@ -125,6 +127,11 @@ GET /recall?
   # 'filter' excludes only CROSS-scope items — a null scope is a shared global
   # and still matches; 'strict' additionally excludes nulls, so a sandboxed
   # reader sees only items carrying its own scope value; 'none' ignores the axis.
+  # One rule on all four axes. Categories with no per-record agent/session
+  # value (preferences, insights, procedures, chunks, …) count as null on
+  # those axes: shared under agent/session 'filter', excluded under 'strict'.
+  # Facts judge agent/session by origin lineage (source episode, falling back
+  # to the fact's own props on direct writes); observations carry both props.
   # v1.2: restrict to a subset of memory categories (comma-separated).
   # Valid kinds: episode,chunk,fact,preference,insight,observation,
   # knowledge_document,knowledge_chunk,procedure,research,research_chunk,intention.

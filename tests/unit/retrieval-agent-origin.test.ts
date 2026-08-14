@@ -2,8 +2,8 @@ import { describe, expect, test } from 'vitest';
 import type { Fact } from '../../src/models/types.ts';
 import { AgentOriginAnnotationStage } from '../../src/services/retrieval/stages/AgentOriginAnnotationStage.ts';
 import { PostFilterStage } from '../../src/services/retrieval/stages/PostFilterStage.ts';
-import type { FactCandidate } from '../../src/services/retrieval/types.ts';
-import { makeCtx, makeFact, makeState } from './retrieval-fixtures.ts';
+import type { FactCandidate, PipelineState } from '../../src/services/retrieval/types.ts';
+import { makeCtx, makeFact, makePreferenceCandidate, makeState } from './retrieval-fixtures.ts';
 
 function makeCandidate(
   fact: Fact,
@@ -18,6 +18,33 @@ function makeCandidate(
     originAgentId,
     originSessionId,
   };
+}
+
+// One fact plus two categories that carry no agent/session prop — the maps
+// that agentScope='filter' used to clear wholesale, silently emptying every
+// preference from a per-agent recall.
+function makePropLessState(): PipelineState {
+  return makeState([makeCandidate(makeFact({ id: 'alpha-own' }), 'alpha', 's1')], {
+    preferences: new Map([['p1', makePreferenceCandidate({ id: 'p1' })]]),
+    chunks: new Map([
+      [
+        'c1',
+        {
+          chunk: {
+            id: 'c1',
+            episodeId: 'e1',
+            position: 0,
+            text: 'x',
+            tokenCount: 1,
+            embedding: [],
+            createdAt: new Date(),
+          },
+          sources: [],
+          expansionReason: 'chunk_vector',
+        },
+      ],
+    ]),
+  });
 }
 
 describe('AgentOriginAnnotationStage — direct-write scope fallback', () => {
@@ -83,25 +110,32 @@ describe('PostFilterStage — agent/session scope', () => {
     expect(state.facts.size).toBe(2);
   });
 
-  test('agentScope=filter drops chunks / preferences / insights for cross-agent safety', async () => {
-    const state = makeState([makeCandidate(makeFact({ id: 'alpha-own' }), 'alpha', 's1')]);
-    // Seed non-fact collections so we can verify they're cleared.
-    state.chunks.set('c1', {
-      chunk: {
-        id: 'c1',
-        episodeId: 'e1',
-        position: 0,
-        text: 'x',
-        tokenCount: 1,
-        embedding: [],
-        createdAt: new Date(),
-      },
-      sources: [],
-      expansionReason: 'chunk_vector',
-    });
+  test('agentScope=strict drops null-origin facts that filter keeps', async () => {
+    const state = makeState([
+      makeCandidate(makeFact({ id: 'alpha-own' }), 'alpha', 's1'),
+      makeCandidate(makeFact({ id: 'shared' }), null, null),
+    ]);
+    const ctx = makeCtx({ query: { agentId: 'alpha', agentScope: 'strict' } });
+    await PostFilterStage().run(ctx, state);
+    expect(Array.from(state.facts.keys())).toEqual(['alpha-own']);
+  });
+
+  // Chunks and preferences carry no agent prop, so they count as null on that
+  // axis: shared under 'filter', excluded under 'strict'.
+  test('agentScope=filter keeps prop-less categories as shared', async () => {
+    const state = makePropLessState();
     const ctx = makeCtx({ query: { agentId: 'alpha', agentScope: 'filter' } });
     await PostFilterStage().run(ctx, state);
+    expect(state.chunks.size).toBe(1);
+    expect(state.preferences.size).toBe(1);
+  });
+
+  test('agentScope=strict drops prop-less categories', async () => {
+    const state = makePropLessState();
+    const ctx = makeCtx({ query: { agentId: 'alpha', agentScope: 'strict' } });
+    await PostFilterStage().run(ctx, state);
     expect(state.chunks.size).toBe(0);
+    expect(state.preferences.size).toBe(0);
   });
 
   test('importance / confidence / temporal filters still apply', async () => {

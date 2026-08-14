@@ -1,7 +1,7 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Observation } from '../models/types.ts';
 import { dateParam, toJsDate } from '../utils/neo4j-conv.ts';
-import { memoryItemParams, memoryItemSetClause, readScope } from './scope.ts';
+import { memoryItemParams, memoryItemSetClause, readScope, scopeAndClause } from './scope.ts';
 
 function toObservation(node: Record<string, unknown>): Observation {
   return {
@@ -42,18 +42,24 @@ export const ObservationRepository = {
     return toObservation(result.records[0]!.get('o'));
   },
 
+  // `userId` separates one participant's working memory inside a session shared
+  // by several humans. It runs in 'filter' mode, so null-user observations are
+  // session-shared and still match; an absent userId emits no clause at all.
   async listForSession(
     tx: ManagedTransaction,
     sessionId: string,
     limit = 100,
+    userId?: string,
   ): Promise<Observation[]> {
+    const { clause, params } = scopeAndClause('o', { userId, userScope: 'filter' });
     const result = await tx.run(
       `MATCH (o:Observation {sessionId: $sessionId})
        WHERE o.expiresAt > datetime()
+         ${clause}
        RETURN o {.*} AS o
        ORDER BY o.recordedAt DESC
        LIMIT toInteger($limit)`,
-      { sessionId, limit },
+      { sessionId, limit, ...params },
     );
     return result.records.map((r) => toObservation(r.get('o')));
   },
