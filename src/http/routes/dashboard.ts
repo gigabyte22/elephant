@@ -1,11 +1,10 @@
 import { basename } from 'node:path';
 import { z } from 'zod';
 import {
-  bodyFor,
-  frontmatterFor,
   type NarrativeItem,
   pathFor,
   serializeVaultDoc,
+  vaultDocFor,
 } from '../../adapters/vault/frontmatter.ts';
 import type { VaultKind } from '../../adapters/vault/types.ts';
 import { read } from '../../config/neo4j.ts';
@@ -50,9 +49,12 @@ type WireNarrativeMarkdown = z.infer<typeof WireNarrativeMarkdownSchema>;
 // text/markdown: the whole client assumes {ok,data}, and the vault — not
 // HTTP — is the raw-markdown surface (docs/okf-evaluation.md).
 function renderVaultMarkdown(kind: VaultKind, item: NarrativeItem): WireNarrativeMarkdown {
+  const { meta, body } = vaultDocFor(kind, item);
   return {
-    markdown: serializeVaultDoc(frontmatterFor(kind, item), bodyFor(item)),
-    filename: basename(pathFor(kind, item.id, item.projectId)),
+    markdown: serializeVaultDoc(meta, body),
+    filename: basename(
+      pathFor({ kind, id: item.id, projectId: item.projectId, title: item.title }),
+    ),
   };
 }
 

@@ -20,7 +20,7 @@ pnpm test:integration           # Neo4j testcontainer, needs Docker
 pnpm typecheck                  # tsc --noEmit
 pnpm lint / pnpm lint:fix       # biome
 pnpm dream                      # run one dream cycle now
-pnpm okf:sync                   # backfill/repair the markdown vault
+pnpm okf:sync                   # reconcile the markdown vault (--dry-run, --purge)
 pnpm backfill:bitemporal        # repair validFrom/validTo/recordedAt on existing graphs
 pnpm rebuild:facts              # wipe facts/insights + reset dream cursor (re-dream after)
 ```
@@ -85,3 +85,5 @@ That last stage closes a loop with pruning: recall bumps `referenceCount`, and `
 - `docs/okf-evaluation.md` — as-built addendum for OKF, including work explicitly *not* built.
 
 "OKF vault" is a one-way markdown projection of research + knowledge documents. **The node content is the source of truth; the vault is derived.** Soft-deletes move files to `_trash/`. The writer uses temp-sibling + atomic rename because `protect` gives no cross-process lock against a manual `pnpm okf:sync`.
+
+Files are named `{title-slug}--{id}.md`; the id suffix is identity, the slug is decoration, and every lookup matches on the suffix because a title can change under you. `syncVault` reconciles both directions — the reap moves files whose node is gone to `_trash/`, gated by a parse check, an mtime check (it runs against a live service, so a file newer than the sweep belongs to a concurrent request) and an empty-graph guard. `--purge` is the only hard delete and is never automatic. `summary` is omitted from frontmatter when the body already opens with it, which is the usual case: below `SUMMARY_THRESHOLD_TOKENS` a document is its own summary.
