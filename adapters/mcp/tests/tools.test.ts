@@ -114,7 +114,9 @@ describe('memory_save', () => {
 
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('http://elephant.test/facts');
+    // The client injects a client-side idempotency id on every write.
     expect(JSON.parse(init?.body as string)).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       content: 'user prefers espresso',
       category: 'preference',
       entityNames: ['espresso'],
@@ -529,6 +531,7 @@ describe('memory_observe', () => {
     expect(textOf(result)).toContain('expires 2026-07-22');
     const body = JSON.parse(fetchMock.mock.calls[0]![1]?.body as string);
     expect(body).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       agentId: 'claude-code',
       sessionId: 's-test',
       content: 'user is mid-refactor of the auth module',

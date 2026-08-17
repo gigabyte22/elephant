@@ -197,7 +197,9 @@ describe('tools', () => {
     });
     expect(result.content[0]!.text).toContain('Saved fact f1');
     const body = JSON.parse(fetchMock.mock.calls[0]![1]?.body as string);
+    // The vendored client injects a client-side idempotency id on every write.
     expect(body).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       content: 'user prefers espresso',
       category: 'preference',
       agentId: 'openclaw',
