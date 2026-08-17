@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@react-sigma/core": "^4.0.3",
+    "@react-sigma/core": "^5.0.6",
     "@tanstack/react-query": "^5.101.4",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
