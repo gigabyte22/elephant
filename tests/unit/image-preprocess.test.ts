@@ -16,7 +16,11 @@ async function makeImage(
 }
 
 describe('prepareImageForVision', () => {
-  it('downscales an oversized photo to maxDim and normalises to JPEG', async () => {
+  // Encoding + decoding a 3072×4080 image in pure-JS jimp takes seconds; the
+  // default 5s testTimeout flakes on slow CI runners.
+  it('downscales an oversized photo to maxDim and normalises to JPEG', {
+    timeout: 30_000,
+  }, async () => {
     const big = await makeImage(3072, 4080, 'image/jpeg');
     const out = await prepareImageForVision(big, 'image/jpeg', OPTS);
 
