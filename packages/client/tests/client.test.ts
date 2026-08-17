@@ -120,7 +120,14 @@ describe('query-string building', () => {
       actor: 'alpha',
     });
     const body = JSON.parse(fetchMock.mock.calls[0]![1]?.body as string);
-    expect(body).toEqual({ content: 'x', agentId: 'alpha', sessionId: 's1', actor: 'alpha' });
+    // withWriteDefaults injects a client-side idempotency id on every write.
+    expect(body).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      content: 'x',
+      agentId: 'alpha',
+      sessionId: 's1',
+      actor: 'alpha',
+    });
   });
 });
 
