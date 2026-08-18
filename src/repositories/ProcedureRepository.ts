@@ -152,8 +152,12 @@ export const ProcedureRepository = {
     input: { name: string; projectId?: string | null },
   ): Promise<Procedure | null> {
     const result = await tx.run(
+      // Liveness matters here beyond the version ordering: supersession
+      // retires old versions via expiresAt, but a soft-deleted head also has
+      // expiresAt set and would otherwise come straight back on name lookup.
       `MATCH (p:Procedure {name: $name})
        WHERE coalesce(p.projectId, '') = coalesce($projectId, '')
+         AND (p.expiresAt IS NULL OR p.expiresAt > datetime())
        RETURN p {.*} AS p
        ORDER BY p.version DESC
        LIMIT 1`,

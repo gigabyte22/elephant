@@ -457,6 +457,31 @@ describe('D. procedure supersede chain', () => {
     // Embeddings are stripped from snapshots.
     expect(snapshot.embedding).toBeUndefined();
   });
+
+  test('name lookup serves the live head and excludes soft-deleted procedures', async () => {
+    // The supersession above left v1 retired and v2 live under one name;
+    // getByName must pick the live head.
+    const byName = await getAuth('/procedures?name=restart%20cache');
+    expect(byName.statusCode).toBe(200);
+    expect(byName.json().data).toHaveLength(1);
+    const head = byName.json().data[0] as { id: string; version: number };
+    expect(head.version).toBe(2);
+    expect(head.id).not.toBe(originalId);
+
+    // Soft-delete the head: the same expiresAt liveness predicate the list
+    // paths carry must keep it out of name lookup too, not fall back to the
+    // retired v1.
+    const del = await app.inject({
+      method: 'DELETE',
+      url: `/procedures/${head.id}`,
+      headers: auth,
+    });
+    expect(del.statusCode).toBe(200);
+
+    const after = await getAuth('/procedures?name=restart%20cache');
+    expect(after.statusCode).toBe(200);
+    expect(after.json().data).toHaveLength(0);
+  });
 });
 
 describe('E. knowledge document soft-delete + purge', () => {

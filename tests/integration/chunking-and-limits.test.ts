@@ -266,8 +266,19 @@ describe('oversized bodies embed a bounded prefix', () => {
     expect(update.statusCode).toBe(200);
     expect(update.json().data.version).toBe(2);
 
-    const got = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
+    // A body change supersedes: the response carries a NEW node at v2 (per
+    // EXPECTED.md), and GET by id is exact-node — the old id keeps serving
+    // the retired v1 verbatim, with expiresAt marking the retirement.
+    const newId = update.json().data.id as string;
+    expect(newId).not.toBe(id);
+
+    const got = await app.inject({ method: 'GET', url: `/procedures/${newId}`, headers: auth });
     expect(got.json().data.content).toBe(bigContent);
+
+    const old = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
+    expect(old.json().data.content).toBe('run the deploy script');
+    expect(old.json().data.version).toBe(1);
+    expect(old.json().data.expiresAt).not.toBeNull();
 
     const embedded = embedCalls.at(-1)!;
     expect(embedded.startsWith(`${whenToUse}\n\n`)).toBe(true);
