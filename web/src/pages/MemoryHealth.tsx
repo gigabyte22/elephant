@@ -130,7 +130,7 @@ function Histogram({ data }: { data: RetentionPayload }) {
             <Tooltip
               {...chartTooltipProps}
               itemStyle={{ color: chartColors.accent }}
-              labelFormatter={(label: string) => `retention ${label}`}
+              labelFormatter={(label) => `retention ${label}`}
             />
             <ReferenceLine
               x={bins[0]?.label}
@@ -209,8 +209,8 @@ function DecayScatter({ data }: { data: RetentionPayload }) {
             <Tooltip
               {...chartTooltipProps}
               cursor={{ strokeDasharray: '3 3', stroke: 'rgba(255,196,225,0.2)' }}
-              formatter={(value: number, name: string) =>
-                name === 'idle days' ? Math.round(value) : Number(value).toFixed(3)
+              formatter={(value, name) =>
+                name === 'idle days' ? Math.round(Number(value)) : Number(value).toFixed(3)
               }
             />
             <ReferenceLine

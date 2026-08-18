@@ -1,5 +1,5 @@
 import { SigmaContainer, useLoadGraph, useRegisterEvents, useSigma } from '@react-sigma/core';
-import '@react-sigma/core/lib/react-sigma.min.css';
+import '@react-sigma/core/lib/style.css';
 import Graph, { MultiGraph } from 'graphology';
 import forceAtlas2 from 'graphology-layout-forceatlas2';
 import { useEffect, useMemo } from 'react';

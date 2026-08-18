@@ -1,5 +1,5 @@
 import { SigmaContainer, useLoadGraph, useRegisterEvents, useSigma } from '@react-sigma/core';
-import '@react-sigma/core/lib/react-sigma.min.css';
+import '@react-sigma/core/lib/style.css';
 import { MultiGraph } from 'graphology';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CORE_PREFIX, type CosmosBuild, DIM_NODE, hexToRgba, mixHex } from '../../lib/cosmos.ts';
