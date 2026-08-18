@@ -247,11 +247,12 @@ describe('oversized bodies embed a bounded prefix', () => {
   test('update with oversized content succeeds and re-embeds bounded text', async () => {
     await clearDb();
     const whenToUse = 'Use when deploying the service.';
+    const originalContent = 'run the deploy script';
     const create = await app.inject({
       method: 'POST',
       url: '/procedures',
       headers: { ...auth, 'content-type': 'application/json' },
-      payload: { name: 'deploy', content: 'run the deploy script', whenToUse },
+      payload: { name: 'deploy', content: originalContent, whenToUse },
     });
     expect(create.statusCode).toBe(200);
     const { id } = create.json().data;
@@ -269,16 +270,16 @@ describe('oversized bodies embed a bounded prefix', () => {
     // A body change supersedes: the response carries a NEW node at v2 (per
     // EXPECTED.md), and GET by id is exact-node — the old id keeps serving
     // the retired v1 verbatim, with expiresAt marking the retirement.
-    const newId = update.json().data.id as string;
+    const newId = update.json().data.id;
     expect(newId).not.toBe(id);
 
     const got = await app.inject({ method: 'GET', url: `/procedures/${newId}`, headers: auth });
     expect(got.json().data.content).toBe(bigContent);
 
-    const old = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
-    expect(old.json().data.content).toBe('run the deploy script');
-    expect(old.json().data.version).toBe(1);
-    expect(old.json().data.expiresAt).not.toBeNull();
+    const retired = await app.inject({ method: 'GET', url: `/procedures/${id}`, headers: auth });
+    expect(retired.json().data.content).toBe(originalContent);
+    expect(retired.json().data.version).toBe(1);
+    expect(retired.json().data.expiresAt).not.toBeNull();
 
     const embedded = embedCalls.at(-1)!;
     expect(embedded.startsWith(`${whenToUse}\n\n`)).toBe(true);

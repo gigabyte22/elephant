@@ -459,9 +459,11 @@ describe('D. procedure supersede chain', () => {
   });
 
   test('name lookup serves the live head and excludes soft-deleted procedures', async () => {
+    const nameLookup = '/procedures?name=restart%20cache';
+
     // The supersession above left v1 retired and v2 live under one name;
     // getByName must pick the live head.
-    const byName = await getAuth('/procedures?name=restart%20cache');
+    const byName = await getAuth(nameLookup);
     expect(byName.statusCode).toBe(200);
     expect(byName.json().data).toHaveLength(1);
     const head = byName.json().data[0] as { id: string; version: number };
@@ -478,7 +480,7 @@ describe('D. procedure supersede chain', () => {
     });
     expect(del.statusCode).toBe(200);
 
-    const after = await getAuth('/procedures?name=restart%20cache');
+    const after = await getAuth(nameLookup);
     expect(after.statusCode).toBe(200);
     expect(after.json().data).toHaveLength(0);
   });
