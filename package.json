@@ -48,7 +48,7 @@
     "fastify-type-provider-zod": "^4.0.0",
     "ioredis": "^6.0.0",
     "jimp": "^1.6.1",
-    "neo4j-driver": "^5.26.0",
+    "neo4j-driver": "^6.2.0",
     "openai": "^4.65.0",
     "pdf-parse": "^2.4.5",
     "uuid": "^11.0.0",
