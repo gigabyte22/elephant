@@ -131,7 +131,7 @@ function ActivityChart({ items }: { items: DreamRunSummary[] }) {
             <Tooltip
               {...chartTooltipProps}
               itemStyle={{ color: '#E6E1ED' }}
-              labelFormatter={(label: string) => `cycle · ${label}`}
+              labelFormatter={(label) => `cycle · ${label}`}
             />
             {SERIES.map((s) => (
               <Bar
