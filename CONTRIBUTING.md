@@ -125,6 +125,17 @@ cause.
 
 ## Upgrade notes
 
+**Vision extraction got a new prompt and a quality guard.** A completed OCR
+response must now contain the transcription plus a trailing `DESCRIPTION:` line;
+output that doesn't conform (the way a small model silently gives up on a dense
+screenshot) is no longer stored as `done` — it falls through to the optional
+`KNOWLEDGE_VISION_FALLBACK_*` tier, and records `failed` with each tier's
+outcome if every tier flunks. Junk readings stored as `done` *before* this
+change are not repaired automatically: re-run
+`scripts/backfill-attachment-extraction.ts --id=<attachmentId>` for the ones you
+know about (`--id` bypasses the status filter).
+
+
 **Attachment OCR/transcription became explicit opt-in.** `KNOWLEDGE_VISION_PROVIDER=auto`
 and `KNOWLEDGE_TRANSCRIBE_PROVIDER=auto` used to enable themselves off any
 available key, so a deployment that set `ANTHROPIC_API_KEY` for dreaming got

@@ -3,13 +3,23 @@ import { prepareImageForVision } from './image-preprocess.ts';
 import { deferred } from './service.ts';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
 
-export interface VisionConfig {
+/** One place to send an image, with its per-provider credentials. */
+export interface VisionTargetConfig {
   provider: 'openai' | 'anthropic';
   model: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
   anthropicApiKey?: string;
-  /** Ceiling for a single model call. A local vision model can take minutes. */
+}
+
+export interface VisionConfig {
+  /** Tried in order: the primary first, then any fallback. A target's output
+   *  must pass checkVisionOutput before it is stored; a flunk or a thrown call
+   *  advances to the next target instead of failing the attachment. */
+  targets: VisionTargetConfig[];
+  /** Ceiling for a single model call, shared by every target. A local vision
+   *  model can take minutes; a hosted fallback finishing in seconds is
+   *  unaffected by the generous ceiling. */
   timeoutMs: number;
   /** Longest edge, in px, an image is downscaled to before OCR. */
   maxDim: number;
@@ -20,16 +30,23 @@ export interface VisionConfig {
   maxTokens: number;
 }
 
-// The two halves are labelled because they are different kinds of claim: the
-// OCR block is what the image says, the description is what the model thinks it
-// depicts. A reader — human or agent — pulling this text out of recall should
-// not have to guess which one they are quoting.
+// The marker and sentinel are what checkVisionOutput looks for, so they live
+// next to the prompt that demands them: change one and the other must follow.
+export const DESCRIPTION_MARKER = 'DESCRIPTION:';
+export const NO_TEXT_SENTINEL = 'NO TEXT';
+
+// Transcription first, description last. The order is deliberate: a small local
+// model given "reply with two labelled sections" produces the section headings
+// and stops (observed live: a legible table screenshot came back as 9 tokens of
+// headings with finish_reason=stop, stored as 'done'), while "transcribe
+// everything, then describe" makes the same model emit the full table. The
+// trailing marker also makes conformance checkable, and the sentinel keeps "no
+// text in this image" distinguishable from "model gave up".
 const PROMPT = [
-  'Read this image and reply with exactly two labelled sections and nothing else:',
-  'OCR:',
-  'the text visible in the image, transcribed verbatim; leave this section empty if there is none',
-  'DESCRIPTION:',
-  'one short line describing the image',
+  'Transcribe every piece of text visible in this image, verbatim and complete.',
+  'Preserve the line structure; render tables as markdown tables.',
+  `If the image contains no visible text, write exactly ${NO_TEXT_SENTINEL} instead of a transcription.`,
+  `Then, as the final line, write "${DESCRIPTION_MARKER} " followed by one short line describing the image.`,
 ].join('\n');
 
 /** What a provider gave back: the text, plus whether the model stopped because
@@ -37,6 +54,37 @@ const PROMPT = [
 export interface VisionResponse {
   text: string;
   truncated: boolean;
+}
+
+/**
+ * Shape check on a completed (non-truncated) response: null when it conforms
+ * to PROMPT's contract, otherwise a human-readable reason for the flunk.
+ *
+ * This exists because a model can give up without erroring: the observed
+ * failure returned a handful of heading tokens with a clean stop, and storing
+ * that as 'done' made a junk reading indistinguishable from a real one. The
+ * rules are deliberately about shape, not length — a photo of a single word
+ * legitimately transcribes to two short lines — and use no token-usage
+ * signals, which the Anthropic path does not return.
+ */
+export function checkVisionOutput(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return 'empty response';
+  const lines = trimmed.split('\n');
+  // Search from the end: the marker is specified as the final line, and a
+  // transcription may legitimately quote the word earlier in the image's text.
+  const markerIndex = lines.findLastIndex((line) => line.trim().startsWith(DESCRIPTION_MARKER));
+  if (markerIndex === -1) return `missing ${DESCRIPTION_MARKER} marker`;
+  const body = lines.slice(0, markerIndex).join('\n').trim();
+  if (body.length === 0) return `no transcription and no ${NO_TEXT_SENTINEL} sentinel`;
+  return null;
+}
+
+/** How a target names itself in an extraction's `detail`. One definition
+ *  because the string is contractual: it is what a reader sees recorded against
+ *  the attachment, and what the fallback outcomes are listed by. */
+function targetLabel(target: { provider: string; model: string }): string {
+  return `${target.provider}:${target.model}`;
 }
 
 /**
@@ -53,7 +101,7 @@ export function mapVisionResponse(
   meta: { provider: string; model: string },
 ): ExtractionResult {
   const text = response.text.trim();
-  const source = `${meta.provider}:${meta.model}`;
+  const source = targetLabel(meta);
   if (text.length === 0) {
     return {
       status: 'empty',
@@ -81,10 +129,46 @@ export function supportsImage(mime: string): boolean {
   return mime.startsWith('image/');
 }
 
+/** One model call against one target. Injectable so tests can script per-target
+ *  responses without a provider SDK — the same seam pdf-extractor exposes as
+ *  `ocrPage`. */
+export type CallVisionProvider = (
+  target: VisionTargetConfig,
+  mime: string,
+  b64: string,
+) => Promise<VisionResponse>;
+
+/**
+ * Why this target's reading must not be stored, or null to accept it.
+ *
+ * The quality guard applies to completed responses only: the marker is the
+ * final line, so output clipped at max_tokens can never contain it. A
+ * truncated-but-nonempty reading is therefore accepted (mapVisionResponse
+ * records it as 'truncated') — the next target shares maxTokens and would just
+ * truncate the same way. Truncated with nothing to show for it is a reading of
+ * nothing, which is worth spending another target on.
+ */
+function unusableReason(response: VisionResponse, label: string): string | null {
+  if (response.truncated) {
+    return response.text.trim().length === 0
+      ? `${label} produced no text before hitting max_tokens`
+      : null;
+  }
+  const flunk = checkVisionOutput(response.text);
+  return flunk === null ? null : `${label} flunked quality guard: ${flunk}`;
+}
+
 // Vision OCR/description for image attachments. Produces searchable text via
-// the configured multimodal LLM. Construct only when a provider is available;
-// callers pass `null` to disable (→ images are stored but not text-extracted).
-export function createVisionExtractor(config: VisionConfig): Extractor {
+// the configured multimodal LLM(s). Construct only when a provider is
+// available; callers pass `null` to disable (→ images are stored but not
+// text-extracted).
+export function createVisionExtractor(
+  config: VisionConfig,
+  callProvider: CallVisionProvider = (target, mime, b64) =>
+    target.provider === 'anthropic'
+      ? viaAnthropic(target, config, mime, b64)
+      : viaOpenAI(target, config, mime, b64),
+): Extractor {
   return {
     supports: supportsImage,
     async extract(input: ExtractionInput): Promise<ExtractionResult> {
@@ -95,7 +179,7 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
       // Downscale first: vision prefill cost scales with pixel count, and a
       // full-size phone photo costs minutes of GPU for no accuracy gain over the
       // 1024px version. This also normalises whatever it re-encodes to JPEG,
-      // which every provider accepts.
+      // which every provider accepts. One downscale serves every target.
       let prepared: { data: Buffer; mimeType: string } | null;
       try {
         prepared = await prepareImageForVision(input.data, input.mimeType, {
@@ -119,37 +203,65 @@ export function createVisionExtractor(config: VisionConfig): Extractor {
         };
       }
 
-      try {
-        const b64 = prepared.data.toString('base64');
-        const response =
-          config.provider === 'anthropic'
-            ? await viaAnthropic(config, prepared.mimeType, b64)
-            : await viaOpenAI(config, prepared.mimeType, b64);
-        return mapVisionResponse(response, config);
-      } catch (err) {
-        return {
-          status: 'failed',
-          text: '',
-          detail: err instanceof Error ? err.message : String(err),
-        };
+      const b64 = prepared.data.toString('base64');
+      // Why a thrown call advances rather than fails: to the attachment it
+      // makes no difference whether the local model was down or produced junk —
+      // either way the fallback is the next best reading. Only the last
+      // target's outcome is terminal.
+      const outcomes: string[] = [];
+      for (const target of config.targets) {
+        const label = targetLabel(target);
+        let response: VisionResponse;
+        try {
+          response = await callProvider(target, prepared.mimeType, b64);
+        } catch (err) {
+          outcomes.push(`${label}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
+        const unusable = unusableReason(response, label);
+        if (unusable) {
+          outcomes.push(unusable);
+          continue;
+        }
+        const result = mapVisionResponse(response, target);
+        return outcomes.length === 0
+          ? result
+          : { ...result, detail: `${result.detail} (fallback after ${outcomes.join('; ')})` };
       }
+      return {
+        status: 'failed',
+        text: '',
+        detail: `all vision targets failed — ${outcomes.join('; ')}`,
+      };
     },
   };
 }
 
-async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promise<VisionResponse> {
+/** The per-call ceilings every target shares: credentials and model come from
+ *  the target, budget from the one VisionConfig. */
+type CallLimits = { timeoutMs: number; maxTokens: number };
+
+async function viaOpenAI(
+  target: VisionTargetConfig,
+  limits: CallLimits,
+  mime: string,
+  b64: string,
+): Promise<VisionResponse> {
   const { default: OpenAI } = await import('openai');
   const client = new OpenAI({
-    apiKey: config.openaiApiKey ?? 'unused',
-    baseURL: config.openaiBaseUrl,
-    timeout: config.timeoutMs,
+    apiKey: target.openaiApiKey ?? 'unused',
+    baseURL: target.openaiBaseUrl,
+    timeout: limits.timeoutMs,
     // The SDK retries twice by default, which would triple an already-slow
     // vision call instead of surfacing the timeout as a 'failed' with a reason.
     maxRetries: 0,
   });
   const res = await client.chat.completions.create({
-    model: config.model,
-    max_tokens: config.maxTokens,
+    model: target.model,
+    max_tokens: limits.maxTokens,
+    // OCR wants the most likely reading, not a creative one — sampling at the
+    // default temperature made a small local model wander off the transcription.
+    temperature: 0,
     messages: [
       {
         role: 'user',
@@ -167,19 +279,21 @@ async function viaOpenAI(config: VisionConfig, mime: string, b64: string): Promi
 }
 
 async function viaAnthropic(
-  config: VisionConfig,
+  target: VisionTargetConfig,
+  limits: CallLimits,
   mime: string,
   b64: string,
 ): Promise<VisionResponse> {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({
-    apiKey: config.anthropicApiKey ?? 'unused',
-    timeout: config.timeoutMs,
+    apiKey: target.anthropicApiKey ?? 'unused',
+    timeout: limits.timeoutMs,
     maxRetries: 0,
   });
   const res = await client.messages.create({
-    model: config.model,
-    max_tokens: config.maxTokens,
+    model: target.model,
+    max_tokens: limits.maxTokens,
+    temperature: 0,
     messages: [
       {
         role: 'user',

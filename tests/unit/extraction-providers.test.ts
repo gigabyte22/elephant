@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   describeExtractionCapabilities,
   resolveTranscribeTarget,
   resolveVisionTarget,
+  resolveVisionTargets,
 } from '../../src/adapters/factory.ts';
 import type { Env } from '../../src/config/env.ts';
 
@@ -12,6 +13,7 @@ import type { Env } from '../../src/config/env.ts';
 type ProviderEnv = Pick<
   Env,
   | 'KNOWLEDGE_VISION_PROVIDER'
+  | 'KNOWLEDGE_VISION_FALLBACK_PROVIDER'
   | 'KNOWLEDGE_TRANSCRIBE_PROVIDER'
   | 'KNOWLEDGE_TRANSCRIBE_MODEL'
   | 'ANTHROPIC_EXTRACTION_MODEL'
@@ -21,6 +23,7 @@ type ProviderEnv = Pick<
 const env = (over: Partial<ProviderEnv> = {}): Env =>
   ({
     KNOWLEDGE_VISION_PROVIDER: 'auto',
+    KNOWLEDGE_VISION_FALLBACK_PROVIDER: 'auto',
     KNOWLEDGE_TRANSCRIBE_PROVIDER: 'auto',
     KNOWLEDGE_TRANSCRIBE_MODEL: 'whisper-1',
     ANTHROPIC_EXTRACTION_MODEL: 'claude-sonnet-4-6',
@@ -80,6 +83,65 @@ describe('resolveVisionTarget', () => {
   });
 });
 
+describe('resolveVisionTargets', () => {
+  const primaryOn = { KNOWLEDGE_VISION_BASE_URL: 'http://ollama:11434/v1' };
+
+  it('is just the primary when no fallback credentials exist', () => {
+    // Same rule as the primary: shared LLM keys alone do not enrol a fallback.
+    expect(resolveVisionTargets(env({ ...primaryOn, OPENAI_API_KEY: 'sk-oai' }))).toEqual([
+      {
+        provider: 'openai',
+        key: undefined,
+        baseUrl: 'http://ollama:11434/v1',
+        model: 'gpt-4o-mini',
+      },
+    ]);
+  });
+
+  it('appends the fallback tier with its own credentials and model', () => {
+    const targets = resolveVisionTargets(
+      env({
+        ...primaryOn,
+        KNOWLEDGE_VISION_MODEL: 'qwen2.5vl:7b',
+        KNOWLEDGE_VISION_FALLBACK_BASE_URL: 'https://api.x.ai/v1',
+        KNOWLEDGE_VISION_FALLBACK_API_KEY: 'xai-key',
+        KNOWLEDGE_VISION_FALLBACK_MODEL: 'grok-4-1-fast-non-reasoning',
+      }),
+    );
+    expect(targets).toEqual([
+      {
+        provider: 'openai',
+        key: undefined,
+        baseUrl: 'http://ollama:11434/v1',
+        model: 'qwen2.5vl:7b',
+      },
+      {
+        provider: 'openai',
+        key: 'xai-key',
+        baseUrl: 'https://api.x.ai/v1',
+        model: 'grok-4-1-fast-non-reasoning',
+      },
+    ]);
+  });
+
+  it('is empty while the primary is off, even with fallback credentials', () => {
+    // The primary is the capability switch; a fallback alone is not silently
+    // promoted into being the OCR provider.
+    expect(resolveVisionTargets(env({ KNOWLEDGE_VISION_FALLBACK_API_KEY: 'xai-key' }))).toEqual([]);
+  });
+
+  it('lets a named fallback provider spend the shared keys', () => {
+    const targets = resolveVisionTargets(
+      env({
+        ...primaryOn,
+        KNOWLEDGE_VISION_FALLBACK_PROVIDER: 'anthropic',
+        ANTHROPIC_API_KEY: 'sk-ant',
+      }),
+    );
+    expect(targets[1]).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+  });
+});
+
 describe('resolveTranscribeTarget', () => {
   it('applies the same opt-in rule as vision', () => {
     expect(resolveTranscribeTarget(env({ OPENAI_API_KEY: 'sk-oai' }))).toBeNull();
@@ -107,5 +169,42 @@ describe('describeExtractionCapabilities', () => {
     );
     expect(visionOn).toContain('http://ollama:11434/v1');
     expect(visionOn).toContain('gpt-4o-mini');
+  });
+
+  it('discloses the fallback tier when one is configured', () => {
+    const [vision] = describeExtractionCapabilities(
+      env({
+        KNOWLEDGE_VISION_BASE_URL: 'http://ollama:11434/v1',
+        KNOWLEDGE_VISION_FALLBACK_BASE_URL: 'https://api.x.ai/v1',
+        KNOWLEDGE_VISION_FALLBACK_MODEL: 'grok-4-1-fast-non-reasoning',
+      }),
+    );
+    expect(vision).toContain(
+      '(fallback: openai grok-4-1-fast-non-reasoning at https://api.x.ai/v1)',
+    );
+  });
+});
+
+describe('env validation for the fallback tier', () => {
+  it('rejects a named fallback provider with nothing to talk to', async () => {
+    // Mirrors the primary's rule: an explicitly-selected provider that cannot
+    // be reached is a configuration error, not a silent no-op. The embed
+    // provider is pointed at ollama so no shared OPENAI_* key exists to
+    // satisfy the fallback implicitly.
+    vi.stubEnv('MEMORY_SERVICE_TOKEN', 'test-token');
+    vi.stubEnv('NEO4J_PASSWORD', 'test-password');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+    vi.stubEnv('MEMORY_EMBED_PROVIDER', 'ollama');
+    vi.stubEnv('OLLAMA_BASE_URL', 'http://ollama:11434');
+    vi.stubEnv('KNOWLEDGE_VISION_FALLBACK_PROVIDER', 'openai');
+    try {
+      const { loadEnv, __resetEnvForTests } = await import('../../src/config/env.ts');
+      __resetEnvForTests();
+      expect(() => loadEnv()).toThrow(/KNOWLEDGE_VISION_FALLBACK_BASE_URL/);
+    } finally {
+      vi.unstubAllEnvs();
+      const { __resetEnvForTests } = await import('../../src/config/env.ts');
+      __resetEnvForTests();
+    }
   });
 });
