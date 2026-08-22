@@ -130,6 +130,20 @@ describe('resolveVisionTargets', () => {
     expect(resolveVisionTargets(env({ KNOWLEDGE_VISION_FALLBACK_API_KEY: 'xai-key' }))).toEqual([]);
   });
 
+  it('drops a fallback that resolves to the same call as the primary', () => {
+    // Naming a fallback provider without its own model or endpoint would
+    // otherwise queue the identical call twice — billed twice, flunking the
+    // quality guard the same way.
+    const targets = resolveVisionTargets(
+      env({
+        KNOWLEDGE_VISION_PROVIDER: 'openai',
+        KNOWLEDGE_VISION_FALLBACK_PROVIDER: 'openai',
+        OPENAI_API_KEY: 'sk-oai',
+      }),
+    );
+    expect(targets).toHaveLength(1);
+  });
+
   it('lets a named fallback provider spend the shared keys', () => {
     const targets = resolveVisionTargets(
       env({

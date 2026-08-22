@@ -135,7 +135,6 @@ change are not repaired automatically: re-run
 `scripts/backfill-attachment-extraction.ts --id=<attachmentId>` for the ones you
 know about (`--id` bypasses the status filter).
 
-
 **Attachment OCR/transcription became explicit opt-in.** `KNOWLEDGE_VISION_PROVIDER=auto`
 and `KNOWLEDGE_TRANSCRIBE_PROVIDER=auto` used to enable themselves off any
 available key, so a deployment that set `ANTHROPIC_API_KEY` for dreaming got

@@ -190,7 +190,8 @@ function withModel(
 export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
   const primary = resolveVisionTarget(env);
   if (!primary) return [];
-  const targets = [withModel(env, primary, env.KNOWLEDGE_VISION_MODEL)];
+  const primaryTarget = withModel(env, primary, env.KNOWLEDGE_VISION_MODEL);
+  const targets = [primaryTarget];
   const fallback = resolveTargetFor(
     env.KNOWLEDGE_VISION_FALLBACK_PROVIDER,
     {
@@ -199,8 +200,21 @@ export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
     },
     env,
   );
-  if (fallback) targets.push(withModel(env, fallback, env.KNOWLEDGE_VISION_FALLBACK_MODEL));
+  if (fallback) {
+    // A fallback that resolves to the same provider, endpoint, credentials and
+    // model as the primary is not a rescue — it is the same call billed twice,
+    // flunking the quality guard the same way. Easy to arrive at by naming a
+    // fallback provider without giving it its own model or endpoint.
+    const resolved = withModel(env, fallback, env.KNOWLEDGE_VISION_FALLBACK_MODEL);
+    if (!sameVisionTarget(primaryTarget, resolved)) targets.push(resolved);
+  }
   return targets;
+}
+
+function sameVisionTarget(a: ResolvedVisionTarget, b: ResolvedVisionTarget): boolean {
+  return (
+    a.provider === b.provider && a.model === b.model && a.key === b.key && a.baseUrl === b.baseUrl
+  );
 }
 
 /** Resolve the transcription capability. Same opt-in rule as vision. */

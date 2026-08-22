@@ -61,6 +61,14 @@ describe('checkVisionOutput', () => {
     expect(checkVisionOutput('EXIT\nDESCRIPTION: a sign on a door')).toBeNull();
   });
 
+  it('accepts a marker the model decorated with markdown or recased', () => {
+    // The prompt asks for markdown, so models answer in it. A complete, correct
+    // transcription must not be thrown away over a pair of asterisks.
+    expect(checkVisionOutput('EXIT\n**DESCRIPTION:** a sign on a door')).toBeNull();
+    expect(checkVisionOutput('EXIT\n### DESCRIPTION: a sign on a door')).toBeNull();
+    expect(checkVisionOutput('EXIT\nDescription: a sign on a door')).toBeNull();
+  });
+
   it('flunks an empty response', () => {
     expect(checkVisionOutput('   ')).toBe('empty response');
   });

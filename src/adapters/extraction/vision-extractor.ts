@@ -73,11 +73,28 @@ export function checkVisionOutput(text: string): string | null {
   const lines = trimmed.split('\n');
   // Search from the end: the marker is specified as the final line, and a
   // transcription may legitimately quote the word earlier in the image's text.
-  const markerIndex = lines.findLastIndex((line) => line.trim().startsWith(DESCRIPTION_MARKER));
+  const markerIndex = lines.findLastIndex(isMarkerLine);
   if (markerIndex === -1) return `missing ${DESCRIPTION_MARKER} marker`;
   const body = lines.slice(0, markerIndex).join('\n').trim();
   if (body.length === 0) return `no transcription and no ${NO_TEXT_SENTINEL} sentinel`;
   return null;
+}
+
+/**
+ * Does this line carry the description marker?
+ *
+ * Matched on the line's letters, not its decoration: the prompt asks for
+ * markdown, and models answer in it — `**DESCRIPTION:**`, `### DESCRIPTION:`,
+ * `- Description:` are all the marker doing its job. An exact case-sensitive
+ * prefix test would flunk a complete, correct transcription over a pair of
+ * asterisks and, with no fallback configured, discard it entirely.
+ */
+function isMarkerLine(line: string): boolean {
+  return line
+    .trim()
+    .replace(/^[#>*_`\-\s]+/, '')
+    .toUpperCase()
+    .startsWith(DESCRIPTION_MARKER);
 }
 
 /** How a target names itself in an extraction's `detail`. One definition
