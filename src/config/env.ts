@@ -101,6 +101,15 @@ const EnvSchema = z
     // decision, not a side effect of having configured an LLM.
     KNOWLEDGE_VISION_PROVIDER: z.enum(['auto', 'none', 'openai', 'anthropic']).default('auto'),
     KNOWLEDGE_VISION_MODEL: z.string().optional(),
+    // Optional second vision target, tried when the primary's call fails or its
+    // output flunks the quality guard (see extraction/vision-extractor.ts).
+    // Same opt-in semantics as the primary: 'auto' is on only when the
+    // dedicated _FALLBACK_* credentials say where to send the bytes. Ignored
+    // entirely while the primary is off — the primary is the capability switch.
+    KNOWLEDGE_VISION_FALLBACK_PROVIDER: z
+      .enum(['auto', 'none', 'openai', 'anthropic'])
+      .default('auto'),
+    KNOWLEDGE_VISION_FALLBACK_MODEL: z.string().optional(),
     KNOWLEDGE_TRANSCRIBE_PROVIDER: z.enum(['auto', 'none', 'openai']).default('auto'),
     KNOWLEDGE_TRANSCRIBE_MODEL: z.string().default('whisper-1'),
     // Dedicated vision/transcription endpoints. These exist so enabling OCR does
@@ -113,6 +122,12 @@ const EnvSchema = z
       .optional()
       .or(z.literal('').transform(() => undefined)),
     KNOWLEDGE_VISION_API_KEY: z.string().optional(),
+    KNOWLEDGE_VISION_FALLBACK_BASE_URL: z
+      .string()
+      .url()
+      .optional()
+      .or(z.literal('').transform(() => undefined)),
+    KNOWLEDGE_VISION_FALLBACK_API_KEY: z.string().optional(),
     KNOWLEDGE_TRANSCRIBE_BASE_URL: z
       .string()
       .url()
@@ -315,6 +330,27 @@ const EnvSchema = z
         code: z.ZodIssueCode.custom,
         path: ['ANTHROPIC_API_KEY'],
         message: 'ANTHROPIC_API_KEY required when KNOWLEDGE_VISION_PROVIDER=anthropic',
+      });
+    }
+    if (
+      env.KNOWLEDGE_VISION_FALLBACK_PROVIDER === 'openai' &&
+      !env.KNOWLEDGE_VISION_FALLBACK_BASE_URL &&
+      !env.KNOWLEDGE_VISION_FALLBACK_API_KEY &&
+      !env.OPENAI_BASE_URL &&
+      !env.OPENAI_API_KEY
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['KNOWLEDGE_VISION_FALLBACK_BASE_URL'],
+        message:
+          'KNOWLEDGE_VISION_FALLBACK_BASE_URL or KNOWLEDGE_VISION_FALLBACK_API_KEY (or the OPENAI_* fallbacks) required when KNOWLEDGE_VISION_FALLBACK_PROVIDER=openai',
+      });
+    }
+    if (env.KNOWLEDGE_VISION_FALLBACK_PROVIDER === 'anthropic' && !env.ANTHROPIC_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['ANTHROPIC_API_KEY'],
+        message: 'ANTHROPIC_API_KEY required when KNOWLEDGE_VISION_FALLBACK_PROVIDER=anthropic',
       });
     }
     if (

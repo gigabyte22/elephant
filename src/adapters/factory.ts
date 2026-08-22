@@ -137,11 +137,23 @@ export type VisionTarget = Creds & { provider: 'anthropic' | 'openai' };
  * the Anthropic key) on OCR.
  */
 export function resolveVisionTarget(env: Env): VisionTarget | null {
-  const dedicated: Creds = {
-    key: env.KNOWLEDGE_VISION_API_KEY,
-    baseUrl: env.KNOWLEDGE_VISION_BASE_URL,
-  };
-  switch (env.KNOWLEDGE_VISION_PROVIDER) {
+  return resolveTargetFor(
+    env.KNOWLEDGE_VISION_PROVIDER,
+    {
+      key: env.KNOWLEDGE_VISION_API_KEY,
+      baseUrl: env.KNOWLEDGE_VISION_BASE_URL,
+    },
+    env,
+  );
+}
+
+/** The opt-in rule, shared by the primary and fallback vision tiers. */
+function resolveTargetFor(
+  provider: Env['KNOWLEDGE_VISION_PROVIDER'],
+  dedicated: Creds,
+  env: Env,
+): VisionTarget | null {
+  switch (provider) {
     case 'none':
       return null;
     case 'anthropic':
@@ -149,11 +161,60 @@ export function resolveVisionTarget(env: Env): VisionTarget | null {
     default: {
       // 'openai' names the provider, which is the opt-in to spend the shared
       // pair; 'auto' falls through here on dedicated credentials alone.
-      const shared = env.KNOWLEDGE_VISION_PROVIDER === 'openai' ? sharedOpenAICreds(env) : null;
+      const shared = provider === 'openai' ? sharedOpenAICreds(env) : null;
       const creds = pickCreds(dedicated, shared);
       return creds ? { provider: 'openai', ...creds } : null;
     }
   }
+}
+
+/** A vision target with its model resolved — what the extractor and the boot
+ *  line both consume. */
+export type ResolvedVisionTarget = VisionTarget & { model: string };
+
+/** A tier's own KNOWLEDGE_*_MODEL wins; otherwise the provider's default. */
+function withModel(
+  env: Env,
+  target: VisionTarget,
+  configured: string | undefined,
+): ResolvedVisionTarget {
+  return { ...target, model: configured ?? defaultVisionModel(env, target) };
+}
+
+/**
+ * The ordered vision targets: primary first, then the optional fallback tier
+ * (KNOWLEDGE_VISION_FALLBACK_*, same opt-in rule). Empty when the primary is
+ * off — the primary remains the capability's on/off switch, so a fallback
+ * configured on its own is ignored rather than silently promoted.
+ */
+export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
+  const primary = resolveVisionTarget(env);
+  if (!primary) return [];
+  const primaryTarget = withModel(env, primary, env.KNOWLEDGE_VISION_MODEL);
+  const targets = [primaryTarget];
+  const fallback = resolveTargetFor(
+    env.KNOWLEDGE_VISION_FALLBACK_PROVIDER,
+    {
+      key: env.KNOWLEDGE_VISION_FALLBACK_API_KEY,
+      baseUrl: env.KNOWLEDGE_VISION_FALLBACK_BASE_URL,
+    },
+    env,
+  );
+  if (fallback) {
+    // A fallback that resolves to the same provider, endpoint, credentials and
+    // model as the primary is not a rescue — it is the same call billed twice,
+    // flunking the quality guard the same way. Easy to arrive at by naming a
+    // fallback provider without giving it its own model or endpoint.
+    const resolved = withModel(env, fallback, env.KNOWLEDGE_VISION_FALLBACK_MODEL);
+    if (!sameVisionTarget(primaryTarget, resolved)) targets.push(resolved);
+  }
+  return targets;
+}
+
+function sameVisionTarget(a: ResolvedVisionTarget, b: ResolvedVisionTarget): boolean {
+  return (
+    a.provider === b.provider && a.model === b.model && a.key === b.key && a.baseUrl === b.baseUrl
+  );
 }
 
 /** Resolve the transcription capability. Same opt-in rule as vision. */
@@ -179,12 +240,16 @@ function describeDisabled(capability: string, envPrefix: string): string {
   return `[extraction] ${capability} disabled (set ${envPrefix}_* credentials, or name a provider to use the shared keys)`;
 }
 
-function describeVision(env: Env): string {
-  const target = resolveVisionTarget(env);
-  if (!target) return describeDisabled('image OCR', 'KNOWLEDGE_VISION');
-  const model = env.KNOWLEDGE_VISION_MODEL ?? defaultVisionModel(env, target);
+function describeVisionTarget(target: ResolvedVisionTarget): string {
   const endpoint = target.provider === 'anthropic' ? 'the Anthropic API' : describeEndpoint(target);
-  return `[extraction] image OCR → ${target.provider} ${model} at ${endpoint}`;
+  return `${target.provider} ${target.model} at ${endpoint}`;
+}
+
+function describeVision(env: Env): string {
+  const [primary, fallback] = resolveVisionTargets(env);
+  if (!primary) return describeDisabled('image OCR', 'KNOWLEDGE_VISION');
+  const suffix = fallback ? ` (fallback: ${describeVisionTarget(fallback)})` : '';
+  return `[extraction] image OCR → ${describeVisionTarget(primary)}${suffix}`;
 }
 
 function describeTranscribe(env: Env): string {
@@ -205,22 +270,26 @@ export function describeExtractionCapabilities(env: Env): string[] {
 // configured, and otherwise register a disabled stand-in so the attachment is
 // recorded as 'skipped' with a reason rather than an ambiguous 'unsupported'.
 export function buildExtractionService(env: Env): ExtractionService {
-  const vision = resolveVisionTarget(env);
+  const visionTargets = resolveVisionTargets(env);
   // The vision extractor doubles as the PDF extractor's OCR fallback, so a
-  // scanned PDF is read by whatever reads screenshots.
-  const visionExtractor = vision
-    ? createVisionExtractor({
-        provider: vision.provider,
-        model: env.KNOWLEDGE_VISION_MODEL ?? defaultVisionModel(env, vision),
-        openaiApiKey: vision.key,
-        openaiBaseUrl: vision.baseUrl,
-        anthropicApiKey: env.ANTHROPIC_API_KEY,
-        timeoutMs: env.KNOWLEDGE_VISION_TIMEOUT_MS,
-        maxDim: env.KNOWLEDGE_VISION_MAX_DIM,
-        jpegQuality: env.KNOWLEDGE_VISION_JPEG_QUALITY,
-        maxTokens: env.KNOWLEDGE_VISION_MAX_TOKENS,
-      })
-    : null;
+  // scanned PDF is read by whatever reads screenshots — quality guard,
+  // fallback tier and all.
+  const visionExtractor =
+    visionTargets.length > 0
+      ? createVisionExtractor({
+          targets: visionTargets.map((target) => ({
+            provider: target.provider,
+            model: target.model,
+            openaiApiKey: target.key,
+            openaiBaseUrl: target.baseUrl,
+            anthropicApiKey: env.ANTHROPIC_API_KEY,
+          })),
+          timeoutMs: env.KNOWLEDGE_VISION_TIMEOUT_MS,
+          maxDim: env.KNOWLEDGE_VISION_MAX_DIM,
+          jpegQuality: env.KNOWLEDGE_VISION_JPEG_QUALITY,
+          maxTokens: env.KNOWLEDGE_VISION_MAX_TOKENS,
+        })
+      : null;
 
   const extractors: Extractor[] = [
     createTextExtractor({ maxBytes: env.KNOWLEDGE_EXTRACT_MAX_TEXT_BYTES }),

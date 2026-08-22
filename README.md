@@ -206,7 +206,9 @@ comfortable operating a Neo4j.
   instead. The service logs which of these is live at boot. Text extraction and
   a PDF's text layer are local and always on; a PDF with *no* text layer is a
   scan, and its pages are rendered and sent to the vision provider like any
-  other image (bounded by `KNOWLEDGE_PDF_OCR_MAX_PAGES`).
+  other image (bounded by `KNOWLEDGE_PDF_OCR_MAX_PAGES`). An optional second
+  vision tier (`KNOWLEDGE_VISION_FALLBACK_*`, same opt-in rule) is tried when
+  the primary errors or its output flunks the extraction quality guard.
 
 - Found a vulnerability? Please report it privately — see
   [SECURITY.md](SECURITY.md), not the public issue tracker.
