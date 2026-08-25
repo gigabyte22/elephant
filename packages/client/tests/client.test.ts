@@ -131,6 +131,29 @@ describe('query-string building', () => {
   });
 });
 
+describe('fact scope query', () => {
+  test('scope is forwarded, and a scope-less call keeps its bare URL', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { deleted: true } }));
+    const client = new ElephantClient(cfg);
+
+    await client.getFact('f1', { projectId: 'p1', userId: 'u1' });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://elephant.test/facts/f1?projectId=p1&userId=u1',
+    );
+
+    await client.supersedeFact('old', 'new', 'moved', { projectId: 'p1' });
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'http://elephant.test/facts/old/supersede?projectId=p1',
+    );
+
+    // No scope declared: no trailing '?', which is the URL every existing caller sends.
+    await client.deleteFact('f2');
+    expect(fetchMock.mock.calls[2]![0]).toBe('http://elephant.test/facts/f2');
+  });
+});
+
 describe('path-segment encoding', () => {
   test('ids are encoded so they cannot traverse to another endpoint', async () => {
     const fetchMock = vi

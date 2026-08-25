@@ -345,11 +345,25 @@ export class ElephantClient {
   saveFacts(facts: Array<Parameters<ElephantClient['saveFact']>[0]>): Promise<WireFact[]> {
     return this.post('/facts/batch', { facts });
   }
-  supersedeFact(oldId: string, newFactId: string, reason: string): Promise<{ ok: true }> {
-    return this.post(`/facts/${oldId}/supersede`, { newFactId, reason });
+  // The three id-addressed fact routes take an optional scope guard: declare it
+  // and a cross-scope id is 404 (never 403 — existence is itself scoped); declare
+  // nothing and you stay unrestricted, which is the single-tenant default.
+  // `scopeQuery` keeps the path bare when nothing is declared, so an existing
+  // caller's URL is unchanged.
+  getFact(id: string, scope: WireScope = {}): Promise<WireFact> {
+    return this.get(`/facts/${id}${this.scopeQuery(scope)}`);
   }
-  deleteFact(id: string): Promise<{ deleted: true }> {
-    return this.delete(`/facts/${id}`);
+  // Guards BOTH facts: supersede writes to the new one too (supersedesFactId).
+  supersedeFact(
+    oldId: string,
+    newFactId: string,
+    reason: string,
+    scope: WireScope = {},
+  ): Promise<{ ok: true }> {
+    return this.post(`/facts/${oldId}/supersede${this.scopeQuery(scope)}`, { newFactId, reason });
+  }
+  deleteFact(id: string, scope: WireScope = {}): Promise<{ deleted: true }> {
+    return this.delete(`/facts/${id}${this.scopeQuery(scope)}`);
   }
 
   // ─ Recall + Timeline ──
@@ -534,6 +548,13 @@ export class ElephantClient {
   }
 
   // ─ HTTP plumbing ──
+  // Empty scope → empty string, so a caller that declares none sends exactly the
+  // URL it always sent. `WireScope` is `{ projectId?: string; userId?: string }`.
+  private scopeQuery(scope: WireScope): string {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(scope)) if (v !== undefined) params.set(k, v);
+    return params.size ? `?${params}` : '';
+  }
   private get<T>(path: string) { return this.request<T>('GET', path); }
   private post<T>(path: string, body: unknown) { return this.request<T>('POST', path, body); }
   private delete<T>(path: string) { return this.request<T>('DELETE', path); }
