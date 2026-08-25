@@ -95,6 +95,19 @@ describe('facts', () => {
     expect(res.ok).toBe(true);
     expect((await client.deleteFact(saved[1]!.id)).deleted).toBe(true);
   });
+
+  test('getFact round-trips, and its scope guard reaches the server', async () => {
+    const saved = await client.saveFact({ content: 'scoped fact', projectId: 'proj-a' });
+
+    const fetched = await client.getFact(saved.id, { projectId: 'proj-a' });
+    expect(fetched.id).toBe(saved.id);
+    expect(fetched.content).toBe('scoped fact');
+
+    // Cross-scope is 404, surfaced as an ElephantError rather than a parse failure.
+    await expect(client.getFact(saved.id, { projectId: 'proj-b' })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
 });
 
 describe('recall — the v1.2 opt-ins actually reach the server', () => {

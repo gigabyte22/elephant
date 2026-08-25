@@ -19,6 +19,7 @@ import type {
   WirePreference,
   WireProcedure,
   WireResearch,
+  WireScope,
   WireWorkingStateEntry,
 } from './wire-types.ts';
 
@@ -122,16 +123,27 @@ export class ElephantClient {
       opts,
     );
   }
+  /** `projectId`/`userId` scope the read: a cross-scope id 404s rather than 403s. */
+  getFact(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<WireFact> {
+    return this.request('GET', scoped(`/facts/${seg(id)}`, query), undefined, opts);
+  }
+  /** The scope guards both facts — supersede writes to the new one too. */
   supersedeFact(
     oldId: string,
     newFactId: string,
     reason: string,
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<{ ok: true }> {
-    return this.request('POST', `/facts/${seg(oldId)}/supersede`, { newFactId, reason }, opts);
+    return this.request(
+      'POST',
+      scoped(`/facts/${seg(oldId)}/supersede`, query),
+      { newFactId, reason },
+      opts,
+    );
   }
-  deleteFact(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/facts/${seg(id)}`, undefined, opts);
+  deleteFact(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<{ deleted: true }> {
+    return this.request('DELETE', scoped(`/facts/${seg(id)}`, query), undefined, opts);
   }
 
   // ─ Recall + Timeline ──
@@ -666,4 +678,10 @@ function qs(obj: Record<string, unknown> | object): string {
     else params.set(k, String(v));
   }
   return params.toString();
+}
+
+/** Append a query string only when there is one, so a scope-less call keeps its bare path. */
+function scoped(path: string, query: object): string {
+  const q = qs(query);
+  return q ? `${path}?${q}` : path;
 }
