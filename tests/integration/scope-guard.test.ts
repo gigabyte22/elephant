@@ -288,6 +288,19 @@ describe('facts', () => {
     expect((await getFact(oldId, asOwner)).json().data.validTo).toBeNull();
   });
 
+  // Supersede writes to the NEW fact too (supersedesFactId, plus the SUPERSEDES
+  // edge), so both sides are guarded. Guarding only the old fact would let a
+  // caller stamp another project's node with its own, and read the id's
+  // existence off the 200/404 split.
+  test('supersede is refused when the new fact is out of scope', async () => {
+    const mine = await createFact({ projectId: INTRUDER });
+    const theirs = await createFact({ projectId: OWNER });
+
+    expect((await supersedeFact(mine, theirs, asIntruder, 'hijack')).statusCode).toBe(404);
+    expect((await getFact(theirs, asOwner)).json().data.supersedes).toBeUndefined();
+    expect((await getFact(mine, asIntruder)).json().data.validTo).toBeNull();
+  });
+
   test('the owning project can still supersede and delete', async () => {
     const oldId = await createFact({ projectId: OWNER });
     const newId = await createFact({ projectId: OWNER });

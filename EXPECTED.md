@@ -49,7 +49,8 @@ DELETE /facts/:id                   redaction: sets deletedAt=now and closes val
   # A cross-scope id is 404, never 403 — existence is itself scoped, so a 403 would
   # confirm the id exists elsewhere. A fact with no scope is a shared global and
   # stays reachable ('filter', not 'strict'). A caller that declares no scope is
-  # unrestricted, which keeps the single-tenant default working.
+  # unrestricted, which keeps the single-tenant default working. Supersede guards
+  # BOTH facts: it writes to the new one too (supersedesFactId + the edge).
 
 GET    /recall                      hybrid retrieve — query params below
                                     // asOf?: valid-time filter for facts + preferences
