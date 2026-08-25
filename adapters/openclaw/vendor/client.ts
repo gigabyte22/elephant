@@ -125,7 +125,12 @@ export class ElephantClient {
       opts,
     );
   }
-  /** `projectId`/`userId` scope the read: a cross-scope id 404s rather than 403s. */
+  /**
+   * `projectId`/`userId` scope the read: a cross-scope id 404s rather than 403s.
+   * Unlike the write methods, scope is NOT filled in from `defaultProjectId` —
+   * declaring none is what the service reads as "unrestricted", so defaulting it
+   * would silently narrow every existing caller. Pass it to get the guard.
+   */
   getFact(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<WireFact> {
     return this.request('GET', scoped(`/facts/${seg(id)}`, query), undefined, opts);
   }
@@ -683,7 +688,7 @@ function qs(obj: Record<string, unknown> | object): string {
 }
 
 /** Append a query string only when there is one, so a scope-less call keeps its bare path. */
-function scoped(path: string, query: object): string {
+function scoped(path: string, query: WireScope): string {
   const q = qs(query);
   return q ? `${path}?${q}` : path;
 }
