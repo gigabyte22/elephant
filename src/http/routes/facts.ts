@@ -3,7 +3,9 @@ import { read } from '../../config/neo4j.ts';
 import type { Container } from '../../index.ts';
 import { toWireFact } from '../../models/wire.ts';
 import { FactRepository } from '../../repositories/FactRepository.ts';
+import { isRedacted } from '../../utils/temporal.ts';
 import { notFound } from '../errors.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, WireFactSchema } from '../wire-schemas.ts';
 
@@ -60,15 +62,58 @@ export function registerFactsRoutes(app: App, container: Container): void {
     },
   });
 
+  // Read-before-write for the mutations below, guarded the same way they are: a
+  // fact id is often derived from its content and scope rather than handed out,
+  // so holding one is not proof of ownership.
+  app.route({
+    method: 'GET',
+    url: '/facts/:id',
+    schema: {
+      params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
+      response: { 200: okEnvelope(WireFactSchema) },
+    },
+    handler: async (req) => {
+      const fact = assertInScope(
+        await read((tx) => FactRepository.get(tx, req.params.id)),
+        req.query,
+        `fact ${req.params.id}`,
+      );
+      // FactRepository.get has no deletedAt filter on purpose — ingestion needs to
+      // see it to reject undelete-by-recreate — so the read gate lives here instead:
+      // redaction is retroactive on every read path. Supersession is history, not
+      // redaction, so a superseded fact still returns. `isRedacted` rather than a
+      // hand-rolled check, so this stays the in-memory twin of notDeletedClause.
+      if (isRedacted(fact)) throw notFound(`fact ${req.params.id}`);
+      return { ok: true as const, data: toWireFact(fact) };
+    },
+  });
+
   app.route({
     method: 'POST',
     url: '/facts/:id/supersede',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: SupersedeBody,
       response: { 200: okEnvelope(z.object({ ok: z.literal(true) })) },
     },
     handler: async (req) => {
+      // Resolving here also turns a missing fact from the service's 400 into a
+      // 404: a 400/404 split would tell a prober which ids exist in a scope it
+      // cannot see.
+      //
+      // BOTH sides are guarded, not just the old fact: FactRepository.supersede
+      // writes to the new fact too (`SET newF.supersedesFactId`, and the edge),
+      // so guarding only the old one would let a caller point its own fact at
+      // another project's, stamping a foreign node and confirming that the id
+      // exists — exactly the oracle this guard is here to close.
+      const [oldFact, newFact] = await read(async (tx) => [
+        await FactRepository.get(tx, req.params.id),
+        await FactRepository.get(tx, req.body.newFactId),
+      ]);
+      assertInScope(oldFact, req.query, `fact ${req.params.id}`);
+      assertInScope(newFact, req.query, `fact ${req.body.newFactId}`);
       await container.ingestion.supersede({
         oldId: req.params.id,
         newId: req.body.newFactId,
@@ -83,11 +128,17 @@ export function registerFactsRoutes(app: App, container: Container): void {
     url: '/facts/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(z.object({ deleted: z.literal(true) })) },
     },
     handler: async (req) => {
-      const existing = await read((tx) => FactRepository.get(tx, req.params.id));
-      if (!existing) throw notFound(`fact ${req.params.id}`);
+      // Unfiltered get on purpose: an already-redacted fact still resolves, so a
+      // repeat DELETE stays a 200 no-op rather than becoming a 404.
+      assertInScope(
+        await read((tx) => FactRepository.get(tx, req.params.id)),
+        req.query,
+        `fact ${req.params.id}`,
+      );
       await container.ingestion.softDelete(req.params.id);
       return { ok: true as const, data: { deleted: true as const } };
     },

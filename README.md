@@ -98,7 +98,7 @@ return an `{ok, data}` / `{ok, error}` envelope.
 | Area | Endpoints |
 |---|---|
 | Episodes | `POST /episodes` |
-| Facts | `POST /facts`, `POST /facts/batch`, `POST /facts/:id/supersede`, `DELETE /facts/:id` |
+| Facts | `POST /facts`, `POST /facts/batch`, `GET /facts/:id`, `POST /facts/:id/supersede`, `DELETE /facts/:id` |
 | Recall | `GET /recall` (hybrid search + scope boosts/filters) |
 | Browse | `GET /timeline`, `GET /entities` |
 | Observations | `POST /observations`, `GET /observations` (session-scoped, TTL) |

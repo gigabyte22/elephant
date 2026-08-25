@@ -31,6 +31,9 @@ POST   /facts                       save one fact (explicit, from user or agent)
                                     // supersedes another is not closed the instant it is written.
                                     // INGEST_SUPERSEDE_MODE=inline restores the blocking check.
 POST   /facts/batch                 save many (for dreaming pipeline)
+GET    /facts/:id                   fetch one fact (same shape recall returns)
+                                    // a redacted fact is 404 here too — redaction is retroactive
+                                    // on every read path. A superseded fact still returns.
 POST   /facts/:id/supersede         explicit supersede (reason, newFactId)
                                     // old.validTo = max(old.validFrom, new.validFrom); edge supersededAt = now
 DELETE /facts/:id                   redaction: sets deletedAt=now and closes validTo
@@ -40,6 +43,14 @@ DELETE /facts/:id                   redaction: sets deletedAt=now and closes val
                                     includeSuperseded and any asOf. Contrast
                                     dream prune, which sets prunedAt and stays
                                     visible to /timeline and asOf.
+
+  # The three id-addressed fact routes above take an optional ?projectId=&userId=
+  # scope guard, as /knowledge/documents/:id, /procedures/:id and /research/:id do.
+  # A cross-scope id is 404, never 403 — existence is itself scoped, so a 403 would
+  # confirm the id exists elsewhere. A fact with no scope is a shared global and
+  # stays reachable ('filter', not 'strict'). A caller that declares no scope is
+  # unrestricted, which keeps the single-tenant default working. Supersede guards
+  # BOTH facts: it writes to the new one too (supersedesFactId + the edge).
 
 GET    /recall                      hybrid retrieve — query params below
                                     // asOf?: valid-time filter for facts + preferences

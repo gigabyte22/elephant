@@ -1,5 +1,6 @@
-// One rule, two expressions: scopeFilterClause (Cypher pushdown) and
-// axisAllows (JS post-filter) must agree on what 'filter' and 'strict' mean.
+// One rule, three expressions: scopeFilterClause (Cypher pushdown), axisAllows
+// (JS post-filter) and assertInScope (the id-addressed route guard) must agree
+// on what 'filter' and 'strict' mean.
 //
 // They did not. SPEC.md says a null scope is a shared global that 'filter'
 // still admits; axisAllows implemented that, scopeFilterClause emitted plain
@@ -9,6 +10,7 @@
 //   "The unscoped procedure may or may not pass null-handling"
 
 import { describe, expect, test } from 'vitest';
+import { assertInScope, type ScopeGuardQuery } from '../../src/http/scope-guard.ts';
 import type { ScopeMode } from '../../src/models/types.ts';
 import { scopeFilterClause } from '../../src/repositories/scope.ts';
 import { axisAllows } from '../../src/services/retrieval/stages/PostFilterStage.ts';
@@ -119,5 +121,59 @@ describe('buildRetrievalScope projects only the axes a node type carries', () =>
     const { clause } = scopeFilterClause('node', scope);
     expect(clause).not.toContain('sessionId');
     expect(clause).not.toContain('agentId');
+  });
+});
+
+// The third expression. assertInScope guards id-addressed routes rather than
+// retrieval, so it takes no mode: it is hard-wired to 'filter' semantics, which
+// makes it exactly comparable to axisAllows(..., 'filter'). The first two drifted
+// once; this pins the third to them before it can.
+describe("assertInScope agrees with axisAllows in 'filter' mode", () => {
+  const axes = ['projectId', 'userId'] as const;
+  type Axis = (typeof axes)[number];
+  const itemValues: Array<string | null> = [null, 'p1', 'p2'];
+  // undefined = the caller declared no scope, which must stay unrestricted.
+  const queryValues: Array<string | undefined> = [undefined, 'p1'];
+
+  // An absent key is how both sides say "no scope on this axis": a null column
+  // on the item, an undeclared scope on the query.
+  function onAxis(axis: Axis, value: string | null | undefined): ScopeGuardQuery {
+    if (value == null) return {};
+    return axis === 'projectId' ? { projectId: value } : { userId: value };
+  }
+
+  function guardAdmits(
+    axis: Axis,
+    itemValue: string | null,
+    queryValue: string | undefined,
+  ): boolean {
+    try {
+      assertInScope(onAxis(axis, itemValue), onAxis(axis, queryValue), 'item');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  for (const axis of axes) {
+    for (const queryValue of queryValues) {
+      for (const itemValue of itemValues) {
+        test(`${axis} query=${queryValue ?? 'none'} item=${itemValue ?? 'null'}`, () => {
+          expect(guardAdmits(axis, itemValue, queryValue)).toBe(
+            axisAllows(itemValue, queryValue, 'filter'),
+          );
+        });
+      }
+    }
+  }
+
+  test('the guard is filter, never strict: an unscoped item stays reachable', () => {
+    expect(axisAllows(null, 'p1', 'strict')).toBe(false);
+    expect(guardAdmits('projectId', null, 'p1')).toBe(true);
+  });
+
+  test('a missing item is refused, and indistinguishably from a cross-scope one', () => {
+    expect(() => assertInScope(null, { projectId: 'p1' }, 'item')).toThrow();
+    expect(() => assertInScope({ projectId: 'p2' }, { projectId: 'p1' }, 'item')).toThrow();
   });
 });
