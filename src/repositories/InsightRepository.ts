@@ -22,6 +22,14 @@ function toInsight(node: Record<string, unknown>): Insight {
   };
 }
 
+// Null-safe equality for one axis of a dedup bucket: a NULL property matches
+// only a NULL parameter. One line per axis so it splices into the Cypher at the
+// template's own indent, the way every other clause fragment here does.
+function bucketAxisMatch(axis: 'projectId' | 'userId'): string {
+  const param = `$bucket_${axis}`;
+  return `(node.${axis} = ${param} OR (node.${axis} IS NULL AND ${param} IS NULL))`;
+}
+
 export const InsightRepository = {
   async create(tx: ManagedTransaction, insight: Insight): Promise<Insight> {
     const result = await tx.run(
@@ -166,6 +174,15 @@ export const InsightRepository = {
     return result.records.map((r) => toInsight(r.get('i')));
   },
 
+  /**
+   * Nearest insights to an embedding.
+   *
+   * Both scope params filter inside the query rather than over the results,
+   * because `queryNodes` returns the GLOBAL top-K: rows the caller could never
+   * accept fill those slots, and a caller-side filter is then left sifting a
+   * neighbourhood that holds nothing for it. Callers still have to overfetch
+   * `limit` to pay for what the index cannot pre-filter.
+   */
   async listSimilar(
     tx: ManagedTransaction,
     input: {
@@ -173,16 +190,27 @@ export const InsightRepository = {
       limit: number;
       minScore?: number;
       includeRetired?: boolean;
-      // Retrieval scope pushdown, same shape every other repository calls
-      // `scope`. Belongs in the query rather than a caller-side filter:
-      // `queryNodes` returns the GLOBAL top-K, which other scopes' rows can
-      // fill entirely. The promotion dedup in DreamingService omits it on
-      // purpose — it compares scope in JS over an unscoped neighbourhood.
+      // Four-axis retrieval scope, same shape every other repository calls
+      // `scope`.
       scope?: RetrievalScope;
+      // One exact scope bucket, and deliberately none of the other three
+      // shapes: not `scope`'s filter mode (where a NULL prop matches anything)
+      // or strict mode (where it matches nothing and the unscoped bucket is
+      // therefore inexpressible), and not FactRepository's `dedupScope`, whose
+      // user axis is permissive. Here both axes match null-safely, so NULL
+      // means "the unscoped bucket" rather than "shared, matches anything".
+      //
+      // That is the dream's promotion-dedup rule: an insight is a verbatim
+      // copy of a fact, so it dedups against the exact tuple its source fact
+      // occupies — the same partition consolidation clusters by.
+      bucket?: { projectId: string | null; userId: string | null };
     },
   ): Promise<Array<Insight & { score: number }>> {
     const minScore = input.minScore ?? 0;
     const retrieval = scopeAndClause('node', input.scope);
+    const bucketClause = input.bucket
+      ? `AND ${bucketAxisMatch('projectId')} AND ${bucketAxisMatch('userId')}`
+      : '';
     const result = await tx.run(
       // Retired insights are excluded by default. Without this an insight
       // promoted from a fact that was later contradicted kept asserting the
@@ -192,6 +220,7 @@ export const InsightRepository = {
        WHERE score >= $minScore
          AND ($includeRetired OR node.validTo IS NULL)
        ${retrieval.clause}
+       ${bucketClause}
        RETURN node {.*} AS i, score
        ORDER BY score DESC`,
       {
@@ -199,6 +228,8 @@ export const InsightRepository = {
         limit: input.limit,
         minScore,
         includeRetired: input.includeRetired ?? false,
+        bucket_projectId: input.bucket?.projectId ?? null,
+        bucket_userId: input.bucket?.userId ?? null,
         ...retrieval.params,
       },
     );
