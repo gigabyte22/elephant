@@ -435,17 +435,36 @@ export const FactRepository = {
 
   async listForEntity(
     tx: ManagedTransaction,
-    input: { entityId: string; includeSuperseded?: boolean },
+    input: {
+      entityId: string;
+      includeSuperseded?: boolean;
+      // Confine to ONE exact scope bucket, both axes matched null-safely: a
+      // NULL scope is the unscoped bucket, not a wildcard. Deliberately
+      // narrower than `dedupScope` above, whose user axis is permissive by
+      // design (a caller with no userId reads the whole bucket) — right for
+      // dedup, wrong here, where it would fold one human's facts into
+      // another's. Mirrors the partition clusterForConsolidation applies.
+      bucket?: { projectId: string | null; userId: string | null };
+    },
   ): Promise<Fact[]> {
     const includeSuperseded = input.includeSuperseded ?? false;
+    const bucketClause = input.bucket
+      ? `AND (f.projectId = $bucketProjectId OR (f.projectId IS NULL AND $bucketProjectId IS NULL))
+            AND (f.userId = $bucketUserId OR (f.userId IS NULL AND $bucketUserId IS NULL))`
+      : '';
     const result = await tx.run(
       `MATCH (e:Entity {id: $entityId})-[:HAS_FACT]->(f:Fact)
        WHERE f.deletedAt IS NULL${includeSuperseded ? '' : ' AND f.validTo IS NULL'}
+       ${bucketClause}
        OPTIONAL MATCH (other:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(other.id) AS entityIds
        RETURN f {.*} AS f, entityIds
        ORDER BY f.importance DESC, f.recordedAt DESC`,
-      { entityId: input.entityId },
+      {
+        entityId: input.entityId,
+        bucketProjectId: input.bucket?.projectId ?? null,
+        bucketUserId: input.bucket?.userId ?? null,
+      },
     );
     return result.records.map((r) =>
       toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),
