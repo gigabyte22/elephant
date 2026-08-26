@@ -292,3 +292,34 @@ describe('dream consolidation pass', () => {
     expect((await getFact(a))?.live).toBe(true);
   });
 });
+
+describe('candidates are chosen per scope bucket', () => {
+  const FRAG_A = 'the user daughter isabelle is six years old';
+  const FRAG_B = 'the user oldest daughter is named isabelle';
+
+  test('an entity whose facts only reach the floor by summing buckets is skipped', async () => {
+    // Two fragments in each of three scopes: six live facts on the entity, but
+    // never three that could merge with each other. Counting across buckets
+    // qualified it anyway and spent a cluster from the per-run budget judging
+    // pairs that the bucket floor was meant to exclude.
+    const isabelle = await seedEntity('Isabelle');
+    // `undefined` is the third bucket — unscoped — not a missing case.
+    for (const projectId of ['proj-A', 'proj-B', undefined]) {
+      await seedFact({ content: FRAG_A, entityIds: [isabelle], projectId });
+      await seedFact({ content: FRAG_B, entityIds: [isabelle], projectId });
+    }
+
+    knobs.consolidateResult = {
+      decision: 'merge',
+      mergeFactIds: [],
+      content: 'should never be used',
+      confidence: 0.9,
+      importance: 0.9,
+    };
+
+    const run = await container.dreaming.runCycle();
+
+    expect(knobs.consolidateCalls).toHaveLength(0);
+    expect(run.factsMerged).toBe(0);
+  });
+});

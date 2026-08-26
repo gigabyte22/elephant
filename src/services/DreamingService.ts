@@ -984,28 +984,41 @@ export function createDreamingService(deps: Deps) {
     const consolidate = llm.consolidateFacts?.bind(llm);
     if (!consolidate) return;
 
-    // Entities with enough live facts to plausibly hold fragments. Overfetch
-    // beyond the cluster budget so touched-first prioritisation has a pool to
-    // pick from; old fragmentation drains over successive nights.
+    // Entity-and-bucket pairs with enough live facts to plausibly hold
+    // fragments. Overfetch beyond the cluster budget so touched-first
+    // prioritisation has a pool to pick from; old fragmentation drains over
+    // successive nights.
+    //
+    // Grouped by scope bucket, not by entity alone, because only facts sharing
+    // a bucket can ever merge. A whole-graph count ranks on a number no single
+    // merge can act on: one fact in each of six scopes outranked four fragments
+    // in one scope and then yielded nothing, and on a shared instance the
+    // busiest account's entities crowd out everyone else's. $minFacts is a
+    // per-bucket floor for the same reason — an entity that reaches it only by
+    // summing buckets never had a merge to make.
     const candidates = await read(async (tx) => {
       const result = await tx.run(
         `MATCH (e:Entity)-[:HAS_FACT]->(f:Fact)
          WHERE f.validTo IS NULL
-         WITH e, count(f) AS liveFacts
+         WITH e.id AS entityId, f.projectId AS projectId, f.userId AS userId, count(f) AS liveFacts
          WHERE liveFacts >= $minFacts
-         RETURN e.id AS id
-         ORDER BY liveFacts DESC, e.id
+         RETURN entityId, projectId, userId
+         ORDER BY liveFacts DESC, entityId, projectId, userId
          LIMIT toInteger($limit)`,
         {
           minFacts: config.consolidationMinEntityFacts,
           limit: config.consolidationMaxClustersPerRun * 5,
         },
       );
-      return result.records.map((r) => r.get('id') as string);
+      return result.records.map((r) => ({
+        entityId: r.get('entityId') as string,
+        projectId: (r.get('projectId') as string | null) ?? null,
+        userId: (r.get('userId') as string | null) ?? null,
+      }));
     });
     const ordered = [
-      ...candidates.filter((id) => touchedEntityIds.has(id)),
-      ...candidates.filter((id) => !touchedEntityIds.has(id)),
+      ...candidates.filter((candidate) => touchedEntityIds.has(candidate.entityId)),
+      ...candidates.filter((candidate) => !touchedEntityIds.has(candidate.entityId)),
     ];
 
     // Facts already folded into a merge this pass — a fact shared by several
@@ -1013,16 +1026,24 @@ export function createDreamingService(deps: Deps) {
     const consumed = new Set<string>();
     let judged = 0;
 
-    for (const entityId of ordered) {
+    for (const { entityId, projectId, userId } of ordered) {
       if (judged >= config.consolidationMaxClustersPerRun || Date.now() >= deadline) break;
 
-      const facts = await read((tx) => FactRepository.listForEntity(tx, { entityId }));
+      // One bucket's facts, not the entity's whole population: the rest could
+      // not have merged anyway, and fetching them means carrying every other
+      // account's embeddings across the wire to throw away.
+      const facts = await read((tx) =>
+        FactRepository.listForEntity(tx, { entityId, bucket: { projectId, userId } }),
+      );
       const live = facts.filter(
         (f) => f.validTo === null && !consumed.has(f.id) && !supersededInCycle.has(f.id),
       );
       if (live.length < 2) continue;
 
       const byId = new Map(live.map((f) => [f.id, f]));
+      // `live` is already one bucket, so the clusterer's own partitioning is a
+      // no-op here — left in place because the never-merge-across-buckets rule
+      // belongs to the clusterer, not to what its callers happen to pass.
       const clusters = clusterForConsolidation(live, {
         minSimilarity: config.consolidationMinSimilarity,
         maxClusterSize: config.consolidationMaxClusterSize,
