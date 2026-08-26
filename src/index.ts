@@ -126,6 +126,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
       config: {
         ...sharedConfig,
         supersedeMode: env.INGEST_SUPERSEDE_MODE,
+        crossScopeSupersede: env.DREAM_CROSS_SCOPE_SUPERSEDE,
         deferSummary: env.INGEST_DEFER_SUMMARY,
       },
     }),
@@ -160,6 +161,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         insightDedupThreshold: env.DREAM_INSIGHT_DEDUP_THRESHOLD,
         insightRetireBatchLimit: env.DREAM_INSIGHT_RETIRE_BATCH_LIMIT,
         crossScopeDedup: env.DREAM_CROSS_SCOPE_DEDUP,
+        crossScopeSupersede: env.DREAM_CROSS_SCOPE_SUPERSEDE,
         pruneWindowDays: env.DREAM_PRUNE_WINDOW_DAYS,
         pruneBatchLimit: env.DREAM_PRUNE_BATCH_LIMIT,
         pruneImportanceExempt: env.DREAM_PRUNE_IMPORTANCE_EXEMPT,

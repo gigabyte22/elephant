@@ -64,6 +64,13 @@ interface Deps {
      */
     supersedeMode: 'dream' | 'inline';
     /**
+     * Whether the inline check may close a fact in the unscoped bucket — the
+     * same rule as the dreamer's supersede pass, and the same tradeoff, on
+     * DREAM_CROSS_SCOPE_SUPERSEDE in config/env.ts. This path used to widen
+     * unconditionally, ignoring even the dedup flag.
+     */
+    crossScopeSupersede: boolean;
+    /**
      * Write a clipped-head summary for an oversized transcript and let the
      * dream cycle install the real one, rather than summarizing in the request.
      * False restores the blocking behaviour for a deployment whose recall leans
@@ -447,12 +454,12 @@ export function createMemoryIngestionService(deps: Deps) {
         limit: 10,
         minScore: SUPERSEDE_VECTOR_THRESHOLD,
         includeSuperseded: false,
-        // Confine to the fact's own bucket + the unscoped personal bucket. An
-        // unscoped search here let a direct POST /facts supersede a DIFFERENT
-        // project's fact.
+        // Confine to the fact's own bucket, widened to the unscoped one only
+        // when crossScopeSupersede says so. A fully unscoped search here let a
+        // direct POST /facts supersede a DIFFERENT project's fact.
         dedupScope: {
           projectId: fact.projectId ?? null,
-          includeUnscoped: true,
+          includeUnscoped: config.crossScopeSupersede,
           userId: fact.userId ?? null,
         },
       }),
@@ -472,6 +479,11 @@ export function createMemoryIngestionService(deps: Deps) {
       return;
     }
     if (!decision) return;
+    // The judge is told which facts it may pick from, but nothing makes it
+    // obey: an id echoed from outside this candidate set — the new fact's own
+    // id included — would close a row the scope search deliberately excluded.
+    // The dreamer's own pass has always checked this; this one had not.
+    if (!others.some((o) => o.id === decision.oldFactId)) return;
 
     await write((tx) =>
       supersedeFactWithAudit(tx, {

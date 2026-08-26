@@ -69,6 +69,13 @@ interface Deps {
     insightDedupThreshold: number;
     insightRetireBatchLimit: number;
     crossScopeDedup: boolean;
+    /**
+     * Whether that widening extends to contradiction supersede, which unlike
+     * dedup is destructive: it CLOSES the older fact and writes the
+     * replacement into the episode's own scope. Off by default; the tradeoff
+     * is spelled out on DREAM_CROSS_SCOPE_SUPERSEDE in config/env.ts.
+     */
+    crossScopeSupersede: boolean;
     // Pruning (see utils/decay.ts for the retention model).
     pruneWindowDays: number;
     pruneBatchLimit: number;
@@ -613,8 +620,9 @@ export function createDreamingService(deps: Deps) {
     for (const fact of newFromThisEp) {
       if (supersededInCycle.has(fact.id)) continue;
       await checkSupersede(fact, run, {
-        // Supersede within this episode's own bucket, or the unscoped personal
-        // bucket — never another project's.
+        // Supersede within this episode's own bucket — and, only when
+        // crossScopeSupersede is on, the unscoped bucket too. Never another
+        // project's. checkSupersede applies that second half.
         dedupScope: {
           projectId: ep.projectId ?? null,
           includeUnscoped: config.crossScopeDedup && !ep.isolated,
@@ -638,6 +646,10 @@ export function createDreamingService(deps: Deps) {
    * the fact is already committed, so a model hiccup skips this fact rather
    * than failing anything.
    *
+   * The caller's `dedupScope` names the bucket; this narrows it by
+   * `crossScopeSupersede` before searching, so no caller — present or future —
+   * can forget to.
+   *
    * Resolves false only when the model call threw, which is the sweep's cue to
    * leave the fact unstamped and retry it next cycle. Every other outcome —
    * including "nothing contradicts this" — is a completed check.
@@ -654,13 +666,20 @@ export function createDreamingService(deps: Deps) {
       context: string;
     },
   ): Promise<boolean> {
+    // The candidate search is the whole boundary: FactRepository.supersede has
+    // no scope clause of its own, and the judge's pick is validated against
+    // this list below, so whatever cannot appear here cannot be closed.
+    const supersedeScope = {
+      ...opts.dedupScope,
+      includeUnscoped: opts.dedupScope.includeUnscoped && config.crossScopeSupersede,
+    };
     const candidates = await read((tx) =>
       FactRepository.listSimilar(tx, {
         embedding: fact.embedding,
         limit: 8,
         minScore: config.supersedeVectorThreshold,
         includeSuperseded: false,
-        dedupScope: opts.dedupScope,
+        dedupScope: supersedeScope,
       }),
     );
     const others = candidates.filter((c) => c.id !== fact.id && !opts.exclude?.has(c.id));

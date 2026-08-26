@@ -210,9 +210,20 @@ const EnvSchema = z
     // orphaned-insight reconciliation sweep.
     DREAM_INSIGHT_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
     DREAM_INSIGHT_RETIRE_BATCH_LIMIT: z.coerce.number().int().positive().default(1000),
-    // Cross-scope dedup lets a project episode dedup/supersede against the
-    // unscoped personal bucket (never another project's bucket).
+    // Cross-scope dedup lets a scoped episode SKIP writing a fact the unscoped
+    // bucket already holds (never another project's bucket). Read-only: the
+    // reader sees that bucket anyway, so declining to store a second copy costs
+    // nothing.
     DREAM_CROSS_SCOPE_DEDUP: boolEnv(true),
+    // Whether the same widening applies to contradiction SUPERSEDE, which is
+    // not read-only: it closes the older fact and writes the replacement into
+    // the *episode's* scope. Off by default — where the unscoped bucket is
+    // shared between accounts, superseding across it silently moves a shared
+    // fact into one account's private scope and retires the insights derived
+    // from it. On restores the previous behaviour, which a single-tenant
+    // deployment may legitimately want: there the unscoped bucket is the
+    // operator's own, and a correction made inside a project should fix it.
+    DREAM_CROSS_SCOPE_SUPERSEDE: boolEnv(false),
     // Pruning: facts at or above the exemption importance never auto-prune;
     // below it, retention follows an importance- and reference-scaled
     // Ebbinghaus curve once past the window.

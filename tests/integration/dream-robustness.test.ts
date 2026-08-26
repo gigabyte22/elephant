@@ -312,47 +312,6 @@ describe('dream cycle robustness', () => {
     expect(projectIds).toEqual([null, 'proj-A']);
   });
 
-  test('cross-scope supersede: a project fact can supersede a contradicting personal fact', async () => {
-    // Same engineered-cosine setup as the supersede-throw test: preseeded
-    // personal fact at cosine ≈0.894 from the incoming project fact — inside
-    // the supersede band, below dedup.
-    const preseedEmbedding = new Array<number>(EMBED_DIM).fill(0);
-    for (let i = 0; i < 4; i++) preseedEmbedding[i] = 0.5;
-    const newEmbedding = new Array<number>(EMBED_DIM).fill(0);
-    const five = 1 / Math.sqrt(5);
-    for (let i = 0; i < 5; i++) newEmbedding[i] = five;
-
-    const now = new Date(Date.now() - 60_000);
-    const preseeded: Fact = {
-      id: newId(),
-      content: 'preseeded personal fact to be superseded',
-      category: 'attribute',
-      confidence: 0.8,
-      importance: 0.5,
-      validFrom: now,
-      validTo: null,
-      recordedAt: now,
-      embedding: preseedEmbedding,
-      entityIds: [],
-    };
-    await txWrite((tx) => FactRepository.create(tx, preseeded));
-
-    await postScopedEpisode('the user mentioned berlin', 'proj-A');
-    knobs.embedBatchOverride = [newEmbedding];
-    knobs.supersedeTargetId = preseeded.id;
-
-    const run = await container.dreaming.runCycle();
-    expect(run.factsSuperseded).toBe(1);
-
-    const tombstone = await read(async (tx) => {
-      const r = await tx.run('MATCH (f:Fact {id: $id}) RETURN f.validTo AS validTo', {
-        id: preseeded.id,
-      });
-      return r.records[0]?.get('validTo');
-    });
-    expect(tombstone).not.toBeNull();
-  });
-
   test('the supersede sweep cannot cross into another project', async () => {
     // Preseed a fact in proj-Q lexically close to the incoming proj-P fact
     // (5 of 6 shared tokens → cosine ≈0.91, above the supersede floor).
@@ -390,15 +349,17 @@ describe('dream cycle robustness', () => {
     });
     expect(stillLive).toBeNull();
 
-    // Control: the same write against a PERSONAL preseed does supersede,
-    // proving only the scope guard blocked the cross-project path.
-    const personal: Fact = {
+    // Control: the same write against a preseed in proj-P's OWN bucket does
+    // supersede, proving only the scope guard blocked the cross-project path.
+    // (Not an unscoped preseed: reaching the unscoped bucket from a project is
+    // its own flag now — see cross-scope-supersede.test.ts.)
+    const sameProject: Fact = {
       ...preseeded,
       id: newId(),
-      projectId: undefined,
+      projectId: 'proj-P',
     };
-    await txWrite((tx) => FactRepository.create(tx, personal));
-    knobs.supersedeTargetId = personal.id;
+    await txWrite((tx) => FactRepository.create(tx, sameProject));
+    knobs.supersedeTargetId = sameProject.id;
     await container.ingestion.saveFact({
       content: 'alpha beta gamma delta epsilon',
       projectId: 'proj-P',
@@ -406,7 +367,7 @@ describe('dream cycle robustness', () => {
     await sweepUncheckedFacts();
     const superseded = await read(async (tx) => {
       const r = await tx.run('MATCH (f:Fact {id: $id}) RETURN f.validTo AS validTo', {
-        id: personal.id,
+        id: sameProject.id,
       });
       return r.records[0]?.get('validTo');
     });
