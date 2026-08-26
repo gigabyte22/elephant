@@ -14,6 +14,7 @@ import { buildHttpServer } from '../../src/http/server.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import { FactRepository } from '../../src/repositories/FactRepository.ts';
 import { InsightRepository } from '../../src/repositories/InsightRepository.ts';
+import { cosine } from '../../src/utils/cosine.ts';
 import { newId } from '../../src/utils/ids.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
@@ -23,6 +24,8 @@ const auth = { authorization: `Bearer ${TOKEN}` };
 const json = { ...auth, 'content-type': 'application/json' };
 
 const CLAIM = 'the user prefers dark mode';
+
+const embedder = createFakeEmbeddingAdapter({ dim: EMBED_DIM });
 
 let container: Container;
 let app: Awaited<ReturnType<typeof buildHttpServer>>;
@@ -41,7 +44,7 @@ beforeAll(async () => {
       },
     ],
   });
-  container = await bootstrap({ llm, embedder: createFakeEmbeddingAdapter({ dim: EMBED_DIM }) });
+  container = await bootstrap({ llm, embedder });
   app = await buildHttpServer(container);
   await app.ready();
 });
@@ -331,5 +334,74 @@ describe('run counters', () => {
     });
     const third = await container.dreaming.runCycle();
     expect(third.insightsRetired).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('promotion dedup survives a crowded neighbourhood', () => {
+  function magnitude(v: number[]): number {
+    return Math.sqrt(v.reduce((sum, x) => sum + x * x, 0));
+  }
+
+  /**
+   * A unit vector at exactly `target` cosine from `base`, which must itself be
+   * a unit vector — the fake embedder normalizes, so `embed()` output is one.
+   */
+  function nearTo(base: number[], target: number): number[] {
+    // Gram-Schmidt: take the first basis vector e1, strip its component along
+    // `base` to leave a perpendicular direction, then step tan(theta) along
+    // that. Renormalized, the sum sits at cos(theta) = 1/sqrt(1 + tan^2) from
+    // `base`.
+    const alongBase = base[0] ?? 0; // e1 . base, since e1 is (1, 0, 0, ...)
+    const perp = base.map((v, i) => (i === 0 ? 1 : 0) - alongBase * v);
+    const perpNorm = magnitude(perp);
+    const tan = Math.sqrt(1 / (target * target) - 1);
+    const raw = base.map((v, i) => v + (tan * (perp[i] ?? 0)) / perpNorm);
+    const rawNorm = magnitude(raw);
+    return raw.map((v) => v / rawNorm);
+  }
+
+  async function makeInsight(
+    embedding: number[],
+    scope: { projectId?: string; userId?: string },
+  ): Promise<void> {
+    await write((tx) =>
+      InsightRepository.create(tx, {
+        id: newId(),
+        content: CLAIM,
+        embedding,
+        promotedFromFactIds: [],
+        createdAt: new Date(),
+        ...scope,
+      }),
+    );
+  }
+
+  test("the fact's own bucket is found even when other scopes fill the top-K", async () => {
+    // The index hands back the GLOBAL nearest K and any scope predicate runs
+    // only afterwards. Six other accounts holding an exactly-identical insight
+    // is more than the five neighbours the dedup used to ask for, so every slot
+    // went to a row dana could never match: filtering the results by scope
+    // found nothing to corroborate and minted a duplicate — quietly, and more
+    // often the more accounts an instance has.
+    const base = await embedder.embed(CLAIM);
+    const near = nearTo(base, 0.95);
+    // 0.95 clears DREAM_INSIGHT_DEDUP_THRESHOLD (0.92), so `near` is a genuine
+    // duplicate, and sits strictly under the decoys' 1.0, so they outrank it.
+    // Asserted rather than assumed because nearTo only holds for a unit `base`
+    // that is not itself parallel to e1.
+    expect(cosine(base, near)).toBeCloseTo(0.95, 6);
+
+    for (let i = 0; i < 6; i++) {
+      await makeInsight(base, { projectId: `proj-other-${i}`, userId: `other-${i}` });
+    }
+    await makeInsight(near, { userId: 'dana' });
+
+    await dreamOne(CLAIM, { userId: 'dana' });
+
+    const danaInsights = await read(async (tx) => {
+      const r = await tx.run("MATCH (i:Insight) WHERE i.userId = 'dana' RETURN i.id AS id");
+      return r.records.length;
+    });
+    expect(danaInsights).toBe(1);
   });
 });

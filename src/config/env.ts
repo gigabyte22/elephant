@@ -209,6 +209,16 @@ const EnvSchema = z
     // existing insight instead of cloning it, and the per-cycle cap on the
     // orphaned-insight reconciliation sweep.
     DREAM_INSIGHT_DEDUP_THRESHOLD: z.coerce.number().min(0).max(1).default(0.92),
+    // How many insight neighbours the promotion dedup fetches before narrowing
+    // to the source fact's own scope bucket. Far more than it compares, because
+    // a Neo4j vector index cannot pre-filter: queryNodes picks the K nearest
+    // across the WHOLE graph and the scope predicate only runs afterwards. Every
+    // scope on the instance competes for those K slots while only one bucket's
+    // rows can match, so K has to carry the other buckets too — widening it is
+    // the only lever, the same reasoning as RETRIEVAL_ASOF_OVERFETCH_MULTIPLIER.
+    // Raise it on an instance with many accounts or projects: too low and the
+    // dedup silently stops firing, minting a duplicate insight each cycle.
+    DREAM_INSIGHT_DEDUP_K: z.coerce.number().int().positive().default(50),
     DREAM_INSIGHT_RETIRE_BATCH_LIMIT: z.coerce.number().int().positive().default(1000),
     // Cross-scope dedup lets a project episode dedup/supersede against the
     // unscoped personal bucket (never another project's bucket).

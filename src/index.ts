@@ -158,6 +158,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         summaryTargetTokens: env.SUMMARY_TARGET_TOKENS,
         promoteInsightImportance: env.DREAM_PROMOTE_INSIGHT_IMPORTANCE,
         insightDedupThreshold: env.DREAM_INSIGHT_DEDUP_THRESHOLD,
+        insightDedupK: env.DREAM_INSIGHT_DEDUP_K,
         insightRetireBatchLimit: env.DREAM_INSIGHT_RETIRE_BATCH_LIMIT,
         crossScopeDedup: env.DREAM_CROSS_SCOPE_DEDUP,
         pruneWindowDays: env.DREAM_PRUNE_WINDOW_DAYS,

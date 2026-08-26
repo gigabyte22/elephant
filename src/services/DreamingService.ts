@@ -67,6 +67,11 @@ interface Deps {
     summaryTargetTokens: number;
     promoteInsightImportance: number;
     insightDedupThreshold: number;
+    /**
+     * How many insight neighbours the promotion dedup asks the vector index
+     * for — well above the handful it compares. See DREAM_INSIGHT_DEDUP_K.
+     */
+    insightDedupK: number;
     insightRetireBatchLimit: number;
     crossScopeDedup: boolean;
     // Pruning (see utils/decay.ts for the retention model).
@@ -1110,18 +1115,22 @@ export function createDreamingService(deps: Deps) {
       // against another's. Promotion was a verbatim copy per qualifying fact,
       // so near-identical insights accumulated with a second copy of the
       // embedding polluting the vector space.
+      //
+      // Asking for the nearest five and sorting scope out afterwards meant that
+      // once other accounts held insights, all five could be rows this fact
+      // could never match and the dedup quietly stopped firing — hence the
+      // bucket pushdown and the overfetched K (see DREAM_INSIGHT_DEDUP_K). Cosine is
+      // still recomputed here: the index score is not raw cosine.
       const similar = await read((tx) =>
         InsightRepository.listSimilar(tx, {
           embedding: f.embedding,
-          limit: 5,
+          limit: config.insightDedupK,
           includeRetired: false,
+          bucket: { projectId: f.projectId ?? null, userId: f.userId ?? null },
         }),
       );
       const duplicate = similar.find(
-        (candidate) =>
-          (candidate.projectId ?? null) === (f.projectId ?? null) &&
-          (candidate.userId ?? null) === (f.userId ?? null) &&
-          cosine(f.embedding, candidate.embedding) > config.insightDedupThreshold,
+        (candidate) => cosine(f.embedding, candidate.embedding) > config.insightDedupThreshold,
       );
       if (duplicate) {
         // Corroboration, not duplication: attaching the source means the
