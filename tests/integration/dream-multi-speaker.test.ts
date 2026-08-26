@@ -5,6 +5,10 @@
 // posted the episode owned everyone's facts. With `participants` declared, the
 // extractor names who each fact is about and the dreamer scopes it to that
 // person's userId (or to the shared bucket for objective claims).
+//
+// That attribution also decides which lane the fact's dedup and contradiction
+// checks run in — see the last describe block. Judging it in the poster's lane
+// instead would compare it against facts it will never sit beside.
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
@@ -13,6 +17,7 @@ import { buildHttpServer } from '../../src/http/server.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { ExtractedFact } from '../../src/models/types.ts';
 import { EpisodeRepository } from '../../src/repositories/EpisodeRepository.ts';
+import { FactRepository } from '../../src/repositories/FactRepository.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
@@ -21,13 +26,35 @@ const auth = { authorization: `Bearer ${TOKEN}` };
 const json = { ...auth, 'content-type': 'application/json' };
 
 const PARTICIPANTS = [{ label: 'alice', userId: 'u:alice' }, { label: 'bob' }];
+// The same two people, but with bob given a userId too — the lane tests are
+// about telling two accounts apart, which PARTICIPANTS deliberately does not do
+// (its bob is unaccounted for, and lands in the shared bucket).
+const LANED_PARTICIPANTS = [
+  { label: 'alice', userId: 'u:alice' },
+  { label: 'bob', userId: 'u:bob' },
+];
+const PROJECT = 'proj-lane';
+
+// The pair the supersede specs share: close enough to clear the supersede floor
+// (0.85), far enough to stay under the dedup threshold (0.92).
+const OLD_CLAIM = 'The user prefers dark mode in the editor';
+const NEW_CLAIM = 'The user prefers light mode in the editor';
 
 let container: Container;
 let app: Awaited<ReturnType<typeof buildHttpServer>>;
 let extractResult: ExtractedFact[] = [];
 
 beforeAll(async () => {
-  const llm = createFakeLLMAdapter({ extract: () => extractResult });
+  const llm = createFakeLLMAdapter({
+    extract: () => extractResult,
+    // Closes OLD_CLAIM whenever it is offered as prior art. Keyed on that one
+    // string, so the attribution tests below — which never store it — are
+    // unaffected.
+    supersede: ({ existing }) => {
+      const old = existing.find((e) => e.content === OLD_CLAIM);
+      return old ? { oldFactId: old.id, reason: 'reversed', confidenceDelta: 0 } : null;
+    },
+  });
   container = await bootstrap({ llm, embedder: createFakeEmbeddingAdapter({ dim: EMBED_DIM }) });
   app = await buildHttpServer(container);
   await app.ready();
@@ -143,5 +170,78 @@ describe('dream extraction attributes facts to participants', () => {
     const got = await factUserIds();
     expect(got.get('alice prefers dark mode')).toBe('u:greg');
     expect(got.get('a shared claim')).toBe('u:greg');
+  });
+});
+
+describe("hygiene runs in the fact's lane, not the poster's", () => {
+  /** A live fact in one person's lane inside PROJECT. */
+  async function seed(content: string, userId?: string): Promise<string> {
+    const f = await container.ingestion.saveFact({ content, projectId: PROJECT, userId });
+    return f.id;
+  }
+
+  async function isLive(id: string): Promise<boolean> {
+    const stored = await read((tx) => FactRepository.get(tx, id));
+    return stored?.validTo == null;
+  }
+
+  async function countByContent(content: string): Promise<number> {
+    return read(async (tx) => {
+      const r = await tx.run('MATCH (f:Fact {content: $content}) RETURN f.id AS id', {
+        content,
+      });
+      return r.records.length;
+    });
+  }
+
+  test("dedups against the attributed person's own fact, not the poster's lane", async () => {
+    // Alice posts; the fact is about Bob, and Bob already has it. The poster's
+    // lane cannot see Bob's rows, so keying on it would store a second copy.
+    const known = 'bob ships on tuesdays';
+    await seed(known, 'u:bob');
+    extractResult = [fact(known, 'bob')];
+
+    await ingest({ participants: LANED_PARTICIPANTS, projectId: PROJECT, userId: 'u:alice' });
+    await container.dreaming.runCycle();
+
+    expect(await countByContent(known)).toBe(1);
+  });
+
+  test("supersedes the attributed person's own contradicted fact", async () => {
+    const bobs = await seed(OLD_CLAIM, 'u:bob');
+    extractResult = [fact(NEW_CLAIM, 'bob')];
+
+    await ingest({ participants: LANED_PARTICIPANTS, projectId: PROJECT, userId: 'u:alice' });
+    await container.dreaming.runCycle();
+
+    expect(await isLive(bobs)).toBe(false);
+  });
+
+  test("never closes another participant's fact", async () => {
+    // The room case: an episode with no userId of its own, which leaves the
+    // user guard off. Before attribution decided the lane, a fact about Alice
+    // could close one belonging to Bob — the cross-user supersede #62 shut.
+    const bobs = await seed(OLD_CLAIM, 'u:bob');
+    extractResult = [fact(NEW_CLAIM, 'alice')];
+
+    // userId: undefined is the point — a room names a thread, not a person, so
+    // the episode carries none and the guard has nothing of its own to key on.
+    await ingest({ participants: LANED_PARTICIPANTS, projectId: PROJECT, userId: undefined });
+    await container.dreaming.runCycle();
+
+    expect(await isLive(bobs)).toBe(true);
+  });
+
+  test('an objective fact still sees the whole project bucket', async () => {
+    // subject: null lands the fact in the shared lane, and a null lane sees
+    // everything in its bucket — the same rule recall's filter mode uses.
+    // That is what lets one member's objective claim correct another's.
+    const bobs = await seed(OLD_CLAIM, 'u:bob');
+    extractResult = [fact(NEW_CLAIM, null)];
+
+    await ingest({ participants: LANED_PARTICIPANTS, projectId: PROJECT, userId: 'u:alice' });
+    await container.dreaming.runCycle();
+
+    expect(await isLive(bobs)).toBe(false);
   });
 });

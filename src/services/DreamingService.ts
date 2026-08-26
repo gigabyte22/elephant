@@ -487,11 +487,19 @@ export function createDreamingService(deps: Deps) {
       for (let i = 0; i < extracted.length; i++) {
         const ext = extracted[i]!;
         const embedding = embeddings[i] ?? [];
+        // The lane this fact will live in: on a multi-party episode the
+        // extractor attributes each fact to the participant it is about, so it
+        // is not necessarily the poster's userId. Resolved up here rather than
+        // at the create below because both hygiene searches — the dedup just
+        // below and the contradiction pass after the loop — have to run in that
+        // lane too, or they judge the fact against rows it will never sit beside.
+        const factUserId = resolveFactUserId(ep, ext);
 
         // Skip duplicates within the live fact set. The dedup bucket is the
         // episode's own project bucket, widened (unless the episode is from an
         // isolated project) to the unscoped personal bucket so the same fact
-        // learned personally and inside a project doesn't persist twice.
+        // learned personally and inside a project doesn't persist twice. The
+        // user axis is the fact's own lane, not the episode's.
         const similar = await read((tx) =>
           FactRepository.listSimilar(tx, {
             embedding,
@@ -500,7 +508,7 @@ export function createDreamingService(deps: Deps) {
             dedupScope: {
               projectId: ep.projectId ?? null,
               includeUnscoped: config.crossScopeDedup && !ep.isolated,
-              userId: ep.userId ?? null,
+              userId: factUserId ?? null,
             },
           }),
         );
@@ -535,11 +543,10 @@ export function createDreamingService(deps: Deps) {
             sourceEpisodeId: ep.id,
             // Inherit the source episode's scope so isolated projects keep
             // their own dream-learned facts and don't leak into other scopes.
-            // userId goes through attribution: on multi-party episodes the
-            // extractor names who each fact is about, so one speaker's facts
-            // don't land in the posting user's personal bucket.
+            // userId is the attributed lane resolved above, so one speaker's
+            // facts don't land in the posting user's personal bucket.
             projectId: ep.projectId,
-            userId: resolveFactUserId(ep, ext),
+            userId: factUserId,
             // The contradiction pass below covers this fact, so the sweep that
             // picks up unchecked facts must not claim it a second time.
             supersedeCheckedAt: now,
@@ -620,13 +627,16 @@ export function createDreamingService(deps: Deps) {
     for (const fact of newFromThisEp) {
       if (supersededInCycle.has(fact.id)) continue;
       await checkSupersede(fact, run, {
-        // Supersede within this episode's own bucket — and, only when
+        // Supersede within this fact's own bucket — and, only when
         // crossScopeSupersede is on, the unscoped bucket too. Never another
         // project's. checkSupersede applies that second half.
+        //
+        // The user axis is the fact's own attributed lane — decided by
+        // resolveFactUserId at extraction — not the episode poster's.
         dedupScope: {
           projectId: ep.projectId ?? null,
           includeUnscoped: config.crossScopeDedup && !ep.isolated,
-          userId: ep.userId ?? null,
+          userId: fact.userId ?? null,
         },
         exclude: epFactIds,
         supersededInCycle,
