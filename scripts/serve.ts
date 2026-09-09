@@ -4,6 +4,7 @@ import { startAttachmentExtractionWorker } from '../src/jobs/AttachmentExtractio
 import { startDreamScheduler } from '../src/jobs/DreamScheduler.ts';
 import { startObservationReaper } from '../src/jobs/ObservationReaper.ts';
 import { startOkfSyncScheduler } from '../src/jobs/OkfSyncScheduler.ts';
+import { startResearchReaper } from '../src/jobs/ResearchReaper.ts';
 
 async function main(): Promise<void> {
   const container = await bootstrap();
@@ -14,6 +15,10 @@ async function main(): Promise<void> {
   const extraction = startAttachmentExtractionWorker(container);
   // Mirrors buildVaultWriter's gate — no vault, nothing to sweep.
   const okfSync = container.env.OKF_ENABLED ? startOkfSyncScheduler(container) : undefined;
+  // Opt-in only — unset means research is never purged. See env.ts for why.
+  const researchGraceDays = container.env.RESEARCH_RETENTION_DAYS;
+  const researchReaper =
+    researchGraceDays === undefined ? undefined : startResearchReaper(container, researchGraceDays);
 
   await app.listen({
     port: container.env.MEMORY_PORT,
@@ -24,7 +29,8 @@ async function main(): Promise<void> {
     `elephant listening on http://${container.env.MEMORY_BIND}:${container.env.MEMORY_PORT} ` +
       `(llm=${container.llm.name}, embedder=${container.embedder.name}, dim=${container.embedder.dim}, ` +
       `dreamCron=${dream.pattern}, extractionCron=${extraction.pattern}` +
-      `${okfSync ? `, okfSyncCron=${okfSync.pattern}` : ''})`,
+      `${okfSync ? `, okfSyncCron=${okfSync.pattern}` : ''}` +
+      `${researchReaper ? `, researchReapCron=${researchReaper.pattern} grace=${researchGraceDays}d` : ''})`,
   );
 
   const stop = async (signal: string): Promise<void> => {
@@ -33,6 +39,7 @@ async function main(): Promise<void> {
     reaper.stop();
     extraction.stop();
     okfSync?.stop();
+    researchReaper?.stop();
     await app.close();
     await shutdown();
     process.exit(0);

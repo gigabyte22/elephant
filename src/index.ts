@@ -205,6 +205,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         minWindowDays: env.DREAM_PRUNE_WINDOW_DAYS,
         retentionFloor: env.DREAM_PRUNE_RETENTION_FLOOR,
       },
+      researchGraceDays: env.RESEARCH_RETENTION_DAYS,
     }),
   };
 }

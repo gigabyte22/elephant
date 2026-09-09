@@ -259,7 +259,15 @@ export function createResearchService(deps: Deps) {
     if (existing) await tombstoneInVault(vault, 'research', existing, at);
   }
 
-  return { create, update, get, list, softDelete };
+  /** Release storage for research that lapsed more than `graceDays` ago, up to
+   *  `limit` documents; returns how many went. A larger backlog drains over
+   *  successive calls rather than in one long transaction. */
+  async function purgeExpired(graceDays: number, limit: number): Promise<number> {
+    const before = new Date(Date.now() - graceDays * 86_400_000);
+    return write((tx) => ResearchRepository.purgeExpired(tx, before, limit));
+  }
+
+  return { create, update, get, list, softDelete, purgeExpired };
 }
 
 export type ResearchService = ReturnType<typeof createResearchService>;

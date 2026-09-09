@@ -356,6 +356,25 @@ export const DashboardRepository = {
     return (result.records[0]?.get('count') as number | undefined) ?? 0;
   },
 
+  /** Live vs lapsed research counts, for the retention readout. "Lapsed" is
+   *  everything already hidden from reads — naturally expired and soft-deleted
+   *  alike, since softDelete is implemented as `expiresAt = now`. Research
+   *  without an expiry never lapses, which is why this can't reuse
+   *  observationCounts' predicates verbatim. */
+  async researchExpiry(tx: ManagedTransaction): Promise<{ live: number; lapsed: number }> {
+    const result = await tx.run(
+      `MATCH (r:Research)
+       RETURN
+         sum(CASE WHEN r.expiresAt IS NULL OR r.expiresAt > datetime() THEN 1 ELSE 0 END) AS live,
+         sum(CASE WHEN r.expiresAt <= datetime() THEN 1 ELSE 0 END) AS lapsed`,
+    );
+    const row = result.records[0];
+    return {
+      live: (row?.get('live') as number | undefined) ?? 0,
+      lapsed: (row?.get('lapsed') as number | undefined) ?? 0,
+    };
+  },
+
   async factCategories(
     tx: ManagedTransaction,
     scope: ScopeFilter,

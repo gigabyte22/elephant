@@ -68,10 +68,52 @@ export const ResearchRepository = {
     return toResearch(result.records[0]!.get('r'));
   },
 
+  // Deliberately UNFILTERED by expiry. Recall and list are gated on liveness;
+  // inspection by id is not, so an operator can still look at what expired or
+  // was soft-deleted — right up until the reaper releases it. (Procedure guards
+  // its NAME lookup for a different reason: a soft-deleted head resurfacing on
+  // a name query.)
   async get(tx: ManagedTransaction, id: string): Promise<Research | null> {
     const result = await tx.run('MATCH (r:Research {id: $id}) RETURN r {.*} AS r', { id });
     const row = result.records[0];
     return row ? toResearch(row.get('r')) : null;
+  },
+
+  /**
+   * Hard-delete research whose expiry lapsed before `before`, plus the two node
+   * kinds that would otherwise keep its body alive. Batched like the observation
+   * reaper so one tick can't hold a long write transaction.
+   *
+   * :ResearchChunk is derived data. :ArchivedRevision snapshots the pre-update
+   * state and `serialiseForSnapshot` strips only `embedding`, so a revision
+   * holds the full body — stranding them would retain the exact content the
+   * purge exists to release.
+   *
+   * :AuditEvent deliberately STAYS: it records field names and reasons, never
+   * content, and it is keyed by `targetId` rather than by edge, so deleting the
+   * document never touches it. The vault is left to its own sweep (`syncVault`
+   * reaps files whose node is gone), the only path that respects `--purge`.
+   *
+   * The LIMIT lands on documents, before either tail is expanded, so the batch
+   * counts what the caller thinks it counts; each tail is then collected in its
+   * own `WITH` so revisions and chunks never cross-product with each other.
+   */
+  async purgeExpired(tx: ManagedTransaction, before: Date, limit: number): Promise<number> {
+    const result = await tx.run(
+      `MATCH (r:Research)
+       WHERE r.expiresAt IS NOT NULL AND r.expiresAt <= datetime($before)
+       WITH r LIMIT toInteger($limit)
+       OPTIONAL MATCH (r)-[:HAS_REVISION]->(revision:ArchivedRevision)
+       WITH r, collect(revision) AS revisions
+       OPTIONAL MATCH (chunk:ResearchChunk {researchId: r.id})
+       WITH r, revisions, collect(chunk) AS chunks
+       FOREACH (n IN revisions | DETACH DELETE n)
+       FOREACH (n IN chunks | DETACH DELETE n)
+       DETACH DELETE r
+       RETURN count(*) AS deleted`,
+      { before: dateParam(before), limit },
+    );
+    return (result.records[0]?.get('deleted') as number) ?? 0;
   },
 
   async update(

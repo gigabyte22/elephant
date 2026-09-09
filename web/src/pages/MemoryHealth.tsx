@@ -64,6 +64,7 @@ export function MemoryHealth() {
             <DecayScatter data={data} />
           </div>
           <AtRiskLedger data={data} />
+          <ResearchRetention data={data} />
           <p className="pt-6 font-mono text-2xs leading-relaxed tracking-widest text-ink-500">
             RETENTION = e^(−DAYS/STRENGTH) · STRENGTH GROWS WITH REFERENCES AND IMPORTANCE · FACTS ≥{' '}
             {data.policy.importanceExempt.toFixed(2)} IMPORTANCE NEVER PRUNE · REFERENCED WITHIN{' '}
@@ -372,5 +373,30 @@ function ExpandedItem({
         {value}
       </dd>
     </div>
+  );
+}
+
+// --- research retention -----------------------------------------------------------
+
+// Read-only, like the prune-policy footnote: graceDays is env-derived and read
+// once at boot, so there is nothing here to write back. "Lapsed" counts what is
+// already hidden from every read — expired and soft-deleted alike, since soft
+// delete sets expiresAt to now.
+function ResearchRetention({ data }: { data: RetentionPayload }) {
+  const { graceDays, live, lapsed } = data.research;
+  return (
+    <section className="border-b border-hairline py-6">
+      <h2 className="label-meta">research retention</h2>
+      <div className="grid grid-cols-2 pt-4 sm:grid-cols-3">
+        <Cell label="live research" value={fmtCount(live)} />
+        <Cell label="lapsed, hidden from reads" value={fmtCount(lapsed)} />
+        <Cell label="purged after expiry" value={graceDays === null ? 'never' : `${graceDays}d`} />
+      </div>
+      <p className="pt-4 font-mono text-2xs leading-relaxed tracking-widest text-ink-500">
+        {graceDays === null
+          ? 'EXPIRED RESEARCH IS HIDDEN FROM EVERY READ BUT NEVER RECLAIMED · SET RESEARCH_RETENTION_DAYS TO PURGE IT'
+          : `EXPIRED RESEARCH IS PURGED WITH ITS CHUNKS AND REVISIONS ${graceDays}D AFTER EXPIRY · RAISE expiresAt WITHIN THAT WINDOW TO KEEP A DOCUMENT`}
+      </p>
+    </section>
   );
 }

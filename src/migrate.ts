@@ -191,6 +191,13 @@ export function buildStatements(embedDim: number): Statement[] {
       cypher: 'CREATE INDEX observation_expires IF NOT EXISTS FOR (o:Observation) ON (o.expiresAt)',
     },
     {
+      name: 'index:research_expires',
+      // Every liveness predicate on Research (list, node-level recall, the
+      // chunk parent guard, and the reap sweep) filters on this property, and
+      // all of them were unindexed property scans until now.
+      cypher: 'CREATE INDEX research_expires IF NOT EXISTS FOR (r:Research) ON (r.expiresAt)',
+    },
+    {
       name: 'index:episode_agent_id',
       cypher: 'CREATE INDEX episode_agent_id IF NOT EXISTS FOR (e:Episode) ON (e.agentId)',
     },
