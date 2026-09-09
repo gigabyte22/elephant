@@ -91,7 +91,10 @@ GET    /health                      liveness + config readback (no auth required
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
 GET    /knowledge/documents/:id     fetch one document
 PUT    /knowledge/documents/:id     update (auto :ArchivedRevision snapshot; re-chunks on content change)
-GET    /knowledge/documents         list (scope-filtered: projectId, userId, limit)
+GET    /knowledge/documents         list (scope-filtered: projectId, userId, projectScope, userScope, limit)
+                                    # projectScope/userScope override the mode inferred from the ids
+                                    # (an id present → 'filter', absent → 'none'). Only `shared` lists
+                                    # the null-scoped documents alone; omitting an id spans every scope.
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
 
 POST   /procedures                  create a skill / workflow / how-to
@@ -138,17 +141,19 @@ GET /recall?
   q=<text>              # embedded server-side
   &agentId=<id>         # optional, scope axis (boost by default)
   &sessionId=<id>       # optional, biases toward session context
-  &agentScope=boost|filter|strict|none
-  &sessionScope=boost|filter|strict|none
+  &agentScope=boost|filter|strict|shared|none
+  &sessionScope=boost|filter|strict|shared|none
   # v1.2: cross-cutting scope axes (same semantics)
   &projectId=<id>
   &userId=<id>
-  &projectScope=boost|filter|strict|none
-  &userScope=boost|filter|strict|none
+  &projectScope=boost|filter|strict|shared|none
+  &userScope=boost|filter|strict|shared|none
   # Scope modes: 'boost' (default when a value is given) multiplies score;
   # 'filter' excludes only CROSS-scope items — a null scope is a shared global
   # and still matches; 'strict' additionally excludes nulls, so a sandboxed
-  # reader sees only items carrying its own scope value; 'none' ignores the axis.
+  # reader sees only items carrying its own scope value; 'shared' inverts that
+  # and returns ONLY the nulls, and is the one mode needing no axis value;
+  # 'none' ignores the axis.
   # One rule on all four axes. Categories with no per-record agent/session
   # value (preferences, insights, procedures, chunks, …) count as null on
   # those axes: shared under agent/session 'filter', excluded under 'strict'.

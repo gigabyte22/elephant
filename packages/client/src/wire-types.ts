@@ -191,7 +191,7 @@ export interface WireHealth {
 
 // ── Recall ──────────────────────────────────────────────────────────────────
 
-export type ScopeMode = 'boost' | 'filter' | 'none' | 'strict';
+export type ScopeMode = 'boost' | 'filter' | 'none' | 'shared' | 'strict';
 
 export type RecallKind =
   | 'episode'

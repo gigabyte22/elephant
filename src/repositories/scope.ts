@@ -1,10 +1,11 @@
 // Shared helpers for scope-aware repo writes and retrieval-time filtering.
 //
 // Scope axes are: projectId, userId, agentId, sessionId. Each runs in one of
-// four modes at retrieval time:
+// five modes at retrieval time:
 //   'boost'  — multiplier on score (default when a value is supplied)
 //   'filter' — hard match, but a NULL scope is a shared global and still matches
 //   'strict' — like filter, and also excludes NULLs
+//   'shared' — the NULL scopes only; carries no value, since it names nobody
 //   'none'   — ignored (default when no value is supplied)
 //
 // Repository writes simply persist whichever scope props are supplied; the
@@ -44,8 +45,10 @@ const AXES: Array<{
 ];
 
 /**
- * Build a Cypher predicate fragment + params that hard-filter on every axis
- * whose mode is 'filter'. Returns an empty clause when no axis is filtering.
+ * Build a Cypher predicate fragment + params for every axis whose mode pushes
+ * down ('filter', 'strict', 'shared'). Returns an empty clause when no axis is
+ * filtering. Parts are ANDed, and each part is self-contained, so a clause
+ * composes with the other axes and with a caller's own WHERE.
  *
  * Example: scopeFilterClause('node', { projectId: 'p1', projectScope: 'filter' })
  *  → { clause: "node.projectId = $scope_projectId", params: { scope_projectId: 'p1' } }
@@ -58,6 +61,12 @@ export function scopeFilterClause(
   const params: Record<string, string | null> = {};
   for (const { axis, modeKey } of AXES) {
     const mode = scope[modeKey];
+    // 'shared' selects the null-scoped rows themselves, so it has nothing to
+    // compare against and must not fall through the value check below.
+    if (mode === 'shared') {
+      parts.push(`${alias}.${axis} IS NULL`);
+      continue;
+    }
     if ((mode !== 'filter' && mode !== 'strict') || !scope[axis]) continue;
     const paramName = `scope_${axis}`;
     // Must mirror axisAllows() in PostFilterStage exactly. This used to emit
