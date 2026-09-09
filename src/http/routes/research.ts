@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
+import { ScopeModeSchema } from '../../models/types.ts';
 import { toWireResearch } from '../../models/wire.ts';
 import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
@@ -34,11 +35,24 @@ const UpdateBody = z
     message: 'at least one field to update is required',
   });
 
-const ListQuery = z.object({
-  projectId: z.string().min(1),
-  userId: z.string().optional(),
-  limit: z.coerce.number().int().positive().max(200).optional(),
-});
+const ListQuery = z
+  .object({
+    // Optional ONLY so an explicit projectScope can be sent instead; the
+    // refinement below keeps it mandatory in every other case. Omitting both
+    // selects 'none', which spans every project — the exact shape this
+    // parameter set exists to prevent.
+    projectId: z.string().min(1).optional(),
+    userId: z.string().optional(),
+    projectScope: ScopeModeSchema.optional(),
+    userScope: ScopeModeSchema.optional(),
+    limit: z.coerce.number().int().positive().max(200).optional(),
+  })
+  .refine((q) => Boolean(q.projectId || q.projectScope), {
+    path: ['projectId'],
+    message:
+      'projectId is required unless an explicit projectScope is supplied ' +
+      '(projectScope=none spans every project; use it only deliberately)',
+  });
 
 export function registerResearchRoutes(app: App, container: Container): void {
   app.route({
@@ -59,7 +73,7 @@ export function registerResearchRoutes(app: App, container: Container): void {
     url: '/research/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
-      querystring: z.object({ projectId: z.string().optional() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(WireResearchSchema) },
     },
     handler: async (req) => {
@@ -77,7 +91,7 @@ export function registerResearchRoutes(app: App, container: Container): void {
     url: '/research/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
-      querystring: z.object({ projectId: z.string().optional() }),
+      querystring: ScopeGuardQuery,
       body: UpdateBody,
       response: { 200: okEnvelope(WireResearchSchema) },
     },
@@ -104,10 +118,13 @@ export function registerResearchRoutes(app: App, container: Container): void {
         scope: {
           projectId: req.query.projectId,
           userId: req.query.userId,
-          // Without an explicit mode, scopeFilterClause emits an empty predicate and
-          // this returns every project's research. Mirrors knowledge.ts.
-          projectScope: req.query.projectId ? 'filter' : 'none',
-          userScope: req.query.userId ? 'filter' : 'none',
+          // Explicit mode wins, else inferred from the id. Unlike the sibling
+          // routes the 'none' arm here is unreachable — it needs neither projectId
+          // nor projectScope, which the schema refuses — so spanning every project
+          // is only ever an explicit projectScope=none. The arm stays so this
+          // reads identically to the knowledge and procedures list routes.
+          projectScope: req.query.projectScope ?? (req.query.projectId ? 'filter' : 'none'),
+          userScope: req.query.userScope ?? (req.query.userId ? 'filter' : 'none'),
         },
         limit: req.query.limit,
       });

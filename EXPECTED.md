@@ -90,6 +90,9 @@ GET    /health                      liveness + config readback (no auth required
 # v1.2 — knowledge / procedural / research / working-state / audit
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
 GET    /knowledge/documents/:id     fetch one document
+                                    # ?projectId=…&userId=… scope the read: a cross-scope id
+                                    # 404s, never 403s (existence is itself scoped). Declaring
+                                    # no scope is unrestricted — the single-tenant default.
 PUT    /knowledge/documents/:id     update (auto :ArchivedRevision snapshot; re-chunks on content change)
 GET    /knowledge/documents         list (scope-filtered: projectId, userId, projectScope, userScope, limit)
                                     # projectScope/userScope override the mode inferred from the ids
@@ -98,15 +101,32 @@ GET    /knowledge/documents         list (scope-filtered: projectId, userId, pro
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
 
 POST   /procedures                  create a skill / workflow / how-to
-GET    /procedures/:id              fetch one procedure
+GET    /procedures/:id              fetch one procedure (scoped like /knowledge/documents/:id)
 PUT    /procedures/:id              update (auto :ArchivedRevision + :SUPERSEDES on body change)
 GET    /procedures?name=…&projectId=…   lookup or paginated list
+                                    # list: projectId, userId, projectScope, userScope, limit.
+                                    # projectScope/userScope override the mode inferred from the
+                                    # ids (an id present → 'filter', absent → 'none'). Only
+                                    # `shared` lists the null-scoped procedures alone.
+                                    # ?name=… is an exact lookup, not a filtered list: it matches
+                                    # the project axis exactly (a null id selects the shared
+                                    # procedure, not every project's), then applies the user axis
+                                    # under the same mode rule. An out-of-scope hit answers [].
 DELETE /procedures/:id              soft-delete
 
 POST   /research                    project-scoped research artifact (projectId required)
-GET    /research/:id                fetch one (includes full `content` body)
+GET    /research/:id                fetch one (includes full `content` body; scoped by
+                                    ?projectId=…&userId=… as above — the userId leg is enforced,
+                                    not just accepted)
 PUT    /research/:id                update (auto :ArchivedRevision snapshot; projectId/userId immutable)
-GET    /research?projectId=…        list (projectId required; rows include `content`)
+GET    /research?projectId=…        list (rows include `content`)
+                                    # projectId is required UNLESS an explicit projectScope is
+                                    # sent; omitting both would select 'none', which spans every
+                                    # project. Also takes userId, userScope, limit.
+                                    # projectScope=shared is empty by construction here — POST
+                                    # /research requires projectId, so no null-scoped row exists.
+                                    # The userId axis IS nullable, so userScope=shared is the
+                                    # meaningful shared listing for research.
 DELETE /research/:id                soft-delete
 
 POST   /intentions                  record a forward-looking commitment
@@ -115,8 +135,15 @@ GET    /intentions/due?before=…     open commitments past/near their dueAt.
                                     For boot-time reconciliation, NOT polling —
                                     elephant never fires intentions, the caller
                                     owns the clock.
-GET    /intentions/:id              fetch one
+GET    /intentions/:id              fetch one. Scoped by ?projectId=…&userId=… — project and
+                                    user only, since the guard carries no agent/session axis,
+                                    while the list routes below take all four.
 GET    /intentions?status=…         list (pending|completed|cancelled|expired)
+                                    # Four scope axes, each with its own mode param:
+                                    # projectScope, userScope, agentScope, sessionScope. Same
+                                    # rule as everywhere: an explicit mode overrides the one
+                                    # inferred from whether that axis's id was supplied.
+                                    # Applies to /intentions/due as well.
 POST   /intentions/:id/complete     terminal: sets validTo
 POST   /intentions/:id/cancel       terminal: sets validTo
 POST   /intentions/:id/fired        record a firing without closing it

@@ -13,6 +13,7 @@ import { AuditEventKindSchema, MemoryKindSchema } from '../../models/types.ts';
 import { toWireAuditEvent } from '../../models/wire.ts';
 import { AuditService } from '../../services/AuditService.ts';
 import { notFound } from '../errors.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { WireAuditEventSchema } from '../wire-schemas.ts';
 import {
@@ -333,19 +334,17 @@ export function registerDashboardRoutes(app: App, container: Container): void {
     url: '/dashboard/api/research/:id/markdown',
     schema: {
       params: z.object({ id: z.string().uuid() }),
-      querystring: z.object({ projectId: z.string().optional() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(WireNarrativeMarkdownSchema) },
     },
     handler: async (req) => {
-      const research = await container.research.get(req.params.id);
-      // Same scope semantics as GET /research/:id — a cross-project id is
+      // Same scope semantics as GET /research/:id — a cross-scope id is
       // notFound, never forbidden, because existence is itself scoped.
-      if (
-        !research ||
-        (req.query.projectId && research.projectId && research.projectId !== req.query.projectId)
-      ) {
-        throw notFound(`research ${req.params.id}`);
-      }
+      const research = assertInScope(
+        await container.research.get(req.params.id),
+        req.query,
+        `research ${req.params.id}`,
+      );
       return { ok: true as const, data: renderVaultMarkdown('research', research) };
     },
   });
@@ -355,11 +354,14 @@ export function registerDashboardRoutes(app: App, container: Container): void {
     url: '/dashboard/api/knowledge/documents/:id/markdown',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(WireNarrativeMarkdownSchema) },
     },
     handler: async (req) => {
       const result = await container.knowledge.getWithAttachments(req.params.id);
       if (!result) throw notFound(`knowledge document ${req.params.id}`);
+      // The document already carries its scope, so the guard needs no second read.
+      assertInScope(result.document, req.query, `knowledge document ${req.params.id}`);
       return {
         ok: true as const,
         data: renderVaultMarkdown('knowledge_document', result.document),

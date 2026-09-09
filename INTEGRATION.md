@@ -85,7 +85,7 @@ Wrong-tier writes are silent product failures (permanent junk in facts, or impor
 
 ### Scope axes
 
-Every memory item except `WorkingStateEntry` carries up to four optional scope fields: `agentId`, `sessionId`, `projectId`, `userId`. Every recall query carries a corresponding mode per axis: `boost`, `filter`, or `none`.
+Every memory item except `WorkingStateEntry` carries up to four optional scope fields: `agentId`, `sessionId`, `projectId`, `userId`. Every recall query carries a corresponding mode per axis: `boost`, `filter`, `strict`, `shared`, or `none`. The same mode params are accepted on the list routes (`/knowledge/documents`, `/procedures`, `/research`, `/intentions`).
 
 - `boost` — items in the scope rank higher; items outside still match.
 - `filter` — hard filter; items outside the scope are excluded.
@@ -425,8 +425,14 @@ export class ElephantClient {
     scope?: { projectId?: string; userId?: string };
     actor?: string;
   }): Promise<WireKnowledgeDocument> { return this.post('/knowledge/documents', input); }
-  getKnowledge(id: string): Promise<WireKnowledgeDocument> { return this.get(`/knowledge/documents/${id}`); }
-  listKnowledge(opts?: { projectId?: string; userId?: string; limit?: number }): Promise<WireKnowledgeDocument[]> {
+  // Scope the read: a cross-scope id 404s rather than 403s. Declaring no scope
+  // is unrestricted, so don't default it — that would narrow every caller.
+  getKnowledge(id: string, scope: WireScope = {}): Promise<WireKnowledgeDocument> {
+    return this.get(`/knowledge/documents/${id}${this.scopeQuery(scope)}`);
+  }
+  // projectScope/userScope override the mode inferred from the ids. Only
+  // `shared` lists the null-scoped documents alone.
+  listKnowledge(opts?: { projectId?: string; userId?: string; projectScope?: ScopeMode; userScope?: ScopeMode; limit?: number }): Promise<WireKnowledgeDocument[]> {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(opts ?? {})) if (v !== undefined) params.set(k, String(v));
     return this.get(`/knowledge/documents?${params.toString()}`);
@@ -445,7 +451,9 @@ export class ElephantClient {
     expiresAt?: Date | null;
     actor?: string;
   }): Promise<WireProcedure> { return this.post('/procedures', input); }
-  getProcedure(id: string): Promise<WireProcedure> { return this.get(`/procedures/${id}`); }
+  getProcedure(id: string, scope: WireScope = {}): Promise<WireProcedure> {
+    return this.get(`/procedures/${id}${this.scopeQuery(scope)}`);
+  }
   getProcedureByName(name: string, scope?: { projectId?: string; userId?: string }): Promise<WireProcedure[]> {
     const params = new URLSearchParams({ name });
     if (scope?.projectId) params.set('projectId', scope.projectId);
@@ -462,7 +470,7 @@ export class ElephantClient {
     reason: string;
     actor: string;
   }>): Promise<WireProcedure> { return this.request('PUT', `/procedures/${id}`, patch); }
-  listProcedures(opts?: { projectId?: string; userId?: string; limit?: number }): Promise<WireProcedure[]> {
+  listProcedures(opts?: { projectId?: string; userId?: string; projectScope?: ScopeMode; userScope?: ScopeMode; limit?: number }): Promise<WireProcedure[]> {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(opts ?? {})) if (v !== undefined) params.set(k, String(v));
     return this.get(`/procedures?${params.toString()}`);
@@ -483,10 +491,9 @@ export class ElephantClient {
     expiresAt?: Date | null;
     actor?: string;
   }): Promise<WireResearch> { return this.post('/research', input); }
-  // `projectId` scopes the read — a cross-project id 404s rather than 403s.
-  getResearch(id: string, projectId?: string): Promise<WireResearch> {
-    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-    return this.get(`/research/${id}${q}`);
+  // `projectId`/`userId` scope the read — a cross-scope id 404s rather than 403s.
+  getResearch(id: string, scope: WireScope = {}): Promise<WireResearch> {
+    return this.get(`/research/${id}${this.scopeQuery(scope)}`);
   }
   updateResearch(id: string, patch: Partial<{
     title: string;
@@ -498,8 +505,14 @@ export class ElephantClient {
     reason: string;
     actor: string;
   }>): Promise<WireResearch> { return this.request('PUT', `/research/${id}`, patch); }
-  listResearch(opts: { projectId: string; userId?: string; limit?: number }): Promise<WireResearch[]> {
-    const params = new URLSearchParams({ projectId: opts.projectId });
+  // projectId is required unless an explicit projectScope is sent. Note
+  // projectScope: 'shared' is empty by construction (research always carries a
+  // projectId); userScope: 'shared' is the meaningful shared listing here.
+  listResearch(opts: { projectId?: string; userId?: string; projectScope?: ScopeMode; userScope?: ScopeMode; limit?: number }): Promise<WireResearch[]> {
+    const params = new URLSearchParams();
+    if (opts.projectId) params.set('projectId', opts.projectId);
+    if (opts.projectScope) params.set('projectScope', opts.projectScope);
+    if (opts.userScope) params.set('userScope', opts.userScope);
     if (opts.userId) params.set('userId', opts.userId);
     if (opts.limit) params.set('limit', String(opts.limit));
     return this.get(`/research?${params.toString()}`);

@@ -301,7 +301,12 @@ export function registerTools(
       inputSchema: { id: z.string().uuid() },
       annotations: { readOnlyHint: true },
     },
-    async ({ id }) => textResult(formatDocument(await client.getKnowledge(id))),
+    async ({ id }) =>
+      textResult(
+        formatDocument(
+          await client.getKnowledge(id, { projectId: scope.projectId, userId: scope.userId }),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -524,7 +529,13 @@ export function registerTools(
       annotations: { readOnlyHint: true },
     },
     async ({ id, name }) => {
-      if (id) return textResult(formatProcedure(await client.getProcedure(id)));
+      if (id) {
+        const proc = await client.getProcedure(id, {
+          projectId: scope.projectId,
+          userId: scope.userId,
+        });
+        return textResult(formatProcedure(proc));
+      }
       if (!name) return textResult('Provide id or name.');
       const matches = await client.getProcedureByName(name, {
         projectId: scope.projectId,
