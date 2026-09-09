@@ -10,7 +10,7 @@
 //   "The unscoped procedure may or may not pass null-handling"
 
 import { describe, expect, test } from 'vitest';
-import { assertInScope, type ScopeGuardQuery } from '../../src/http/scope-guard.ts';
+import { assertInScope, ScopeGuardQuery } from '../../src/http/scope-guard.ts';
 import type { ScopeMode } from '../../src/models/types.ts';
 import { scopeFilterClause } from '../../src/repositories/scope.ts';
 import { axisAllows } from '../../src/services/retrieval/stages/PostFilterStage.ts';
@@ -208,5 +208,15 @@ describe("assertInScope agrees with axisAllows in 'filter' mode", () => {
   test('a missing item is refused, and indistinguishably from a cross-scope one', () => {
     expect(() => assertInScope(null, { projectId: 'p1' }, 'item')).toThrow();
     expect(() => assertInScope({ projectId: 'p2' }, { projectId: 'p1' }, 'item')).toThrow();
+  });
+
+  // The id-addressed reads feed this guard now too, not just the write paths.
+  // ScopeGuardQuery carries no mode field, so none of them can smuggle one in:
+  // an extra key is stripped rather than honoured, and the guard stays
+  // hard-wired to 'filter' semantics no matter what a caller appends.
+  test('ScopeGuardQuery admits no mode, so no route can hand the guard one', () => {
+    expect(ScopeGuardQuery.parse({ projectId: 'p1', projectScope: 'shared' })).toEqual({
+      projectId: 'p1',
+    });
   });
 });

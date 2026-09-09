@@ -76,11 +76,14 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
     url: '/knowledge/documents/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(WireKnowledgeDocumentSchema) },
     },
     handler: async (req) => {
       const result = await container.knowledge.getWithAttachments(req.params.id);
       if (!result) throw notFound(`knowledge document ${req.params.id}`);
+      // The document already carries its scope, so the guard needs no second read.
+      assertInScope(result.document, req.query, `knowledge document ${req.params.id}`);
       return {
         ok: true as const,
         data: toWireKnowledgeDocument(result.document, result.attachments, result.attachmentTexts),

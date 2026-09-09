@@ -240,15 +240,23 @@ export class ElephantClient {
   ): Promise<WireIntention> {
     return this.request('POST', '/intentions', input, opts);
   }
-  getIntention(id: string, opts?: RequestOpts): Promise<WireIntention> {
-    return this.request('GET', `/intentions/${seg(id)}`, undefined, opts);
+  /** Scoped like `getFact`: a cross-scope id 404s, and declaring none is unrestricted. */
+  getIntention(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<WireIntention> {
+    return this.request('GET', scoped(`/intentions/${seg(id)}`, query), undefined, opts);
   }
+  /** `projectScope: 'shared'` lists ONLY the null-scoped items — what a shared
+   *  space contains. Omitting the ids instead infers `none`, which ignores the
+   *  axis and spans every scope. */
   listIntentions(
     query?: {
       projectId?: string;
       userId?: string;
       agentId?: string;
       sessionId?: string;
+      projectScope?: ScopeMode;
+      userScope?: ScopeMode;
+      agentScope?: ScopeMode;
+      sessionScope?: ScopeMode;
       status?: 'pending' | 'completed' | 'cancelled' | 'expired';
       limit?: number;
     },
@@ -262,6 +270,10 @@ export class ElephantClient {
       userId?: string;
       agentId?: string;
       sessionId?: string;
+      projectScope?: ScopeMode;
+      userScope?: ScopeMode;
+      agentScope?: ScopeMode;
+      sessionScope?: ScopeMode;
       before?: string;
       status?: 'pending' | 'completed' | 'cancelled' | 'expired';
       limit?: number;
@@ -343,12 +355,23 @@ export class ElephantClient {
       reason?: string;
       actor?: string;
     },
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireKnowledgeDocument> {
-    return this.request('PUT', `/knowledge/documents/${seg(id)}`, input, opts);
+    return this.request('PUT', scoped(`/knowledge/documents/${seg(id)}`, query), input, opts);
   }
-  getKnowledge(id: string, opts?: RequestOpts): Promise<WireKnowledgeDocument> {
-    return this.request('GET', `/knowledge/documents/${seg(id)}`, undefined, opts);
+  /**
+   * `projectId`/`userId` scope the read: a cross-scope id 404s rather than 403s.
+   * Unlike the write methods, scope is NOT filled in from `defaultProjectId` —
+   * declaring none is what the service reads as "unrestricted", so defaulting it
+   * would silently narrow every existing caller. Pass it to get the guard.
+   */
+  getKnowledge(
+    id: string,
+    query: WireScope = {},
+    opts?: RequestOpts,
+  ): Promise<WireKnowledgeDocument> {
+    return this.request('GET', scoped(`/knowledge/documents/${seg(id)}`, query), undefined, opts);
   }
   /** `projectScope: 'shared'` lists ONLY the null-scoped documents — what a
    *  shared space contains. Omitting the ids instead infers `none`, which
@@ -368,11 +391,12 @@ export class ElephantClient {
   deleteKnowledge(
     id: string,
     purge = false,
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<{ deleted: true; chunksDeleted: number }> {
     return this.request(
       'DELETE',
-      `/knowledge/documents/${seg(id)}?${qs({ purge })}`,
+      `/knowledge/documents/${seg(id)}?${qs({ ...query, purge })}`,
       undefined,
       opts,
     );
@@ -436,8 +460,9 @@ export class ElephantClient {
   ): Promise<WireProcedure> {
     return this.request('POST', '/procedures', input, opts);
   }
-  getProcedure(id: string, opts?: RequestOpts): Promise<WireProcedure> {
-    return this.request('GET', `/procedures/${seg(id)}`, undefined, opts);
+  /** Scoped like `getKnowledge`: a cross-scope id 404s, and declaring none is unrestricted. */
+  getProcedure(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<WireProcedure> {
+    return this.request('GET', scoped(`/procedures/${seg(id)}`, query), undefined, opts);
   }
   getProcedureByName(
     name: string,
@@ -458,18 +483,32 @@ export class ElephantClient {
       reason: string;
       actor: string;
     }>,
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireProcedure> {
-    return this.request('PUT', `/procedures/${seg(id)}`, patch, opts);
+    return this.request('PUT', scoped(`/procedures/${seg(id)}`, query), patch, opts);
   }
+  /** `projectScope: 'shared'` lists ONLY the null-scoped items — what a shared
+   *  space contains. Omitting the ids instead infers `none`, which ignores the
+   *  axis and spans every scope. */
   listProcedures(
-    query?: { projectId?: string; userId?: string; limit?: number },
+    query?: {
+      projectId?: string;
+      userId?: string;
+      projectScope?: ScopeMode;
+      userScope?: ScopeMode;
+      limit?: number;
+    },
     opts?: RequestOpts,
   ): Promise<WireProcedure[]> {
     return this.request('GET', `/procedures?${qs(query ?? {})}`, undefined, opts);
   }
-  deleteProcedure(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/procedures/${seg(id)}`, undefined, opts);
+  deleteProcedure(
+    id: string,
+    query: WireScope = {},
+    opts?: RequestOpts,
+  ): Promise<{ deleted: true }> {
+    return this.request('DELETE', scoped(`/procedures/${seg(id)}`, query), undefined, opts);
   }
 
   // ─ Research ──
@@ -491,12 +530,8 @@ export class ElephantClient {
   ): Promise<WireResearch> {
     return this.request('POST', '/research', input, opts);
   }
-  /** `projectId` scopes the read: a cross-project id 404s rather than 403s. */
-  getResearch(
-    id: string,
-    query: { projectId?: string } = {},
-    opts?: RequestOpts,
-  ): Promise<WireResearch> {
+  /** `projectId`/`userId` scope the read: a cross-scope id 404s rather than 403s. */
+  getResearch(id: string, query: WireScope = {}, opts?: RequestOpts): Promise<WireResearch> {
     return this.request('GET', `/research/${seg(id)}?${qs(query)}`, undefined, opts);
   }
   updateResearch(
@@ -511,19 +546,33 @@ export class ElephantClient {
       reason?: string;
       actor?: string;
     },
-    query: { projectId?: string } = {},
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireResearch> {
     return this.request('PUT', `/research/${seg(id)}?${qs(query)}`, patch, opts);
   }
+  /** `projectId` is required by the service UNLESS an explicit `projectScope` is
+   *  sent. Note `projectScope: 'shared'` is empty by construction here: research
+   *  always carries a projectId, so no null-scoped row exists. The `userId` axis
+   *  IS nullable, so `userScope: 'shared'` is the meaningful shared listing. */
   listResearch(
-    query: { projectId: string; userId?: string; limit?: number },
+    query: {
+      projectId?: string;
+      userId?: string;
+      projectScope?: ScopeMode;
+      userScope?: ScopeMode;
+      limit?: number;
+    },
     opts?: RequestOpts,
   ): Promise<WireResearch[]> {
     return this.request('GET', `/research?${qs(query)}`, undefined, opts);
   }
-  deleteResearch(id: string, opts?: RequestOpts): Promise<{ deleted: true }> {
-    return this.request('DELETE', `/research/${seg(id)}`, undefined, opts);
+  deleteResearch(
+    id: string,
+    query: WireScope = {},
+    opts?: RequestOpts,
+  ): Promise<{ deleted: true }> {
+    return this.request('DELETE', scoped(`/research/${seg(id)}`, query), undefined, opts);
   }
 
   // ─ Working state ──

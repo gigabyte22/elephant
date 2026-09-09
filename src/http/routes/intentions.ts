@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
-import type { IntentionStatus } from '../../models/types.ts';
+import { type IntentionStatus, ScopeModeSchema } from '../../models/types.ts';
 import { toWireIntention } from '../../models/wire.ts';
 import type { RetrievalScope } from '../../repositories/scope.ts';
-import { notFound } from '../errors.ts';
+import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, WireIntentionSchema } from '../wire-schemas.ts';
 
@@ -35,6 +35,14 @@ const ScopeQuery = z.object({
   userId: z.string().optional(),
   agentId: z.string().optional(),
   sessionId: z.string().optional(),
+  // Explicit modes on all four axes, for the question an id alone cannot ask:
+  // `shared` lists the null-scoped intentions only. Absent them the mode is
+  // inferred from whether the id was supplied, which is the historical
+  // behaviour of both list routes.
+  projectScope: ScopeModeSchema.optional(),
+  userScope: ScopeModeSchema.optional(),
+  agentScope: ScopeModeSchema.optional(),
+  sessionScope: ScopeModeSchema.optional(),
 });
 
 const ListQuery = ScopeQuery.extend({
@@ -53,26 +61,22 @@ const ActionBody = z.object({
 
 type ScopeQueryShape = z.infer<typeof ScopeQuery>;
 
-// Build a hard-filter RetrievalScope: every supplied axis filters exactly.
+// Build a RetrievalScope from the query. An explicit mode wins; otherwise a
+// supplied id means 'filter' and an absent one 'none', which is what these
+// routes did before modes existed (scopeFilterClause treats an absent mode and
+// 'none' alike). Note 'shared' is the one mode carrying no id — it selects the
+// null-scoped rows on that axis.
 function scopeFromQuery(q: ScopeQueryShape): RetrievalScope {
-  const scope: RetrievalScope = {};
-  if (q.projectId) {
-    scope.projectId = q.projectId;
-    scope.projectScope = 'filter';
-  }
-  if (q.userId) {
-    scope.userId = q.userId;
-    scope.userScope = 'filter';
-  }
-  if (q.agentId) {
-    scope.agentId = q.agentId;
-    scope.agentScope = 'filter';
-  }
-  if (q.sessionId) {
-    scope.sessionId = q.sessionId;
-    scope.sessionScope = 'filter';
-  }
-  return scope;
+  return {
+    projectId: q.projectId,
+    userId: q.userId,
+    agentId: q.agentId,
+    sessionId: q.sessionId,
+    projectScope: q.projectScope ?? (q.projectId ? 'filter' : 'none'),
+    userScope: q.userScope ?? (q.userId ? 'filter' : 'none'),
+    agentScope: q.agentScope ?? (q.agentId ? 'filter' : 'none'),
+    sessionScope: q.sessionScope ?? (q.sessionId ? 'filter' : 'none'),
+  };
 }
 
 export function registerIntentionsRoutes(app: App, container: Container): void {
@@ -126,11 +130,19 @@ export function registerIntentionsRoutes(app: App, container: Container): void {
     url: '/intentions/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      // Project + user only: ScopeGuardQuery carries no agent/session axis, so
+      // this route guards two axes while the list routes above take four. That
+      // is deliberate — widening the guard would change assertInScope's
+      // semantics, which every id-addressed route shares.
+      querystring: ScopeGuardQuery,
       response: { 200: okEnvelope(WireIntentionSchema) },
     },
     handler: async (req) => {
-      const intention = await container.intentions.get(req.params.id);
-      if (!intention) throw notFound(`intention ${req.params.id}`);
+      const intention = assertInScope(
+        await container.intentions.get(req.params.id),
+        req.query,
+        `intention ${req.params.id}`,
+      );
       return { ok: true as const, data: toWireIntention(intention) };
     },
   });

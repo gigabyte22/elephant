@@ -554,7 +554,7 @@ export default {
         parameters: Type.Object({ id: idParam }),
         async execute(_toolCallId: string, params: { id: string }) {
           if (!UUID_RE.test(params.id)) return text('id must be a UUID.');
-          return text(formatDocDetail(await client.getKnowledge(params.id)));
+          return text(formatDocDetail(await client.getKnowledge(params.id, docScope)));
         },
       },
       { name: 'memory_knowledge_get' },
@@ -749,7 +749,7 @@ export default {
         async execute(_toolCallId: string, params: { id?: string; name?: string }) {
           if (params.id) {
             if (!UUID_RE.test(params.id)) return text('id must be a UUID.');
-            const proc = await client.getProcedure(params.id);
+            const proc = await client.getProcedure(params.id, docScope);
             return text([formatProcedureLine(proc), proc.content].join('\n\n'));
           }
           if (!params.name) return text('Provide id or name.');
@@ -1206,7 +1206,7 @@ export default {
           .description('Show one knowledge document')
           .action(async (id: string) => {
             assertUuid(id);
-            console.log(formatDocDetail(await client.getKnowledge(id)));
+            console.log(formatDocDetail(await client.getKnowledge(id, docScope)));
           });
 
         const research = cmd.command('research').description('Research documents');

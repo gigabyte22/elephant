@@ -50,12 +50,20 @@ beforeEach(async () => {
   });
 });
 
-async function createResearch(): Promise<string> {
+// `userId` seeds the second axis: the leg that the old projectId-only
+// querystring on GET/PUT /research/:id silently dropped.
+async function createResearch(userId?: string): Promise<string> {
   const res = await app.inject({
     method: 'POST',
     url: '/research',
     headers: json,
-    payload: { title: 'Owned', source: 'manual', content: 'body', projectId: OWNER },
+    payload: {
+      title: 'Owned',
+      source: 'manual',
+      content: 'body',
+      projectId: OWNER,
+      ...(userId ? { userId } : {}),
+    },
   });
   expect(res.statusCode).toBe(200);
   return res.json().data.id as string;
@@ -93,7 +101,30 @@ async function createDocument(projectId?: string): Promise<string> {
   return res.json().data.id as string;
 }
 
+// An intention needs one of dueAt/triggerHint/schedule to be accepted at all;
+// triggerHint is the cheapest, and the scope guard ignores it.
+async function createIntention(projectId?: string): Promise<string> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/intentions',
+    headers: json,
+    payload: {
+      content: 'ship the release notes',
+      triggerHint: 'next deploy',
+      ...(projectId ? { scope: { projectId } } : {}),
+    },
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json().data.id as string;
+}
+
 type Response = Awaited<ReturnType<typeof app.inject>>;
+
+// The id-addressed reads guarded alongside the mutations. `query` carries the
+// caller's declared scope, including the empty string for a caller declaring none.
+function get(url: string, query = ''): Promise<Response> {
+  return app.inject({ method: 'GET', url: `${url}${query}`, headers: auth });
+}
 
 async function createFact(scope?: { projectId?: string; userId?: string }): Promise<string> {
   const res = await app.inject({
@@ -106,8 +137,7 @@ async function createFact(scope?: { projectId?: string; userId?: string }): Prom
   return res.json().data.id as string;
 }
 
-// The three guarded fact routes. `query` carries the caller's declared scope,
-// including the empty string for a caller that declares none.
+// The three guarded fact routes; `query` works as on `get` above.
 function getFact(id: string, query = ''): Promise<Response> {
   return app.inject({ method: 'GET', url: `/facts/${id}${query}`, headers: auth });
 }
@@ -150,6 +180,15 @@ describe('research', () => {
     expect(still.json().data.expiresAt).toBeNull();
   });
 
+  // GET/PUT took an inline projectId-only querystring, so a declared userId was
+  // silently dropped and never enforced.
+  test('GET with a mismatched userId is refused', async () => {
+    const id = await createResearch('usr-owner');
+    const url = `/research/${id}?projectId=${OWNER}`;
+    expect((await get(url, '&userId=usr-intruder')).statusCode).toBe(404);
+    expect((await get(url, '&userId=usr-owner')).statusCode).toBe(200);
+  });
+
   test('DELETE from the owning project still works', async () => {
     const id = await createResearch();
     const res = await app.inject({
@@ -184,6 +223,14 @@ describe('procedures', () => {
       headers: auth,
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  // GET was the outlier: PUT and DELETE guarded, the read did not, and the
+  // route declared no querystring so a caller could not even offer a scope.
+  test('GET from another project is refused, and from the owning one is not', async () => {
+    const id = await createProcedure(OWNER);
+    expect((await get(`/procedures/${id}`, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+    expect((await get(`/procedures/${id}`, `?projectId=${OWNER}`)).statusCode).toBe(200);
   });
 
   test('the owning project can still mutate', async () => {
@@ -241,6 +288,22 @@ describe('knowledge documents', () => {
     expect(got.json().data.title).toBe('Runbook');
   });
 
+  test('GET from another project is refused, and from the owning one is not', async () => {
+    const id = await createDocument(OWNER);
+    const url = `/knowledge/documents/${id}`;
+    expect((await get(url, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+    expect((await get(url, `?projectId=${OWNER}`)).statusCode).toBe(200);
+  });
+
+  // Same guard on the dashboard surface, which delegates to the same unguarded
+  // service call and so had the same hole.
+  test('the dashboard markdown view is guarded too', async () => {
+    const id = await createDocument(OWNER);
+    const url = `/dashboard/api/knowledge/documents/${id}/markdown`;
+    expect((await get(url, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+    expect((await get(url, `?projectId=${OWNER}`)).statusCode).toBe(200);
+  });
+
   test('attachment upload from another project is refused', async () => {
     const id = await createDocument(OWNER);
     const res = await app.inject({
@@ -254,6 +317,14 @@ describe('knowledge documents', () => {
       },
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('intentions', () => {
+  test('GET from another project is refused, and from the owning one is not', async () => {
+    const id = await createIntention(OWNER);
+    expect((await get(`/intentions/${id}`, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+    expect((await get(`/intentions/${id}`, `?projectId=${OWNER}`)).statusCode).toBe(200);
   });
 });
 
@@ -368,6 +439,23 @@ describe('semantics', () => {
       headers: auth,
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  // One test, every read the guard now covers: the statement is about the guard,
+  // not the route. Closing the cross-scope hole must not narrow the
+  // single-tenant default on any of them.
+  test('a caller declaring no scope can still read every scope-guarded id route', async () => {
+    const docId = await createDocument(OWNER);
+    const procId = await createProcedure(OWNER);
+    const intentionId = await createIntention(OWNER);
+    const researchId = await createResearch();
+    const markdown = `/dashboard/api/knowledge/documents/${docId}/markdown`;
+
+    expect((await get(`/knowledge/documents/${docId}`)).statusCode).toBe(200);
+    expect((await get(`/procedures/${procId}`)).statusCode).toBe(200);
+    expect((await get(`/intentions/${intentionId}`)).statusCode).toBe(200);
+    expect((await get(`/research/${researchId}`)).statusCode).toBe(200);
+    expect((await get(markdown)).statusCode).toBe(200);
   });
 
   // Both rules again on facts, because that is where dobby's Commons tier lives:
