@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { read, write } from '../../config/neo4j.ts';
 import type { Container } from '../../index.ts';
+import { ScopeModeSchema } from '../../models/types.ts';
 import { toWireKnowledgeAttachment, toWireKnowledgeDocument } from '../../models/wire.ts';
 import { KnowledgeChunkRepository } from '../../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../../repositories/KnowledgeDocumentRepository.ts';
@@ -48,6 +49,11 @@ const UpdateBody = z
 const ListQuery = z.object({
   projectId: z.string().optional(),
   userId: z.string().optional(),
+  // Explicit modes, for the question an id alone cannot ask: `shared` lists
+  // the null-scoped documents only. The defaults below are inferred from
+  // whether an id was supplied, which is the historical behaviour.
+  projectScope: ScopeModeSchema.optional(),
+  userScope: ScopeModeSchema.optional(),
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
 
@@ -115,8 +121,8 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
           scope: {
             projectId: req.query.projectId,
             userId: req.query.userId,
-            projectScope: req.query.projectId ? 'filter' : 'none',
-            userScope: req.query.userId ? 'filter' : 'none',
+            projectScope: req.query.projectScope ?? (req.query.projectId ? 'filter' : 'none'),
+            userScope: req.query.userScope ?? (req.query.userId ? 'filter' : 'none'),
           },
           limit: req.query.limit,
         }),

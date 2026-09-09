@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   RecallQuery,
   RecallResult,
+  ScopeMode,
   WireArchivedRevision,
   WireAuditEvent,
   WireFact,
@@ -349,8 +350,17 @@ export class ElephantClient {
   getKnowledge(id: string, opts?: RequestOpts): Promise<WireKnowledgeDocument> {
     return this.request('GET', `/knowledge/documents/${seg(id)}`, undefined, opts);
   }
+  /** `projectScope: 'shared'` lists ONLY the null-scoped documents — what a
+   *  shared space contains. Omitting the ids instead infers `none`, which
+   *  ignores the axis and spans every scope. */
   listKnowledge(
-    query?: { projectId?: string; userId?: string; limit?: number },
+    query?: {
+      projectId?: string;
+      userId?: string;
+      projectScope?: ScopeMode;
+      userScope?: ScopeMode;
+      limit?: number;
+    },
     opts?: RequestOpts,
   ): Promise<WireKnowledgeDocument[]> {
     return this.request('GET', `/knowledge/documents?${qs(query ?? {})}`, undefined, opts);

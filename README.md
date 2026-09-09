@@ -27,8 +27,8 @@ vector database, SQL store, or queue to operate.
   entity relations, and prunes stale memories along an Ebbinghaus-style decay
   curve.
 - **Scoped memory** — four scope axes (`agentId`, `sessionId`, `projectId`,
-  `userId`), each configurable to *boost*, *filter*, *strict*, or ignore at
-  recall time.
+  `userId`), each configurable to *boost*, *filter*, *strict*, *shared*, or
+  ignore at recall time.
 - **Prospective memory** — `:Intention` nodes record forward-looking
   commitments ("remind me before the registration lapses"). Elephant is
   pull-only and never fires them; an external scheduler owns the clock.
@@ -160,8 +160,8 @@ cloud alongside the OSS project. It scopes memory by user, session, and agent.
 Elephant instead keeps *everything* — vectors, full-text, graph, temporal — in a
 single Neo4j, so there is no second datastore to run, sync, or reconcile. Its
 scope model adds a fourth axis (`projectId`) and, more importantly, makes each
-axis independently configurable as *boost*, *filter*, *strict*, or ignored at
-query time.
+axis independently configurable as *boost*, *filter*, *strict*, *shared*, or
+ignored at query time.
 
 **[Zep](https://www.getzep.com) / [Graphiti](https://github.com/getzep/graphiti)**
 is the closest architectural relative: a temporal knowledge graph with

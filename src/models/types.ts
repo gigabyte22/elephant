@@ -632,7 +632,14 @@ export function resolveFactUserId(
 //              (null) items — they're treated as globally shared.
 // - 'strict' : like 'filter' but ALSO exclude unscoped (null) items, so a
 //              sandboxed (isolated) reader sees only its own scope.
+// - 'shared' : ONLY unscoped (null) items — the shared globals themselves,
+//              with every scoped item excluded. The one mode carrying no axis
+//              value, because a shared-space listing has no id to name.
+//              Omitting the axis is NOT the same request: that selects 'none',
+//              which spans every scope, so a deployment with per-account
+//              scopes renders one account's private items into another's
+//              shared space.
 // - 'none'   : ignore this axis entirely.
 
-export const ScopeModeSchema = z.enum(['boost', 'filter', 'none', 'strict']);
+export const ScopeModeSchema = z.enum(['boost', 'filter', 'none', 'shared', 'strict']);
 export type ScopeMode = z.infer<typeof ScopeModeSchema>;

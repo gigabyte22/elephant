@@ -151,9 +151,10 @@ function scopeMatches(
 
 // Decide whether a single scope axis admits an item. One rule for all four.
 // 'filter' excludes only cross-scope items (nulls are shared globals);
-// 'strict' additionally excludes nulls, so a sandboxed reader sees only
-// items carrying its own scope value. Any other mode (or no query value)
-// admits everything on this axis.
+// 'strict' additionally excludes nulls, so a sandboxed reader sees only items
+// carrying its own scope value; 'shared' inverts that and keeps only the
+// nulls — the one decision taken without a query value. Any other mode (or no
+// query value) admits everything on this axis.
 //
 // Exported so the unit suite can assert this and scopeFilterClause (the Cypher
 // expression of the same rule) agree over one table of inputs — they diverged
@@ -164,12 +165,18 @@ export function axisAllows(
   queryValue: string | undefined,
   mode: ScopeMode,
 ): boolean {
+  if (mode === 'shared') return itemValue == null;
   if ((mode !== 'filter' && mode !== 'strict') || !queryValue) return true;
   if (mode === 'strict' && itemValue == null) return false;
   return itemValue == null || itemValue === queryValue;
 }
 
+// Resolve the mode actually applied on an axis. A mode needs a value to compare
+// against and collapses to 'none' without one — except 'shared', which selects
+// the null-scoped rows themselves and so stands alone. Downgrading that one
+// would turn "only the shared items" back into "everything".
 function effectiveScope(explicit: ScopeMode | undefined, value: string | undefined): ScopeMode {
+  if (explicit === 'shared') return 'shared';
   if (!value) return 'none';
   return explicit ?? 'boost';
 }

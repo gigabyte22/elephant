@@ -1,6 +1,6 @@
 // One rule, three expressions: scopeFilterClause (Cypher pushdown), axisAllows
 // (JS post-filter) and assertInScope (the id-addressed route guard) must agree
-// on what 'filter' and 'strict' mean.
+// on what each scope mode means.
 //
 // They did not. SPEC.md says a null scope is a shared global that 'filter'
 // still admits; axisAllows implemented that, scopeFilterClause emitted plain
@@ -22,18 +22,20 @@ import type { RecallQuery } from '../../src/services/retrieval/types.ts';
 
 // Evaluate the emitted Cypher against a row. A tiny interpreter rather than a
 // string match, so the assertion is about MEANING and survives harmless
-// formatting changes. Both shapes the builder can produce reduce to:
-//   no clause          → admits everything
-//   null item value    → admitted only if the clause has an IS NULL branch
-//   non-null           → admitted only if it equals the bound query value
+// formatting changes. Every clause the builder emits is one or both of a null
+// branch (`IS NULL`) and an equality branch (`= $param`), so a row is admitted
+// by whichever branch applies to it — and a clause carrying only the null
+// branch ('shared') admits no scoped row at all.
 function evaluateClause(clause: string, itemValue: string | null, queryValue: string): boolean {
   if (clause === '') return true;
-  if (itemValue === null) return clause.includes('IS NULL');
-  return itemValue === queryValue;
+  const nullBranch = clause.includes('IS NULL');
+  const equalityBranch = clause.includes('= $');
+  if (itemValue === null) return nullBranch;
+  return equalityBranch && itemValue === queryValue;
 }
 
 describe('scopeFilterClause and axisAllows agree', () => {
-  const modes: ScopeMode[] = ['boost', 'filter', 'strict', 'none'];
+  const modes: ScopeMode[] = ['boost', 'filter', 'strict', 'shared', 'none'];
   const itemValues: Array<string | null> = [null, 'p1', 'p2'];
 
   for (const mode of modes) {
@@ -70,8 +72,24 @@ describe('emitted clause shape per mode', () => {
     expect(scopeFilterClause('node', { projectId: 'p1', projectScope: 'none' }).clause).toBe('');
   });
 
-  test('an axis with no value pushes nothing down regardless of mode', () => {
+  test("'shared' selects the null-scoped rows themselves", () => {
+    const { clause, params } = scopeFilterClause('node', {
+      projectId: 'p1',
+      projectScope: 'shared',
+    });
+    // The supplied value is ignored: a shared space has no id to name.
+    expect(clause).toBe('node.projectId IS NULL');
+    expect(params).toEqual({});
+  });
+
+  test("an axis with no value pushes nothing down, except under 'shared'", () => {
     expect(scopeFilterClause('node', { projectScope: 'strict' }).clause).toBe('');
+    expect(scopeFilterClause('node', { projectScope: 'filter' }).clause).toBe('');
+    // 'shared' is the exception, and needs to be: a shared-space listing has
+    // no id to supply, and omitting the axis would mean "no filter at all".
+    expect(scopeFilterClause('node', { projectScope: 'shared' }).clause).toBe(
+      'node.projectId IS NULL',
+    );
   });
 
   test('multiple filtering axes are ANDed', () => {
@@ -82,6 +100,20 @@ describe('emitted clause shape per mode', () => {
       userScope: 'strict',
     });
     expect(clause).toBe('node.projectId = $scope_projectId AND node.userId = $scope_userId');
+  });
+
+  // 'shared' emits a bare predicate while 'filter' emits a disjunction, so this
+  // pins that the two compose without the OR escaping its parentheses.
+  test("'shared' ANDs with another axis intact", () => {
+    const { clause, params } = scopeFilterClause('node', {
+      projectScope: 'shared',
+      userId: 'u1',
+      userScope: 'filter',
+    });
+    expect(clause).toBe(
+      'node.projectId IS NULL AND (node.userId = $scope_userId OR node.userId IS NULL)',
+    );
+    expect(params).toEqual({ scope_userId: 'u1' });
   });
 });
 
@@ -125,9 +157,10 @@ describe('buildRetrievalScope projects only the axes a node type carries', () =>
 });
 
 // The third expression. assertInScope guards id-addressed routes rather than
-// retrieval, so it takes no mode: it is hard-wired to 'filter' semantics, which
-// makes it exactly comparable to axisAllows(..., 'filter'). The first two drifted
-// once; this pins the third to them before it can.
+// retrieval, so it takes no mode at all: it is hard-wired to 'filter'
+// semantics, which makes it exactly comparable to axisAllows(..., 'filter') and
+// means no new mode can reach it. The first two drifted once; this pins the
+// third to them before it can.
 describe("assertInScope agrees with axisAllows in 'filter' mode", () => {
   const axes = ['projectId', 'userId'] as const;
   type Axis = (typeof axes)[number];

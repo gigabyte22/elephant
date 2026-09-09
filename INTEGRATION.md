@@ -224,7 +224,7 @@ export interface WireAuditEvent {
 
 // ── Recall request shape ──────────────────────────────────────────────────
 
-export type ScopeMode = 'boost' | 'filter' | 'none' | 'strict';
+export type ScopeMode = 'boost' | 'filter' | 'none' | 'shared' | 'strict';
 
 export interface RecallQuery {
   q: string;

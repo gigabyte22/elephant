@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
+import { ScopeModeSchema } from '../../models/types.ts';
 import {
   toWireChunk,
   toWireEntity,
@@ -33,8 +34,6 @@ import {
   WireResearchSchema,
 } from '../wire-schemas.ts';
 
-const Scope = z.enum(['boost', 'filter', 'none', 'strict']);
-
 // Comma-separated kinds in the URL → array.
 const Kinds = z
   .union([
@@ -52,13 +51,13 @@ const Query = z.object({
   q: z.string().min(1),
   agentId: z.string().min(1).optional(),
   sessionId: z.string().optional(),
-  agentScope: Scope.optional(),
-  sessionScope: Scope.optional(),
+  agentScope: ScopeModeSchema.optional(),
+  sessionScope: ScopeModeSchema.optional(),
   // v1.2: cross-cutting scope axes.
   projectId: z.string().min(1).optional(),
   userId: z.string().min(1).optional(),
-  projectScope: Scope.optional(),
-  userScope: Scope.optional(),
+  projectScope: ScopeModeSchema.optional(),
+  userScope: ScopeModeSchema.optional(),
   // v1.2: restrict search to specific memory kinds (comma-separated).
   kinds: Kinds.optional(),
   from: z.coerce.date().optional(),
