@@ -67,6 +67,20 @@ const EnvSchema = z
     OKF_SYNC_CRON: z.string().default('30 3 * * *'),
     MEMORY_OBSERVATION_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
+    // A GRACE PERIOD measured from each document's own `expiresAt`, not a TTL —
+    // callers set their own expiry, and this says how long an already-lapsed
+    // document is kept before its storage goes back. That gap is what makes the
+    // purge recoverable: raise `expiresAt` within it and the document returns.
+    //
+    // Deliberately not defaulted. Unset means research is never purged, which
+    // is how the service has always behaved, and setting it opts into the only
+    // automatic hard delete of a :MemoryItem — an upgrade must never start
+    // deleting somebody's data on its own. See scripts/serve.ts for the gate.
+    RESEARCH_RETENTION_DAYS: z.coerce.number().int().nonnegative().optional(),
+    // Staggered off the observation reaper's hard-coded hourly tick so the two
+    // sweeps don't contend for the same driver pool.
+    RESEARCH_REAP_CRON: z.string().default('15 * * * *'),
+
     // Working-state backend selection. Default Neo4j keeps everything in one
     // graph; Redis is opt-in for hot-path orchestration state.
     WORKING_STATE_BACKEND: z.enum(['neo4j', 'redis']).default('neo4j'),

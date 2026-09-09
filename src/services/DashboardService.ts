@@ -122,6 +122,9 @@ export interface RetentionPayload {
   totalActive: number;
   truncated: boolean;
   policy: { importanceExempt: number; minWindowDays: number; retentionFloor: number };
+  /** Research retention is a separate policy from fact pruning.
+   *  `graceDays: null` means expired research is never purged (the default). */
+  research: { graceDays: number | null; live: number; lapsed: number };
   summary: { exempt: number; withinWindow: number; atRisk: number; prunable: number };
   histogram: Array<{ bin: number; count: number }>;
   sample: Array<{
@@ -276,6 +279,8 @@ function daysSince(now: number, lastReferencedAt: Date | null, recordedAt: Date)
 export interface DashboardServiceConfig {
   // Prune policy the dreamer actually runs with, so retention readouts match.
   prune?: PruneConfig;
+  // Grace period the research reaper actually runs with; undefined = no reaper.
+  researchGraceDays?: number;
 }
 
 export function createDashboardService(config: DashboardServiceConfig = {}): DashboardService {
@@ -284,6 +289,7 @@ export function createDashboardService(config: DashboardServiceConfig = {}): Das
     minWindowDays: config.prune?.minWindowDays ?? 30,
     retentionFloor: config.prune?.retentionFloor ?? 0.05,
   };
+  const researchGraceDays = config.researchGraceDays ?? null;
   return {
     async stats(scope) {
       return read(async (tx) => buildStats(tx, scope));
@@ -354,9 +360,12 @@ export function createDashboardService(config: DashboardServiceConfig = {}): Das
     async retention(scope) {
       return read(async (tx) => {
         const filter = toScopeFilter(scope);
-        const [rows, totalActive] = await Promise.all([
+        const [rows, totalActive, researchExpiry] = await Promise.all([
           DashboardRepository.factRetentionRows(tx, { scope: filter, cap: RETENTION_ROW_CAP }),
           DashboardRepository.countFacts(tx, { scope: filter }),
+          // Unscoped on purpose: this is an operator-facing storage readout, and
+          // research retention is a service-wide policy rather than a per-scope one.
+          DashboardRepository.researchExpiry(tx),
         ]);
         const now = Date.now();
         const points = rows.map((row) => {
@@ -428,6 +437,7 @@ export function createDashboardService(config: DashboardServiceConfig = {}): Das
           totalActive,
           truncated: totalActive > rows.length,
           policy: prunePolicy,
+          research: { graceDays: researchGraceDays, ...researchExpiry },
           summary: {
             exempt: points.filter((p) => p.exempt).length,
             withinWindow: points.filter(

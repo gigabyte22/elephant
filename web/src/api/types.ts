@@ -103,6 +103,9 @@ export interface RetentionPayload {
   totalActive: number;
   truncated: boolean;
   policy: { importanceExempt: number; minWindowDays: number; retentionFloor: number };
+  /** Research retention is a separate policy from fact pruning.
+   *  `graceDays: null` means expired research is never purged (the default). */
+  research: { graceDays: number | null; live: number; lapsed: number };
   summary: { exempt: number; withinWindow: number; atRisk: number; prunable: number };
   histogram: Array<{ bin: number; count: number }>;
   sample: RetentionPoint[];
