@@ -261,17 +261,21 @@ export interface RecallQuery {
   chunkNeighborRadius?: 1 | 2 | 3;
 }
 
+// Every recall item carries both numbers. See "Ranking vs. thresholding" below.
+export type WithScore<T> = T & { score: number; vectorScore?: number };
+
 export interface RecallResult {
   facts: WireFactWithScore[];
   entities?: Array<{ id: string; name: string; type: string }>;
-  chunks?: Array<{ id: string; episodeId: string; position: number; text: string; createdAt: string; score: number }>;
-  preferences?: Array<WirePreference & { score: number }>;
-  insights?: Array<WireInsight & { score: number }>;
-  knowledgeChunks?: Array<{ id: string; documentId: string; position: number; text: string; createdAt: string; score: number }>;
-  procedures?: Array<WireProcedure & { score: number }>;
-  research?: Array<WireResearch & { score: number }>;
-  researchChunks?: Array<{ id: string; researchId: string; position: number; text: string; createdAt: string; score: number }>;
-  intentions?: Array<WireIntention & { score: number }>;
+  chunks?: Array<WithScore<{ id: string; episodeId: string; position: number; text: string; createdAt: string }>>;
+  preferences?: Array<WithScore<WirePreference>>;
+  insights?: Array<WithScore<WireInsight>>;
+  knowledgeChunks?: Array<WithScore<{ id: string; documentId: string; position: number; text: string; createdAt: string }>>;
+  procedures?: Array<WithScore<WireProcedure>>;
+  research?: Array<WithScore<WireResearch>>;
+  researchChunks?: Array<WithScore<{ id: string; researchId: string; position: number; text: string; createdAt: string }>>;
+  intentions?: Array<WithScore<WireIntention>>;
+  observations?: Array<WithScore<WireObservation>>;
   trace?: { stageTimingsMs: Record<string, number>; rerankUsed: boolean; candidatesSeen: Record<string, number> };
 }
 
@@ -613,6 +617,33 @@ export class ElephantClient {
 ```
 
 Every response follows the envelope `{ ok: true, data: ... }` on success and `{ ok: false, error: "..." }` on failure — the plumbing above unwraps it once so callers only ever see `data`.
+
+### Ranking vs. thresholding
+
+`score` and `vectorScore` answer different questions, and using the wrong one is
+the most common way to misread a recall.
+
+**`score` orders one result set. It is not comparable across queries.** The
+pipeline fuses its ranked lists with Reciprocal Rank Fusion, which replaces
+similarity magnitude with `1/(k + rank)`, and `BlendedScoringStage` then
+normalises against the best candidate in the set. The consequence is that the
+top hit of any query scores about the same whether it is an excellent match or
+the least-bad of a poor set — and the gap between rank 1 and rank 2 is close to
+a constant. Ranking by it is correct; thresholding on it is not, and neither is
+comparing it between two queries.
+
+**`vectorScore` is the raw similarity from the vector index, before fusion and
+blending, and it IS comparable across queries.** Threshold on this one when you
+need to *abstain* — to show nothing rather than the closest of several poor
+matches. Pick the cut-off by measuring against a labelled query set for your own
+embedding model rather than assuming a value; the separation between a real
+match and noise is model-dependent.
+
+It is optional because not every item has one: a full-text-only hit, an entity
+sibling, a chunk neighbour and a PageRank expansion all reach the result set
+without a similarity behind them. Absent means "cannot say", which is why it is
+`undefined` rather than `0` — a zero would read as "maximally dissimilar" and be
+thresholded away.
 
 ### 3.2 Configuration
 

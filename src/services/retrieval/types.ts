@@ -252,25 +252,43 @@ export interface Pipeline {
   run(ctx: RetrievalContext): Promise<PipelineState>;
 }
 
+/**
+ * A recall item, with both numbers a caller may need to rank or reject it.
+ *
+ * `score` is the blended rank score. It is deliberately NOT comparable across
+ * queries: `RrfFusionStage` replaces similarity magnitude with reciprocal rank,
+ * and `BlendedScoringStage` then normalises the top hit to ~1.0 — so the best
+ * result of a query always scores about the same whether it is a perfect match
+ * or the least-bad of a bad set. That is the right property for ordering one
+ * result set and the wrong one for deciding whether to use it at all.
+ *
+ * `vectorScore` is the raw similarity the vector index returned, before fusion
+ * and blending, and it IS comparable across queries. A caller that needs to
+ * abstain — to show nothing rather than the closest of several poor matches —
+ * has to threshold on this one. Absent when an item reached the result set by a
+ * route with no vector score behind it: a full-text hit, an entity sibling, a
+ * chunk neighbour, or PageRank expansion.
+ */
+export type WithScore<T> = T & { score: number; vectorScore?: number };
+
 export interface RecallResult {
   facts: Array<
-    Fact & {
-      score: number;
+    WithScore<Fact> & {
       expansionReason: CandidateSource;
       originAgentId?: string | null;
       originSessionId?: string | null;
     }
   >;
   entities: Entity[];
-  chunks?: Array<Chunk & { score: number; expansionReason: CandidateSource }>;
-  preferences?: Array<Preference & { score: number }>;
-  insights?: Array<Insight & { score: number }>;
-  knowledgeChunks?: Array<KnowledgeChunk & { score: number; expansionReason: CandidateSource }>;
-  procedures?: Array<Procedure & { score: number; expansionReason: CandidateSource }>;
-  research?: Array<Research & { score: number }>;
-  researchChunks?: Array<ResearchChunk & { score: number; expansionReason: CandidateSource }>;
-  intentions?: Array<Intention & { score: number }>;
-  observations?: Array<Observation & { score: number }>;
+  chunks?: Array<WithScore<Chunk> & { expansionReason: CandidateSource }>;
+  preferences?: Array<WithScore<Preference>>;
+  insights?: Array<WithScore<Insight>>;
+  knowledgeChunks?: Array<WithScore<KnowledgeChunk> & { expansionReason: CandidateSource }>;
+  procedures?: Array<WithScore<Procedure> & { expansionReason: CandidateSource }>;
+  research?: Array<WithScore<Research>>;
+  researchChunks?: Array<WithScore<ResearchChunk> & { expansionReason: CandidateSource }>;
+  intentions?: Array<WithScore<Intention>>;
+  observations?: Array<WithScore<Observation>>;
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;

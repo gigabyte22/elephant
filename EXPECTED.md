@@ -342,20 +342,26 @@ export interface Fact extends Scope {
   sourceEpisodeId?: string;
 }
 
+// `score` ranks within one result set only; `vectorScore` is the raw pre-fusion
+// similarity and is the one to threshold on. Absent when the item had no vector
+// hit behind it. INTEGRATION.md § "Ranking vs. thresholding".
+export type WithScore<T> = T & { score: number; vectorScore?: number };
+
 export interface RecallResult {
   // `expansionReason` records why a fact is present when it wasn't a direct
   // vector/full-text hit: 'sibling' | 'chunk_derived' | 'ppr' | 'rerank'.
-  facts: Array<Fact & { score: number; expansionReason?: string }>;
+  facts: Array<WithScore<Fact> & { expansionReason?: string }>;
   entities?: Array<{ id: string; name: string; type: string }>;
-  chunks?: Array<Chunk>;
-  preferences?: Array<Preference & { score: number }>;
-  insights?: Array<Insight & { score: number }>;
+  chunks?: Array<WithScore<Chunk>>;
+  preferences?: Array<WithScore<Preference>>;
+  insights?: Array<WithScore<Insight>>;
+  observations?: Array<WithScore<Observation>>;
   // v1.2 — surfaced when caller opts in via include* flags.
-  knowledgeChunks?: Array<KnowledgeChunk & { score: number }>;
-  procedures?: Array<Procedure & { score: number }>;
-  research?: Array<Research & { score: number }>;
-  researchChunks?: Array<ResearchChunk & { score: number }>;
-  intentions?: Array<Intention & { score: number }>;
+  knowledgeChunks?: Array<WithScore<KnowledgeChunk>>;
+  procedures?: Array<WithScore<Procedure>>;
+  research?: Array<WithScore<Research>>;
+  researchChunks?: Array<WithScore<ResearchChunk>>;
+  intentions?: Array<WithScore<Intention>>;
   trace?: RecallTrace;   // only when &debug=true
 }
 

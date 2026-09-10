@@ -25,6 +25,20 @@ const ScopeFields = {
   userId: z.string().optional(),
 };
 
+/**
+ * The two numbers every scored recall item carries. Spread into each recall
+ * response schema — a kind that declares `score` on its own silently drops
+ * `vectorScore`, because the zod serializer strips undeclared keys.
+ *
+ * `vectorScore` is optional because a full-text hit, an entity sibling or a
+ * chunk neighbour reaches the result set with no similarity behind it. Why a
+ * caller needs both: see the `WithScore` docstring in retrieval/types.ts.
+ */
+export const ScoreFields = {
+  score: z.number(),
+  vectorScore: z.number().optional(),
+};
+
 export const WireFactSchema = z.object({
   id: z.string().uuid(),
   content: z.string(),
@@ -48,7 +62,7 @@ export const WireFactSchema = z.object({
 });
 
 export const WireFactWithScoreSchema = WireFactSchema.extend({
-  score: z.number(),
+  ...ScoreFields,
   expansionReason: z
     .enum([
       'fact_vector',
@@ -81,7 +95,6 @@ export const WireChunkSchema = z.object({
   position: z.number().int().nonnegative(),
   text: z.string(),
   createdAt: z.string(),
-  score: z.number().optional(),
   expansionReason: z.enum(['chunk_vector', 'chunk_fulltext', 'chunk_neighbor']).optional(),
 });
 
@@ -91,7 +104,7 @@ export const WirePreferenceWithScoreSchema = z.object({
   confidence: z.number(),
   validFrom: z.string(),
   validTo: z.string().nullable(),
-  score: z.number(),
+  ...ScoreFields,
 });
 
 export const WireInsightWithScoreSchema = z.object({
@@ -99,7 +112,7 @@ export const WireInsightWithScoreSchema = z.object({
   content: z.string(),
   promotedFromFactIds: z.array(z.string()),
   createdAt: z.string(),
-  score: z.number(),
+  ...ScoreFields,
 });
 
 export const WireRecallTraceSchema = z.object({
