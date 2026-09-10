@@ -30,7 +30,20 @@ export interface WireFact extends WireScope {
   originSessionId?: string | null;
 }
 
-export type WireFactWithScore = WireFact & { score: number; expansionReason?: string };
+/**
+ * The two numbers a recall item carries.
+ *
+ * `score` orders one result set. `vectorScore` is the raw similarity behind it,
+ * before fusion and blending, and is the only one comparable ACROSS queries —
+ * threshold on it to abstain rather than show the least-bad match. Absent when
+ * an item arrived by a route with no vector score behind it (a full-text hit,
+ * an entity sibling, a chunk neighbour).
+ *
+ * INTEGRATION.md § "Ranking vs. thresholding" has the long version.
+ */
+export type WithScore<T> = T & { score: number; vectorScore?: number };
+
+export type WireFactWithScore = WithScore<WireFact> & { expansionReason?: string };
 
 export interface WirePreference extends WireScope {
   key: string;
@@ -258,25 +271,26 @@ export interface WireChunkBase {
 export interface RecallResult {
   facts: WireFactWithScore[];
   entities?: Array<{ id: string; name: string; type: string }>;
-  chunks?: Array<WireChunkBase & { episodeId: string; score: number }>;
-  preferences?: Array<WirePreference & { score: number }>;
-  insights?: Array<WireInsight & { score: number }>;
+  chunks?: Array<WithScore<WireChunkBase & { episodeId: string }>>;
+  preferences?: Array<WithScore<WirePreference>>;
+  insights?: Array<WithScore<WireInsight>>;
   knowledgeChunks?: Array<
-    WireScope &
-      WireChunkBase & {
-        documentId: string;
-        score: number;
-        /** 'model' when a model produced this text from non-text bytes (OCR, a
-         *  transcription, an image description) rather than it being the
-         *  source's own words. Quote it accordingly. */
-        derivation: 'verbatim' | 'model';
-      }
+    WithScore<
+      WireScope &
+        WireChunkBase & {
+          documentId: string;
+          /** 'model' when a model produced this text from non-text bytes (OCR, a
+           *  transcription, an image description) rather than it being the
+           *  source's own words. Quote it accordingly. */
+          derivation: 'verbatim' | 'model';
+        }
+    >
   >;
-  procedures?: Array<WireProcedure & { score: number }>;
-  research?: Array<WireResearch & { score: number }>;
-  researchChunks?: Array<WireScope & WireChunkBase & { researchId: string; score: number }>;
-  intentions?: Array<WireIntention & { score: number }>;
-  observations?: Array<WireObservation & { score: number }>;
+  procedures?: Array<WithScore<WireProcedure>>;
+  research?: Array<WithScore<WireResearch>>;
+  researchChunks?: Array<WithScore<WireScope & WireChunkBase & { researchId: string }>>;
+  intentions?: Array<WithScore<WireIntention>>;
+  observations?: Array<WithScore<WireObservation>>;
   trace?: {
     stageTimingsMs: Record<string, number>;
     rerankUsed: boolean;

@@ -12,6 +12,7 @@ import type {
   RecallQuery,
   RecallResult,
   RetrievalContext,
+  WithScore,
 } from './retrieval/types.ts';
 
 interface Deps {
@@ -57,14 +58,36 @@ export type RetrievalService = ReturnType<typeof createRetrievalService>;
 // Re-export for consumers (HTTP layer) who want the query / result types.
 export type { RecallQuery, RecallResult } from './retrieval/types.ts';
 
-type Scored = { rerankScore?: number; blendedScore?: number };
+// What the final comparator needs from a candidate: the pipeline's internal
+// ordering, not the `score` the projection hands to the caller.
+type Rankable = { rerankScore?: number; blendedScore?: number };
 
 // Sort candidate map entries by the final pipeline comparator (rerank then
 // blended) and project each through a mapper.
-function sortAndMap<V extends Scored, R>(map: Map<string, V>, mapper: (c: V) => R): R[] {
+function sortAndMap<V extends Rankable, R>(map: Map<string, V>, mapper: (c: V) => R): R[] {
   return Array.from(map.values())
     .sort((a, b) => (b.rerankScore ?? b.blendedScore ?? 0) - (a.rerankScore ?? a.blendedScore ?? 0))
     .map(mapper);
+}
+
+// The two ways a candidate can carry a similarity. Fused kinds keep one entry
+// per index that hit; single-source kinds are vector-only by construction and
+// hold the similarity directly. A candidate with neither shape is a mistake, so
+// this is a union rather than two optional fields.
+type VectorSourced =
+  | { sources: ReadonlyArray<{ source: CandidateSource; rawScore?: number }> }
+  | { rawScore: number };
+
+/**
+ * The raw similarity behind a candidate, when one exists.
+ *
+ * Among fused sources only the vector entry has a comparable magnitude, and a
+ * fulltext-only hit legitimately has none — hence `undefined` rather than 0.
+ * Why callers need it at all: see the `WithScore` docstring in retrieval/types.
+ */
+function vectorScoreOf(c: VectorSourced): number | undefined {
+  if ('sources' in c) return c.sources.find((s) => s.source.endsWith('_vector'))?.rawScore;
+  return c.rawScore;
 }
 
 function projectResult(
@@ -76,14 +99,14 @@ function projectResult(
     state.facts,
     (
       c,
-    ): Fact & {
-      score: number;
+    ): WithScore<Fact> & {
       expansionReason: CandidateSource;
       originAgentId?: string | null;
       originSessionId?: string | null;
     } => ({
       ...c.fact,
       score: c.rerankScore ?? c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
       expansionReason: c.expansionReason,
       originAgentId: c.originAgentId ?? null,
       originSessionId: c.originSessionId ?? null,
@@ -97,6 +120,7 @@ function projectResult(
     result.chunks = sortAndMap(state.chunks, (c) => ({
       ...c.chunk,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
       expansionReason: c.expansionReason,
     }));
   }
@@ -105,6 +129,7 @@ function projectResult(
     result.preferences = sortAndMap(state.preferences, (c) => ({
       ...c.preference,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
     }));
   }
 
@@ -112,6 +137,7 @@ function projectResult(
     result.insights = sortAndMap(state.insights, (c) => ({
       ...c.insight,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
     }));
   }
 
@@ -119,6 +145,7 @@ function projectResult(
     result.knowledgeChunks = sortAndMap(state.knowledgeChunks, (c) => ({
       ...c.chunk,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
       expansionReason: c.expansionReason,
     }));
   }
@@ -127,6 +154,7 @@ function projectResult(
     result.procedures = sortAndMap(state.procedures, (c) => ({
       ...c.procedure,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
       expansionReason: c.expansionReason,
     }));
   }
@@ -135,6 +163,7 @@ function projectResult(
     result.research = sortAndMap(state.research, (c) => ({
       ...c.research,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
     }));
   }
 
@@ -142,6 +171,7 @@ function projectResult(
     result.researchChunks = sortAndMap(state.researchChunks, (c) => ({
       ...c.chunk,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
       expansionReason: c.expansionReason,
     }));
   }
@@ -150,6 +180,7 @@ function projectResult(
     result.intentions = sortAndMap(state.intentions, (c) => ({
       ...c.intention,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
     }));
   }
 
@@ -157,6 +188,7 @@ function projectResult(
     result.observations = sortAndMap(state.observations, (c) => ({
       ...c.observation,
       score: c.blendedScore ?? 0,
+      vectorScore: vectorScoreOf(c),
     }));
   }
 

@@ -19,6 +19,7 @@ import type { App } from '../types.ts';
 import {
   okEnvelope,
   queryBool,
+  ScoreFields,
   WireChunkSchema,
   WireEntitySchema,
   WireFactWithScoreSchema,
@@ -93,15 +94,15 @@ const ResponseShape = okEnvelope(
   z.object({
     facts: z.array(WireFactWithScoreSchema),
     entities: z.array(WireEntitySchema).optional(),
-    chunks: z.array(WireChunkSchema).optional(),
+    chunks: z.array(WireChunkSchema.extend(ScoreFields)).optional(),
     preferences: z.array(WirePreferenceWithScoreSchema).optional(),
     insights: z.array(WireInsightWithScoreSchema).optional(),
-    knowledgeChunks: z.array(WireKnowledgeChunkSchema.extend({ score: z.number() })).optional(),
-    procedures: z.array(WireProcedureSchema.extend({ score: z.number() })).optional(),
-    research: z.array(WireResearchSchema.extend({ score: z.number() })).optional(),
-    researchChunks: z.array(WireResearchChunkSchema.extend({ score: z.number() })).optional(),
-    intentions: z.array(WireIntentionSchema.extend({ score: z.number() })).optional(),
-    observations: z.array(WireObservationSchema.extend({ score: z.number() })).optional(),
+    knowledgeChunks: z.array(WireKnowledgeChunkSchema.extend(ScoreFields)).optional(),
+    procedures: z.array(WireProcedureSchema.extend(ScoreFields)).optional(),
+    research: z.array(WireResearchSchema.extend(ScoreFields)).optional(),
+    researchChunks: z.array(WireResearchChunkSchema.extend(ScoreFields)).optional(),
+    intentions: z.array(WireIntentionSchema.extend(ScoreFields)).optional(),
+    observations: z.array(WireObservationSchema.extend(ScoreFields)).optional(),
     trace: WireRecallTraceSchema.optional(),
   }),
 );
@@ -123,6 +124,7 @@ export function registerRecallRoute(app: App, container: Container): void {
           facts: result.facts.map((f) => ({
             ...toWireFact(f),
             score: f.score,
+            vectorScore: f.vectorScore,
             expansionReason: f.expansionReason,
           })),
           entities: result.entities.map(toWireEntity),
@@ -130,6 +132,7 @@ export function registerRecallRoute(app: App, container: Container): void {
             chunks: result.chunks.map((c) => ({
               ...toWireChunk(c),
               score: c.score,
+              vectorScore: c.vectorScore,
               expansionReason:
                 c.expansionReason === 'chunk_vector' ||
                 c.expansionReason === 'chunk_fulltext' ||
@@ -142,48 +145,56 @@ export function registerRecallRoute(app: App, container: Container): void {
             preferences: result.preferences.map((p) => ({
               ...toWirePreference(p),
               score: p.score,
+              vectorScore: p.vectorScore,
             })),
           }),
           ...(result.insights && {
             insights: result.insights.map((i) => ({
               ...toWireInsight(i),
               score: i.score,
+              vectorScore: i.vectorScore,
             })),
           }),
           ...(result.knowledgeChunks && {
             knowledgeChunks: result.knowledgeChunks.map((c) => ({
               ...toWireKnowledgeChunk(c),
               score: c.score,
+              vectorScore: c.vectorScore,
             })),
           }),
           ...(result.procedures && {
             procedures: result.procedures.map((p) => ({
               ...toWireProcedure(p),
               score: p.score,
+              vectorScore: p.vectorScore,
             })),
           }),
           ...(result.research && {
             research: result.research.map((r) => ({
               ...toWireResearch(r),
               score: r.score,
+              vectorScore: r.vectorScore,
             })),
           }),
           ...(result.researchChunks && {
             researchChunks: result.researchChunks.map((c) => ({
               ...toWireResearchChunk(c),
               score: c.score,
+              vectorScore: c.vectorScore,
             })),
           }),
           ...(result.intentions && {
             intentions: result.intentions.map((i) => ({
               ...toWireIntention(i),
               score: i.score,
+              vectorScore: i.vectorScore,
             })),
           }),
           ...(result.observations && {
             observations: result.observations.map((o) => ({
               ...toWireObservation(o),
               score: o.score,
+              vectorScore: o.vectorScore,
             })),
           }),
           ...(result.trace && { trace: result.trace }),
