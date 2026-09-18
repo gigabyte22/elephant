@@ -92,6 +92,8 @@ interface IngestEpisodeInput {
   origin?: 'user' | 'cron' | 'event' | 'system' | 'ingest';
   participants?: EpisodeParticipant[];
   isolated?: boolean;
+  /** Opaque provenance, stored and otherwise untouched (see EpisodeSchema). */
+  metadata?: Record<string, string>;
 }
 
 interface SaveFactInput {
@@ -176,6 +178,10 @@ export function createMemoryIngestionService(deps: Deps) {
       // [] normalizes to absent so "participants present" is one truthy check.
       participants: input.participants?.length ? input.participants : undefined,
       isolated: input.isolated,
+      // Carried straight through: nothing in ingestion, dreaming or recall
+      // reads it. {} normalizes to absent so the prop is either a map or gone.
+      metadata:
+        input.metadata && Object.keys(input.metadata).length > 0 ? input.metadata : undefined,
       summaryProvisional,
       projectId: input.projectId,
       userId: input.userId,

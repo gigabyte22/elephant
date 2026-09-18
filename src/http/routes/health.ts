@@ -40,6 +40,11 @@ export function registerHealthRoute(app: App, container: Container): void {
               pending: z.number().nullable(),
               deadLettered: z.number().nullable(),
             }),
+            // Capability flag, not state: POST /episodes accepts an optional
+            // `metadata` string map. Present and true means supported; a
+            // client feature-detects on it and omits the field otherwise,
+            // which is what lets the caller ship ahead of this service.
+            episodeMetadata: z.literal(true),
           }),
         }),
       },
@@ -101,6 +106,7 @@ export function registerHealthRoute(app: App, container: Container): void {
             pending: extraction?.pending ?? null,
             deadLettered: extraction?.deadLettered ?? null,
           },
+          episodeMetadata: true as const,
         },
       };
     },

@@ -86,6 +86,14 @@ export class ElephantClient {
        */
       participants?: Array<{ label: string; userId?: string }>;
       isolated?: boolean;
+      /**
+       * Free-form provenance (room id, turn id, upstream session id, ...).
+       * Max 16 entries, keys 1..64 chars, values <=512 chars. Stored and
+       * nothing more — never indexed, searched, recalled or scored. Only send
+       * it when `health().episodeMetadata` is true; older servers reject an
+       * unknown field.
+       */
+      metadata?: Record<string, string>;
     },
     opts?: RequestOpts,
   ): Promise<{ episodeId: string }> {

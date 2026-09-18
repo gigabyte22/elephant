@@ -24,6 +24,12 @@ POST   /episodes                    ingest raw conversation turn → returns epi
                                     //   A declared participant without a userId maps to the shared
                                     //   bucket, never to the episode's userId. Omitted participants
                                     //   = single-user behavior: every fact inherits episode userId.
+                                    // metadata?: { [key: string]: string } — free-form provenance
+                                    //   (room id, turn id, upstream session id, ...). Max 16 entries,
+                                    //   key 1..64 chars, value <=512 chars (400 otherwise). Stored as
+                                    //   an opaque JSON string on the Episode node and nothing else:
+                                    //   never indexed, never searched, never recalled, never scored.
+                                    //   Callers feature-detect it via /health.episodeMetadata.
 POST   /facts                       save one fact (explicit, from user or agent)
                                     // optional validFrom; if omitted + sourceEpisodeId → episode.timestamp
                                     // returns without an LLM call: the contradiction check runs in
@@ -83,8 +89,11 @@ GET    /health                      liveness + config readback (no auth required
                                         // migrate/EMBED_DIM mismatch
       dream: { lastRun, lastRunDurationMs, running, runningJobId, backlogEstimate,
                deadLetteredEpisodes },
-      extraction: { pending, deadLettered }  // attachment text extraction queue;
-                                             // deadLettered needs the backfill
+      extraction: { pending, deadLettered },  // attachment text extraction queue;
+                                              // deadLettered needs the backfill
+      episodeMetadata: true            // capability flag: POST /episodes accepts the
+                                       // optional `metadata` map. Absent on older
+                                       // servers — feature-detect, don't assume.
     }
 
 # v1.2 — knowledge / procedural / research / working-state / audit

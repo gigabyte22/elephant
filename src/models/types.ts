@@ -84,6 +84,11 @@ export const EpisodeSchema = z
     // Isolated projects opt out of cross-scope dedup/supersede against the
     // personal bucket, keeping their facts fully self-contained.
     isolated: z.boolean().optional(),
+    // Caller-supplied provenance (room id, turn id, upstream session id, ...).
+    // Opaque to this service: stored, never indexed, never searched, never
+    // recalled, never scored. Its only job is to let an operator trace an
+    // episode back to where it came from.
+    metadata: z.record(z.string(), z.string()).optional(),
     // Transaction time. `timestamp` is client-supplied EVENT time and may be
     // backdated on import, so it cannot order a work queue. Optional because
     // episodes written before this field existed do not have it.
