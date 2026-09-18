@@ -202,6 +202,11 @@ export interface WireHealth {
     /** Spent their retries; recoverable only via the backfill script. */
     deadLettered: number | null;
   };
+  /**
+   * Capability flag: POST /episodes accepts the optional `metadata` map.
+   * Absent on servers that predate it — feature-detect before sending.
+   */
+  episodeMetadata?: true;
 }
 
 // ── Recall ──────────────────────────────────────────────────────────────────

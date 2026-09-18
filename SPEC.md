@@ -147,7 +147,7 @@ Node Labels & Properties
 Entity (Person, Concept, Tool, etc.): id, name, type, embedding
 Fact (reified long-term memory): id, content, confidence, importance, validFrom, validTo, recordedAt, embedding, sourceEpisodeId
 Preference (user prefs): id, key, value, confidence, validFrom, validTo, recordedAt, embedding
-Episode (conversation turn): id, timestamp, rawTranscript, summary, embedding, sessionId, participants (JSON string, optional)
+Episode (conversation turn): id, timestamp, rawTranscript, summary, embedding, sessionId, participants (JSON string, optional), metadata (JSON string, optional — caller provenance, stored only: never indexed, searched, recalled or scored)
 Insight (dreamed wisdom): id, content, embedding
 Observation (working memory, TTL 7 days)
 

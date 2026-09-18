@@ -18,6 +18,23 @@ function parseParticipants(raw: unknown): EpisodeParticipant[] | undefined {
   }
 }
 
+// Same JSON-string treatment as participants, and for the same reason: a
+// string map is not a native Neo4j property type. Parsed defensively — a
+// corrupted prop degrades to "no provenance" rather than failing every read.
+function parseMetadata(raw: unknown): Record<string, string> | undefined {
+  if (typeof raw !== 'string') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const entries = Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    );
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function toEpisode(node: Record<string, unknown>): Episode {
   return {
     id: node.id as string,
@@ -30,6 +47,7 @@ function toEpisode(node: Record<string, unknown>): Episode {
     origin: (node.origin as EpisodeOrigin | undefined) ?? undefined,
     participants: parseParticipants(node.participants),
     isolated: (node.isolated as boolean | undefined) ?? undefined,
+    metadata: parseMetadata(node.metadata),
     summaryProvisional: (node.summaryProvisional as boolean | undefined) ?? undefined,
     recordedAt: node.recordedAt != null ? toJsDate(node.recordedAt) : undefined,
     dreamedAt: toJsDateOrNull(node.dreamedAt),
@@ -53,6 +71,7 @@ export const EpisodeRepository = {
            e.embedding = $embedding,
            e.origin = $origin,
            e.participants = $participants,
+           e.metadata = $metadata,
            e.isolated = $isolated,
            e.summaryProvisional = $summaryProvisional,
            e.recordedAt = coalesce(e.recordedAt, datetime($recordedAt))
@@ -67,6 +86,7 @@ export const EpisodeRepository = {
         embedding: ep.embedding,
         origin: ep.origin ?? null,
         participants: ep.participants?.length ? JSON.stringify(ep.participants) : null,
+        metadata: Object.keys(ep.metadata ?? {}).length ? JSON.stringify(ep.metadata) : null,
         isolated: ep.isolated ?? null,
         summaryProvisional: ep.summaryProvisional ?? null,
         // coalesce above: a re-POST must not reset the original write time.
