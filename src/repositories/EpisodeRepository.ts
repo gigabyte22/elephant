@@ -26,9 +26,9 @@ function parseMetadata(raw: unknown): Record<string, string> | undefined {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
-    const entries = Object.entries(parsed).filter(([, v]) => typeof v === 'string') as Array<
-      [string, string]
-    >;
+    const entries = Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    );
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
   } catch {
     return undefined;
@@ -86,8 +86,7 @@ export const EpisodeRepository = {
         embedding: ep.embedding,
         origin: ep.origin ?? null,
         participants: ep.participants?.length ? JSON.stringify(ep.participants) : null,
-        metadata:
-          ep.metadata && Object.keys(ep.metadata).length > 0 ? JSON.stringify(ep.metadata) : null,
+        metadata: Object.keys(ep.metadata ?? {}).length ? JSON.stringify(ep.metadata) : null,
         isolated: ep.isolated ?? null,
         summaryProvisional: ep.summaryProvisional ?? null,
         // coalesce above: a re-POST must not reset the original write time.

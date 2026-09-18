@@ -180,8 +180,7 @@ export function createMemoryIngestionService(deps: Deps) {
       isolated: input.isolated,
       // Carried straight through: nothing in ingestion, dreaming or recall
       // reads it. {} normalizes to absent so the prop is either a map or gone.
-      metadata:
-        input.metadata && Object.keys(input.metadata).length > 0 ? input.metadata : undefined,
+      metadata: Object.keys(input.metadata ?? {}).length ? input.metadata : undefined,
       summaryProvisional,
       projectId: input.projectId,
       userId: input.userId,

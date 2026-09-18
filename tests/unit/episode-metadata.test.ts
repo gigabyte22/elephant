@@ -10,6 +10,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
+import type { ManagedTransaction } from 'neo4j-driver';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { errorHandler } from '../../src/http/errors.ts';
 import { registerEpisodesRoute } from '../../src/http/routes/episodes.ts';
@@ -66,13 +67,22 @@ const baseBody = {
   rawTranscript: 'USER: hello\nASSISTANT: hi',
 };
 
-async function post(body: Record<string, unknown>) {
+// One owner for the app lifecycle: every case gets a fresh app and closes it.
+async function inject(options: {
+  method: 'GET' | 'POST';
+  url: string;
+  payload?: Record<string, unknown>;
+}) {
   const app = buildApp();
   try {
-    return await app.inject({ method: 'POST', url: '/episodes', payload: body });
+    return await app.inject(options);
   } finally {
     await app.close();
   }
+}
+
+function post(body: Record<string, unknown>) {
+  return inject({ method: 'POST', url: '/episodes', payload: body });
 }
 
 beforeEach(() => {
@@ -132,16 +142,12 @@ describe('POST /episodes metadata', () => {
 
 describe('GET /health', () => {
   test('advertises episodeMetadata so a client can feature-detect', async () => {
-    const app = buildApp();
-    try {
-      const res = await app.inject({ method: 'GET', url: '/health' });
-      expect(res.statusCode).toBe(200);
-      const body = res.json() as { ok: boolean; data: { episodeMetadata?: boolean } };
-      expect(body.ok).toBe(true);
-      expect(body.data.episodeMetadata).toBe(true);
-    } finally {
-      await app.close();
-    }
+    const res = await inject({ method: 'GET', url: '/health' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { ok: boolean; data: { episodeMetadata?: boolean } };
+    expect(body.ok).toBe(true);
+    expect(body.data.episodeMetadata).toBe(true);
   });
 });
 
@@ -164,19 +170,9 @@ describe('EpisodeRepository metadata round-trip', () => {
     const tx = {
       run: async (cypher: string, params: Record<string, unknown>) => {
         calls.push({ cypher, params });
-        return {
-          records: [
-            {
-              get: () => ({
-                ...params,
-                timestamp: params.timestamp,
-                ...nodeOverrides,
-              }),
-            },
-          ],
-        };
+        return { records: [{ get: () => ({ ...params, ...nodeOverrides }) }] };
       },
-    };
+    } as unknown as ManagedTransaction;
     return { tx, calls };
   }
 
@@ -184,8 +180,7 @@ describe('EpisodeRepository metadata round-trip', () => {
     const metadata = { roomId: 'room-7', turnId: 'turn-42' };
     const { tx, calls } = fakeTx();
 
-    // biome-ignore lint/suspicious/noExplicitAny: a hand-rolled transaction double
-    const saved = await EpisodeRepository.create(tx as any, episode(metadata));
+    const saved = await EpisodeRepository.create(tx, episode(metadata));
 
     expect(calls[0]!.cypher).toContain('e.metadata = $metadata');
     expect(calls[0]!.params.metadata).toBe(JSON.stringify(metadata));
@@ -195,8 +190,7 @@ describe('EpisodeRepository metadata round-trip', () => {
   test('absent or empty metadata is written as null, not "{}"', async () => {
     for (const value of [undefined, {}]) {
       const { tx, calls } = fakeTx();
-      // biome-ignore lint/suspicious/noExplicitAny: a hand-rolled transaction double
-      const saved = await EpisodeRepository.create(tx as any, episode(value));
+      const saved = await EpisodeRepository.create(tx, episode(value));
 
       expect(calls[0]!.params.metadata).toBeNull();
       expect(saved.metadata).toBeUndefined();
@@ -206,8 +200,7 @@ describe('EpisodeRepository metadata round-trip', () => {
   test('a corrupt prop degrades to no provenance rather than failing the read', async () => {
     for (const corrupt of ['not json', '["a"]', '{"k":3}']) {
       const { tx } = fakeTx({ metadata: corrupt });
-      // biome-ignore lint/suspicious/noExplicitAny: a hand-rolled transaction double
-      const saved = await EpisodeRepository.create(tx as any, episode({ roomId: 'room-7' }));
+      const saved = await EpisodeRepository.create(tx, episode({ roomId: 'room-7' }));
 
       expect(saved.metadata).toBeUndefined();
     }
