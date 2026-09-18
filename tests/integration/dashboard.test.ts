@@ -596,6 +596,14 @@ describe('/dashboard/api/facts/retention', () => {
     expect(data.summary.atRisk).toBeGreaterThanOrEqual(1);
     expect(data.summary.prunable).toBeGreaterThanOrEqual(1);
 
+    // The dashboard destructures this block; a wire schema that omits it
+    // would strip it from the response and crash the health page.
+    expect(data.research).toEqual({
+      graceDays: null,
+      live: expect.any(Number),
+      lapsed: expect.any(Number),
+    });
+
     const atRisk = data.atRisk as Array<{ id: string; retention: number; prunable: boolean }>;
     const staging = atRisk.find((f) => f.id === factStagingId);
     expect(staging).toBeDefined();
