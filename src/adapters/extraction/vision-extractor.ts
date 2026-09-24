@@ -1,4 +1,6 @@
 import type AnthropicNS from '@anthropic-ai/sdk';
+import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
+import type { ReasoningEffort } from 'openai/resources/shared';
 import { prepareImageForVision } from './image-preprocess.ts';
 import { deferred } from './service.ts';
 import type { ExtractionInput, ExtractionResult, Extractor } from './types.ts';
@@ -9,6 +11,9 @@ export interface VisionTargetConfig {
   model: string;
   openaiApiKey?: string;
   openaiBaseUrl?: string;
+  /** Sent as `reasoning_effort` on the OpenAI-compatible path; unset leaves the
+   *  model's default. The Anthropic path does not use it. */
+  reasoningEffort?: ReasoningEffort;
   anthropicApiKey?: string;
 }
 
@@ -258,6 +263,35 @@ export function createVisionExtractor(
  *  the target, budget from the one VisionConfig. */
 type CallLimits = { timeoutMs: number; maxTokens: number };
 
+/** The chat-completions body for one OCR call. Split out so the request shape
+ *  is testable without a live endpoint. */
+export function openAIVisionRequest(
+  target: VisionTargetConfig,
+  limits: CallLimits,
+  mime: string,
+  b64: string,
+): ChatCompletionCreateParamsNonStreaming {
+  return {
+    model: target.model,
+    max_tokens: limits.maxTokens,
+    // OCR wants the most likely reading, not a creative one — sampling at the
+    // default temperature made a small local model wander off the transcription.
+    temperature: 0,
+    // Only when configured: a server that does not know the field (or a model
+    // without the knob) should see exactly the request it saw before.
+    ...(target.reasoningEffort && { reasoning_effort: target.reasoningEffort }),
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: PROMPT },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
+        ],
+      },
+    ],
+  };
+}
+
 async function viaOpenAI(
   target: VisionTargetConfig,
   limits: CallLimits,
@@ -273,22 +307,7 @@ async function viaOpenAI(
     // vision call instead of surfacing the timeout as a 'failed' with a reason.
     maxRetries: 0,
   });
-  const res = await client.chat.completions.create({
-    model: target.model,
-    max_tokens: limits.maxTokens,
-    // OCR wants the most likely reading, not a creative one — sampling at the
-    // default temperature made a small local model wander off the transcription.
-    temperature: 0,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: PROMPT },
-          { type: 'image_url', image_url: { url: `data:${mime};base64,${b64}` } },
-        ],
-      },
-    ],
-  });
+  const res = await client.chat.completions.create(openAIVisionRequest(target, limits, mime, b64));
   return {
     text: res.choices[0]?.message?.content ?? '',
     truncated: res.choices[0]?.finish_reason === 'length',

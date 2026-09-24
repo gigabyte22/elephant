@@ -3,6 +3,11 @@ import { z } from 'zod';
 
 const LlmProvider = z.enum(['anthropic', 'openai', 'llamacpp']);
 const EmbedProvider = z.enum(['openai', 'voyage', 'ollama']);
+// The OpenAI SDK's ReasoningEffort values; an empty string reads as unset.
+const reasoningEffort = z
+  .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+  .optional()
+  .or(z.literal('').transform(() => undefined));
 
 // Parse a boolean env var from its string form. z.coerce.boolean() uses JS
 // Boolean() semantics, so the string "false" coerces to TRUE — a silent footgun
@@ -124,6 +129,14 @@ const EnvSchema = z
       .enum(['auto', 'none', 'openai', 'anthropic'])
       .default('auto'),
     KNOWLEDGE_VISION_FALLBACK_MODEL: z.string().optional(),
+    // Reasoning effort sent with each tier's OpenAI-compatible call. Unset sends
+    // nothing, leaving the model's default. A reasoning model's default can be
+    // costly for OCR: grok-4.7 spent ~10k reasoning tokens (~2 min) transcribing
+    // a word list that 'low' read identically in ~300 tokens (~8 s). Per tier
+    // because one value rarely suits both a hosted reasoning model and a local
+    // model that has no such knob. Ignored on the Anthropic path.
+    KNOWLEDGE_VISION_REASONING_EFFORT: reasoningEffort,
+    KNOWLEDGE_VISION_FALLBACK_REASONING_EFFORT: reasoningEffort,
     KNOWLEDGE_TRANSCRIBE_PROVIDER: z.enum(['auto', 'none', 'openai']).default('auto'),
     KNOWLEDGE_TRANSCRIBE_MODEL: z.string().default('whisper-1'),
     // Dedicated vision/transcription endpoints. These exist so enabling OCR does

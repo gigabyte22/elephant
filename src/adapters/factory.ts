@@ -168,17 +168,25 @@ function resolveTargetFor(
   }
 }
 
-/** A vision target with its model resolved — what the extractor and the boot
- *  line both consume. */
-export type ResolvedVisionTarget = VisionTarget & { model: string };
+/** A vision target with its model and per-tier settings resolved — what the
+ *  extractor and the boot line both consume. */
+export type ResolvedVisionTarget = VisionTarget & {
+  model: string;
+  reasoningEffort?: Env['KNOWLEDGE_VISION_REASONING_EFFORT'];
+};
 
-/** A tier's own KNOWLEDGE_*_MODEL wins; otherwise the provider's default. */
-function withModel(
+/** A tier's own KNOWLEDGE_*_MODEL wins; otherwise the provider's default.
+ *  Reasoning effort is the tier's own or nothing. */
+function withTierSettings(
   env: Env,
   target: VisionTarget,
-  configured: string | undefined,
+  tier: { model: string | undefined; reasoningEffort: Env['KNOWLEDGE_VISION_REASONING_EFFORT'] },
 ): ResolvedVisionTarget {
-  return { ...target, model: configured ?? defaultVisionModel(env, target) };
+  return {
+    ...target,
+    model: tier.model ?? defaultVisionModel(env, target),
+    reasoningEffort: tier.reasoningEffort,
+  };
 }
 
 /**
@@ -190,7 +198,10 @@ function withModel(
 export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
   const primary = resolveVisionTarget(env);
   if (!primary) return [];
-  const primaryTarget = withModel(env, primary, env.KNOWLEDGE_VISION_MODEL);
+  const primaryTarget = withTierSettings(env, primary, {
+    model: env.KNOWLEDGE_VISION_MODEL,
+    reasoningEffort: env.KNOWLEDGE_VISION_REASONING_EFFORT,
+  });
   const targets = [primaryTarget];
   const fallback = resolveTargetFor(
     env.KNOWLEDGE_VISION_FALLBACK_PROVIDER,
@@ -204,8 +215,13 @@ export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
     // A fallback that resolves to the same provider, endpoint, credentials and
     // model as the primary is not a rescue — it is the same call billed twice,
     // flunking the quality guard the same way. Easy to arrive at by naming a
-    // fallback provider without giving it its own model or endpoint.
-    const resolved = withModel(env, fallback, env.KNOWLEDGE_VISION_FALLBACK_MODEL);
+    // fallback provider without giving it its own model or endpoint. A different
+    // reasoning effort does make it a different call ('low' first, 'high' as the
+    // rescue).
+    const resolved = withTierSettings(env, fallback, {
+      model: env.KNOWLEDGE_VISION_FALLBACK_MODEL,
+      reasoningEffort: env.KNOWLEDGE_VISION_FALLBACK_REASONING_EFFORT,
+    });
     if (!sameVisionTarget(primaryTarget, resolved)) targets.push(resolved);
   }
   return targets;
@@ -213,7 +229,11 @@ export function resolveVisionTargets(env: Env): ResolvedVisionTarget[] {
 
 function sameVisionTarget(a: ResolvedVisionTarget, b: ResolvedVisionTarget): boolean {
   return (
-    a.provider === b.provider && a.model === b.model && a.key === b.key && a.baseUrl === b.baseUrl
+    a.provider === b.provider &&
+    a.model === b.model &&
+    a.key === b.key &&
+    a.baseUrl === b.baseUrl &&
+    a.reasoningEffort === b.reasoningEffort
   );
 }
 
@@ -242,7 +262,8 @@ function describeDisabled(capability: string, envPrefix: string): string {
 
 function describeVisionTarget(target: ResolvedVisionTarget): string {
   const endpoint = target.provider === 'anthropic' ? 'the Anthropic API' : describeEndpoint(target);
-  return `${target.provider} ${target.model} at ${endpoint}`;
+  const effort = target.reasoningEffort ? ` (reasoning ${target.reasoningEffort})` : '';
+  return `${target.provider} ${target.model}${effort} at ${endpoint}`;
 }
 
 function describeVision(env: Env): string {
@@ -282,6 +303,7 @@ export function buildExtractionService(env: Env): ExtractionService {
             model: target.model,
             openaiApiKey: target.key,
             openaiBaseUrl: target.baseUrl,
+            reasoningEffort: target.reasoningEffort,
             anthropicApiKey: env.ANTHROPIC_API_KEY,
           })),
           timeoutMs: env.KNOWLEDGE_VISION_TIMEOUT_MS,
