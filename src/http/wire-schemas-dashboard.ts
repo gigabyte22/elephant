@@ -174,6 +174,13 @@ export const WireRetentionSchema = z.object({
   ),
   sample: z.array(WireRetentionPointSchema),
   atRisk: z.array(WireAtRiskFactSchema),
+  // Research retention is service-wide, not per-scope. graceDays null = the
+  // reaper is off and expired research is hidden but never purged.
+  research: z.object({
+    graceDays: z.number().nonnegative().nullable(),
+    live: z.number().int().nonnegative(),
+    lapsed: z.number().int().nonnegative(),
+  }),
 });
 
 // --- Graph (search + neighborhood) -----------------------------------------
