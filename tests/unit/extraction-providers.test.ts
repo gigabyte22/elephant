@@ -144,6 +144,34 @@ describe('resolveVisionTargets', () => {
     expect(targets).toHaveLength(1);
   });
 
+  it('resolves reasoning effort per tier', () => {
+    const [primary, fallback] = resolveVisionTargets(
+      env({
+        KNOWLEDGE_VISION_BASE_URL: 'https://api.x.ai/v1',
+        KNOWLEDGE_VISION_MODEL: 'grok-4.7',
+        KNOWLEDGE_VISION_REASONING_EFFORT: 'low',
+        KNOWLEDGE_VISION_FALLBACK_BASE_URL: 'http://ollama:11434/v1',
+        KNOWLEDGE_VISION_FALLBACK_MODEL: 'qwen2.5vl:7b',
+      }),
+    );
+    expect(primary).toMatchObject({ model: 'grok-4.7', reasoningEffort: 'low' });
+    expect(fallback?.reasoningEffort).toBeUndefined();
+  });
+
+  it('keeps a fallback that differs from the primary only in reasoning effort', () => {
+    // 'low' first with 'high' as the rescue is a genuinely different call.
+    const targets = resolveVisionTargets(
+      env({
+        KNOWLEDGE_VISION_PROVIDER: 'openai',
+        KNOWLEDGE_VISION_FALLBACK_PROVIDER: 'openai',
+        OPENAI_API_KEY: 'sk-oai',
+        KNOWLEDGE_VISION_REASONING_EFFORT: 'low',
+        KNOWLEDGE_VISION_FALLBACK_REASONING_EFFORT: 'high',
+      }),
+    );
+    expect(targets.map((t) => t.reasoningEffort)).toEqual(['low', 'high']);
+  });
+
   it('lets a named fallback provider spend the shared keys', () => {
     const targets = resolveVisionTargets(
       env({
@@ -196,6 +224,17 @@ describe('describeExtractionCapabilities', () => {
     expect(vision).toContain(
       '(fallback: openai grok-4-1-fast-non-reasoning at https://api.x.ai/v1)',
     );
+  });
+
+  it('discloses a configured reasoning effort', () => {
+    const [vision] = describeExtractionCapabilities(
+      env({
+        KNOWLEDGE_VISION_BASE_URL: 'https://api.x.ai/v1',
+        KNOWLEDGE_VISION_MODEL: 'grok-4.7',
+        KNOWLEDGE_VISION_REASONING_EFFORT: 'low',
+      }),
+    );
+    expect(vision).toContain('openai grok-4.7 (reasoning low) at https://api.x.ai/v1');
   });
 });
 

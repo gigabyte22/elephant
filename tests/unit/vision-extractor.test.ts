@@ -4,6 +4,7 @@ import {
   createVisionExtractor,
   DESCRIPTION_MARKER,
   mapVisionResponse,
+  openAIVisionRequest,
   type VisionConfig,
   type VisionTargetConfig,
 } from '../../src/adapters/extraction/vision-extractor.ts';
@@ -195,5 +196,26 @@ describe('createVisionExtractor', () => {
     });
     expect(result.status).toBe('pending');
     expect(call).not.toHaveBeenCalled();
+  });
+});
+
+describe('openAIVisionRequest', () => {
+  const target: VisionTargetConfig = { provider: 'openai', model: 'grok-4.7' };
+  const limits = { timeoutMs: 1_000, maxTokens: 16_384 };
+
+  it('sends reasoning_effort when the target configures one', () => {
+    const body = openAIVisionRequest(
+      { ...target, reasoningEffort: 'low' },
+      limits,
+      'image/png',
+      'AA==',
+    );
+    expect(body).toMatchObject({ model: 'grok-4.7', max_tokens: 16_384, reasoning_effort: 'low' });
+  });
+
+  it('omits the field entirely when unset', () => {
+    // A server that does not know the field must see the request it always saw.
+    const body = openAIVisionRequest(target, limits, 'image/png', 'AA==');
+    expect(body).not.toHaveProperty('reasoning_effort');
   });
 });
