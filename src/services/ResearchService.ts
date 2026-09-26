@@ -256,7 +256,10 @@ export function createResearchService(deps: Deps) {
     const hits = await read((tx) =>
       ResearchRepository.listSimilar(tx, {
         embedding: item.embedding,
-        limit: opts.limit + 1,
+        // The vector index returns its global top K BEFORE the scope filter
+        // runs, so asking for exactly limit + 1 lets near-duplicates in other
+        // projects crowd out this project's matches. Overfetch like recall does.
+        limit: Math.min(Math.max((opts.limit + 1) * 5, 50), 200),
         minScore: opts.minScore,
         scope: {
           projectId: item.projectId,

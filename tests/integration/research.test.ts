@@ -346,6 +346,33 @@ describe('research metadata', () => {
     expect(put.json().data.metadata).toEqual(metadata);
   });
 
+  test('over-limit metadata is rejected with 400', async () => {
+    await clearDb();
+    const tooMany = Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`k${i}`, 'v']));
+    for (const metadata of [
+      tooMany,
+      { ['k'.repeat(65)]: 'v' },
+      { '': 'v' },
+      { k: 'v'.repeat(513) },
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/research',
+        headers: { ...auth, 'content-type': 'application/json' },
+        payload: { title: 't', source: 'manual', projectId: PROJECT, content: 'body', metadata },
+      });
+      expect(res.statusCode).toBe(400);
+    }
+    // Exactly at the bounds is accepted.
+    await post({
+      content: 'at the bounds',
+      metadata: {
+        ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`k${i}`, 'v'])),
+        ['k'.repeat(64)]: 'v'.repeat(512),
+      },
+    });
+  });
+
   test('omitted or empty metadata is absent on the wire and null on the node', async () => {
     await clearDb();
     const omitted = await post({ content: 'no provenance here' });
@@ -418,6 +445,19 @@ describe('GET /research/:id/similar', () => {
     // Without a declared projectId the item's own project still bounds the search.
     const unscoped = await similar(base);
     expect((unscoped.json().data as Array<{ id: string }>).map((r) => r.id)).toEqual([twin, near]);
+  });
+
+  test('near-identical copies in another project cannot crowd out a same-project match', async () => {
+    await clearDb();
+    const base = await create(BASE);
+    const near = await create(NEAR);
+    // Twelve exact copies elsewhere outrank NEAR (1.0 vs 0.9) in the global
+    // vector top K; an index fetch of only limit + 1 would see none of NEAR.
+    for (let i = 0; i < 12; i++) await create(BASE, OTHER);
+
+    const res = await similar(base, `?projectId=${PROJECT}&limit=1`);
+    expect(res.statusCode).toBe(200);
+    expect((res.json().data as Array<{ id: string }>).map((r) => r.id)).toEqual([near]);
   });
 
   test('minScore and limit narrow the result', async () => {

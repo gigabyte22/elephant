@@ -6,6 +6,8 @@ import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, WireResearchSchema } from '../wire-schemas.ts';
 
+const MAX_METADATA_ENTRIES = 20;
+
 const CreateBody = z.object({
   id: z.string().uuid().optional(),
   title: z.string().min(1),
@@ -17,7 +19,13 @@ const CreateBody = z.object({
   // Caller-supplied provenance. Stored as an opaque JSON blob and never
   // indexed, embedded, searched or scored — it exists so a caller can trace a
   // research item back to its source. Write-once: UpdateBody has no metadata.
-  metadata: z.record(z.string(), z.string()).optional(),
+  // Bounded so it stays provenance rather than a second payload.
+  metadata: z
+    .record(z.string().min(1).max(64), z.string().max(512))
+    .refine((m) => Object.keys(m).length <= MAX_METADATA_ENTRIES, {
+      message: `metadata accepts at most ${MAX_METADATA_ENTRIES} entries`,
+    })
+    .optional(),
   projectId: z.string().min(1),
   userId: z.string().min(1).optional(),
   expiresAt: z.coerce.date().nullable().optional(),
