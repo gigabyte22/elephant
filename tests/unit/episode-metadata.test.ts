@@ -149,6 +149,17 @@ describe('GET /health', () => {
     expect(body.ok).toBe(true);
     expect(body.data.episodeMetadata).toBe(true);
   });
+
+  test('advertises the research capability flags', async () => {
+    const res = await inject({ method: 'GET', url: '/health' });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      data: { researchMetadata?: boolean; researchSimilar?: boolean };
+    };
+    expect(body.data.researchMetadata).toBe(true);
+    expect(body.data.researchSimilar).toBe(true);
+  });
 });
 
 describe('EpisodeRepository metadata round-trip', () => {

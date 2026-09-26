@@ -21,7 +21,8 @@ function parseParticipants(raw: unknown): EpisodeParticipant[] | undefined {
 // Same JSON-string treatment as participants, and for the same reason: a
 // string map is not a native Neo4j property type. Parsed defensively — a
 // corrupted prop degrades to "no provenance" rather than failing every read.
-function parseMetadata(raw: unknown): Record<string, string> | undefined {
+// Shared with ResearchRepository, which stores its provenance the same way.
+export function parseMetadata(raw: unknown): Record<string, string> | undefined {
   if (typeof raw !== 'string') return undefined;
   try {
     const parsed: unknown = JSON.parse(raw);

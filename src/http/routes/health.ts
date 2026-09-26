@@ -45,6 +45,10 @@ export function registerHealthRoute(app: App, container: Container): void {
             // client feature-detects on it and omits the field otherwise,
             // which is what lets the caller ship ahead of this service.
             episodeMetadata: z.literal(true),
+            // Same kind of flag: POST /research accepts `metadata`.
+            researchMetadata: z.literal(true),
+            // Same kind of flag: GET /research/:id/similar exists.
+            researchSimilar: z.literal(true),
           }),
         }),
       },
@@ -107,6 +111,8 @@ export function registerHealthRoute(app: App, container: Container): void {
             deadLettered: extraction?.deadLettered ?? null,
           },
           episodeMetadata: true as const,
+          researchMetadata: true as const,
+          researchSimilar: true as const,
         },
       };
     },

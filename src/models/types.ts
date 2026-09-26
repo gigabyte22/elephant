@@ -411,6 +411,11 @@ export type Procedure = z.infer<typeof ProcedureSchema>;
 
 export const ResearchSchema = KnowledgeDocumentSchema.extend({
   projectId: z.string().min(1),
+  // Caller-supplied provenance (feed item id, upstream url key, ...). Opaque
+  // to this service: stored, never indexed, never embedded, never searched,
+  // never scored. Write-once at create; its only job is to let a caller trace
+  // a research item back to where it came from.
+  metadata: z.record(z.string(), z.string()).optional(),
 });
 export type Research = z.infer<typeof ResearchSchema>;
 

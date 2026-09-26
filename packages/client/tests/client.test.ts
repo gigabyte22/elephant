@@ -154,6 +154,23 @@ describe('fact scope query', () => {
   });
 });
 
+describe('research similar', () => {
+  test('forwards scope, limit and minScore; a bare call keeps its bare URL', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: [] }));
+    const client = new ElephantClient(cfg);
+
+    await client.similarResearch('r1', { projectId: 'p1', limit: 5, minScore: 0.9 });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://elephant.test/research/r1/similar?projectId=p1&limit=5&minScore=0.9',
+    );
+
+    await client.similarResearch('r2');
+    expect(fetchMock.mock.calls[1]![0]).toBe('http://elephant.test/research/r2/similar');
+  });
+});
+
 describe('path-segment encoding', () => {
   test('ids are encoded so they cannot traverse to another endpoint', async () => {
     const fetchMock = vi

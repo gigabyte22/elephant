@@ -255,6 +255,7 @@ export const WireProcedureSchema = z.object({
 
 export const WireResearchSchema = WireKnowledgeDocumentSchema.extend({
   projectId: z.string(),
+  metadata: z.record(z.string(), z.string()).optional(),
 });
 
 export const WireResearchChunkSchema = z.object({

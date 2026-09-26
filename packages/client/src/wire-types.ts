@@ -139,6 +139,8 @@ export interface WireKnowledgeAttachment {
 
 export interface WireResearch extends WireKnowledgeDocument {
   projectId: string;
+  /** Caller provenance supplied at create; absent when none was supplied. */
+  metadata?: Record<string, string>;
 }
 
 export interface WireWorkingStateEntry {
@@ -205,6 +207,10 @@ export interface WireHealth {
    * Absent on servers that predate it — feature-detect before sending.
    */
   episodeMetadata?: true;
+  /** Capability flag: POST /research accepts the optional `metadata` map. */
+  researchMetadata?: true;
+  /** Capability flag: GET /research/:id/similar exists. */
+  researchSimilar?: true;
 }
 
 // ── Recall ──────────────────────────────────────────────────────────────────
