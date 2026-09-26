@@ -141,6 +141,8 @@ export interface WireKnowledgeAttachment {
 
 export interface WireResearch extends WireKnowledgeDocument {
   projectId: string;
+  /** Caller provenance supplied at create; absent when none was supplied. */
+  metadata?: Record<string, string>;
 }
 
 export interface WireWorkingStateEntry {

@@ -172,6 +172,7 @@ export interface WireProcedure extends WireScope {
 
 export interface WireResearch extends WireKnowledgeDocument {
   projectId: string; // required for research
+  metadata?: Record<string, string>; // caller provenance, absent when none was supplied
 }
 
 export interface WireResearchChunk extends WireScope {
@@ -435,6 +436,7 @@ export function toWireResearch(r: Research): WireResearch {
   return {
     ...toWireKnowledgeDocument(r),
     projectId: r.projectId,
+    ...(r.metadata ? { metadata: r.metadata } : {}),
   };
 }
 

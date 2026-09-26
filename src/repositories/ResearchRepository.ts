@@ -1,6 +1,7 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Research } from '../models/types.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
+import { parseMetadata } from './EpisodeRepository.ts';
 import {
   memoryItemParams,
   memoryItemSetClause,
@@ -21,6 +22,7 @@ function toResearch(node: Record<string, unknown>): Research {
     summary: node.summary as string,
     embedding: (node.embedding as number[]) ?? [],
     tags: (node.tags as string[]) ?? [],
+    metadata: parseMetadata(node.metadata),
     expiresAt: toJsDateOrNull(node.expiresAt),
     createdAt: toJsDate(node.createdAt),
     updatedAt: toJsDate(node.updatedAt),
@@ -45,6 +47,7 @@ export const ResearchRepository = {
            r.summary = $summary,
            r.embedding = $embedding,
            r.tags = $tags,
+           r.metadata = $metadata,
            r.expiresAt = CASE WHEN $expiresAt IS NULL THEN NULL ELSE datetime($expiresAt) END,
            r.createdAt = datetime($createdAt),
            r.updatedAt = datetime($updatedAt)
@@ -59,6 +62,11 @@ export const ResearchRepository = {
         summary: research.summary,
         embedding: research.embedding,
         tags: research.tags,
+        // Same JSON-string encoding as episode metadata: a string map is not a
+        // native Neo4j property type.
+        metadata: Object.keys(research.metadata ?? {}).length
+          ? JSON.stringify(research.metadata)
+          : null,
         expiresAt: nullableDateParam(research.expiresAt ?? null),
         createdAt: dateParam(research.createdAt),
         updatedAt: dateParam(research.updatedAt),

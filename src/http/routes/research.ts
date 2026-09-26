@@ -14,6 +14,10 @@ const CreateBody = z.object({
   content: z.string().min(1),
   summary: z.string().optional(),
   tags: z.array(z.string().min(1)).optional(),
+  // Caller-supplied provenance. Stored as an opaque JSON blob and never
+  // indexed, embedded, searched or scored — it exists so a caller can trace a
+  // research item back to its source. Write-once: UpdateBody has no metadata.
+  metadata: z.record(z.string(), z.string()).optional(),
   projectId: z.string().min(1),
   userId: z.string().min(1).optional(),
   expiresAt: z.coerce.date().nullable().optional(),
@@ -34,6 +38,11 @@ const UpdateBody = z
   .refine((b) => Object.keys(b).some((k) => k !== 'actor' && k !== 'reason'), {
     message: 'at least one field to update is required',
   });
+
+const SimilarQuery = ScopeGuardQuery.extend({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  minScore: z.coerce.number().min(0).max(1).default(0.85),
+});
 
 const ListQuery = z
   .object({
@@ -83,6 +92,35 @@ export function registerResearchRoutes(app: App, container: Container): void {
         `research ${req.params.id}`,
       );
       return { ok: true as const, data: toWireResearch(research) };
+    },
+  });
+
+  app.route({
+    method: 'GET',
+    url: '/research/:id/similar',
+    schema: {
+      params: z.object({ id: z.string().uuid() }),
+      querystring: SimilarQuery,
+      response: {
+        200: okEnvelope(z.array(WireResearchSchema.extend({ score: z.number() }))),
+      },
+    },
+    handler: async (req) => {
+      const { limit, minScore, ...guard } = req.query;
+      const research = assertInScope(
+        await container.research.get(req.params.id),
+        guard,
+        `research ${req.params.id}`,
+      );
+      const similar = await container.research.similar(research, {
+        limit,
+        minScore,
+        userId: guard.userId,
+      });
+      return {
+        ok: true as const,
+        data: similar.map((r) => ({ ...toWireResearch(r), score: r.score })),
+      };
     },
   });
 

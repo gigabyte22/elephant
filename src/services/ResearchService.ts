@@ -39,6 +39,7 @@ export interface CreateResearchInput {
   content: string;
   summary?: string;
   tags?: string[];
+  metadata?: Record<string, string>;
   projectId: string;
   userId?: string;
   expiresAt?: Date | null;
@@ -139,6 +140,7 @@ export function createResearchService(deps: Deps) {
       summary,
       embedding,
       tags: input.tags ?? [],
+      metadata: input.metadata,
       expiresAt: input.expiresAt ?? null,
       createdAt: now,
       updatedAt: now,
@@ -239,6 +241,34 @@ export function createResearchService(deps: Deps) {
     return read((tx) => ResearchRepository.list(tx, opts));
   }
 
+  /**
+   * Live research in the same project whose stored summary embedding lies
+   * within `minScore` of this item's. Reuses the vector already on the node —
+   * no embedding-model call — and excludes the item itself. An expired or
+   * soft-deleted item 404s: it is gone as far as retrieval is concerned.
+   */
+  async function similar(
+    item: Research,
+    opts: { limit: number; minScore: number; userId?: string },
+  ): Promise<Array<Research & { score: number }>> {
+    if (item.expiresAt && item.expiresAt <= new Date()) throw notFound(`research ${item.id}`);
+    if (item.embedding.length === 0) return [];
+    const hits = await read((tx) =>
+      ResearchRepository.listSimilar(tx, {
+        embedding: item.embedding,
+        limit: opts.limit + 1,
+        minScore: opts.minScore,
+        scope: {
+          projectId: item.projectId,
+          projectScope: 'strict',
+          userId: opts.userId,
+          userScope: opts.userId ? 'filter' : 'none',
+        },
+      }),
+    );
+    return hits.filter((r) => r.id !== item.id).slice(0, opts.limit);
+  }
+
   async function softDelete(id: string, actor?: string): Promise<void> {
     // Pre-read for the vault tombstone ref (needs projectId for the path).
     const existing = await read((tx) => ResearchRepository.get(tx, id));
@@ -267,7 +297,7 @@ export function createResearchService(deps: Deps) {
     return write((tx) => ResearchRepository.purgeExpired(tx, before, limit));
   }
 
-  return { create, update, get, list, softDelete, purgeExpired };
+  return { create, update, get, list, similar, softDelete, purgeExpired };
 }
 
 export type ResearchService = ReturnType<typeof createResearchService>;

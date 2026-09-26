@@ -303,3 +303,168 @@ describe('research body retention', () => {
     expect(data.summary).toBe('legacy summary');
   });
 });
+
+describe('research metadata', () => {
+  async function post(payload: Record<string, unknown>) {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 't', source: 'manual', projectId: PROJECT, ...payload },
+    });
+    expect(res.statusCode).toBe(200);
+    return res.json().data as { id: string; metadata?: Record<string, string> };
+  }
+
+  test('create → get → list round-trips metadata; a PUT cannot change it', async () => {
+    await clearDb();
+    const metadata = { feedItemId: 'yt:abc123', channel: 'finance' };
+    const created = await post({ content: 'metadata carrying body', metadata });
+    expect(created.metadata).toEqual(metadata);
+
+    const got = await app.inject({ method: 'GET', url: `/research/${created.id}`, headers: auth });
+    expect(got.json().data.metadata).toEqual(metadata);
+
+    const list = await app.inject({
+      method: 'GET',
+      url: `/research?projectId=${PROJECT}`,
+      headers: auth,
+    });
+    const row = (list.json().data as Array<{ id: string; metadata?: unknown }>).find(
+      (r) => r.id === created.id,
+    );
+    expect(row?.metadata).toEqual(metadata);
+
+    // Write-once: UpdateBody has no metadata field, so it is stripped.
+    const put = await app.inject({
+      method: 'PUT',
+      url: `/research/${created.id}`,
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: 'renamed', metadata: { feedItemId: 'overwritten' } },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().data.metadata).toEqual(metadata);
+  });
+
+  test('omitted or empty metadata is absent on the wire and null on the node', async () => {
+    await clearDb();
+    const omitted = await post({ content: 'no provenance here' });
+    const empty = await post({ content: 'empty provenance here', metadata: {} });
+    expect(omitted.metadata).toBeUndefined();
+    expect(empty.metadata).toBeUndefined();
+
+    const got = await app.inject({ method: 'GET', url: `/research/${omitted.id}`, headers: auth });
+    expect(got.json().data).not.toHaveProperty('metadata');
+
+    const stored = await read(async (tx) => {
+      const r = await tx.run('MATCH (r:Research) WHERE r.id IN $ids RETURN r.metadata AS m', {
+        ids: [omitted.id, empty.id],
+      });
+      return r.records.map((rec) => rec.get('m'));
+    });
+    expect(stored).toEqual([null, null]);
+  });
+});
+
+describe('GET /research/:id/similar', () => {
+  const OTHER = 'proj-research-other';
+  // The fake embedder is bag-of-words, so cosine is the shared-token fraction:
+  // NEAR differs from BASE in one of ten tokens (score 0.9), FAR shares none.
+  const BASE = 'alpha beta gamma delta epsilon zeta eta theta iota kappa';
+  const NEAR = 'alpha beta gamma delta epsilon zeta eta theta iota lambda';
+  const FAR = 'pasta recipe with garlic basil tomato olive oil tonight';
+
+  async function create(content: string, projectId = PROJECT): Promise<string> {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/research',
+      headers: { ...auth, 'content-type': 'application/json' },
+      payload: { title: content.slice(0, 20), source: 'manual', content, projectId },
+    });
+    expect(res.statusCode).toBe(200);
+    return res.json().data.id as string;
+  }
+
+  async function similar(id: string, query = '') {
+    return app.inject({ method: 'GET', url: `/research/${id}/similar${query}`, headers: auth });
+  }
+
+  async function expire(id: string): Promise<void> {
+    await txWrite(async (tx) => {
+      await tx.run(`MATCH (r:Research {id: $id}) SET r.expiresAt = datetime() - duration('PT1H')`, {
+        id,
+      });
+    });
+  }
+
+  test('returns near items best-first, excluding self, expired and other projects', async () => {
+    await clearDb();
+    const base = await create(BASE);
+    const near = await create(NEAR);
+    const twin = await create(BASE);
+    await create(FAR);
+    await create(BASE, OTHER);
+    const expired = await create(BASE);
+    await expire(expired);
+
+    const res = await similar(base, `?projectId=${PROJECT}`);
+    expect(res.statusCode).toBe(200);
+    const rows = res.json().data as Array<{ id: string; projectId: string; score: number }>;
+    expect(rows.map((r) => r.id)).toEqual([twin, near]);
+    expect(rows.every((r) => r.projectId === PROJECT)).toBe(true);
+    expect(rows[0]!.score).toBeGreaterThan(rows[1]!.score);
+    expect(rows[1]!.score).toBeGreaterThanOrEqual(0.85);
+
+    // Without a declared projectId the item's own project still bounds the search.
+    const unscoped = await similar(base);
+    expect((unscoped.json().data as Array<{ id: string }>).map((r) => r.id)).toEqual([twin, near]);
+  });
+
+  test('minScore and limit narrow the result', async () => {
+    await clearDb();
+    const base = await create(BASE);
+    await create(NEAR); // 0.9: inside the default threshold, outside 0.95
+    const twin = await create(BASE);
+
+    const strict = await similar(base, '?minScore=0.95');
+    expect((strict.json().data as Array<{ id: string }>).map((r) => r.id)).toEqual([twin]);
+
+    const loose = await similar(base, '?minScore=0.5&limit=1');
+    expect((loose.json().data as Array<{ id: string }>).map((r) => r.id)).toEqual([twin]);
+  });
+
+  test('404 for an out-of-scope, unknown or expired id; empty for a missing embedding', async () => {
+    await clearDb();
+    const base = await create(BASE);
+
+    expect((await similar(base, `?projectId=${OTHER}`)).statusCode).toBe(404);
+    expect((await similar(randomUUID())).statusCode).toBe(404);
+
+    const gone = await create(NEAR);
+    await expire(gone);
+    expect((await similar(gone)).statusCode).toBe(404);
+
+    const legacy = randomUUID();
+    await txWrite(async (tx) => {
+      await tx.run(
+        `CREATE (r:Research:MemoryItem {
+           id: $id, kind: 'research', title: 'legacy', source: 'manual',
+           summary: 'legacy summary', embedding: [], tags: [], projectId: $projectId,
+           createdAt: datetime(), updatedAt: datetime()
+         })`,
+        { id: legacy, projectId: PROJECT },
+      );
+    });
+    const empty = await similar(legacy);
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json().data).toEqual([]);
+  });
+
+  test('rejects out-of-range limit and minScore', async () => {
+    await clearDb();
+    const base = await create(BASE);
+    expect((await similar(base, '?limit=0')).statusCode).toBe(400);
+    expect((await similar(base, '?limit=51')).statusCode).toBe(400);
+    expect((await similar(base, '?minScore=1.5')).statusCode).toBe(400);
+  });
+});

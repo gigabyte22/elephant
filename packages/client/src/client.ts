@@ -22,6 +22,7 @@ import type {
   WireResearch,
   WireScope,
   WireWorkingStateEntry,
+  WithScore,
 } from './wire-types.ts';
 
 export class ElephantError extends Error {
@@ -529,6 +530,8 @@ export class ElephantClient {
       content: string;
       summary?: string;
       tags?: string[];
+      /** Opaque caller provenance; write-once, never indexed or searched. */
+      metadata?: Record<string, string>;
       projectId: string;
       userId?: string;
       expiresAt?: Date | null;
@@ -558,6 +561,16 @@ export class ElephantClient {
     opts?: RequestOpts,
   ): Promise<WireResearch> {
     return this.request('PUT', `/research/${seg(id)}?${qs(query)}`, patch, opts);
+  }
+  /** Live research in the same project whose stored summary embedding scores at
+   *  least `minScore` (default 0.85) against this item's, excluding the item
+   *  itself, best first. `projectId`/`userId` scope the read like `getResearch`. */
+  similarResearch(
+    id: string,
+    opts: WireScope & { limit?: number; minScore?: number } = {},
+    reqOpts?: RequestOpts,
+  ): Promise<Array<WithScore<WireResearch>>> {
+    return this.request('GET', scoped(`/research/${seg(id)}/similar`, opts), undefined, reqOpts);
   }
   /** `projectId` is required by the service UNLESS an explicit `projectScope` is
    *  sent. Note `projectScope: 'shared'` is empty by construction here: research
