@@ -209,6 +209,10 @@ export interface WireHealth {
    * Absent on servers that predate it — feature-detect before sending.
    */
   episodeMetadata?: true;
+  /** Capability flag: POST /research accepts the optional `metadata` map. */
+  researchMetadata?: true;
+  /** Capability flag: GET /research/:id/similar exists. */
+  researchSimilar?: true;
 }
 
 // ── Recall ──────────────────────────────────────────────────────────────────
