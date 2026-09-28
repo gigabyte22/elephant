@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { read, verifyConnectivity } from '../../config/neo4j.ts';
+import { embedModelId } from '../../adapters/factory.ts';
+import { verifyConnectivity } from '../../config/neo4j.ts';
+import { readEmbeddingState, readVectorIndexDim } from '../../embedding-state.ts';
 import type { Container } from '../../index.ts';
 import type { App } from '../types.ts';
 
@@ -23,6 +25,11 @@ export function registerHealthRoute(app: App, container: Container): void {
               maxInputTokens: z.number(),
             }),
             schemaVectorDim: z.number().nullable(),
+            // The configured embedding model as `<provider>:<model>`, and the
+            // one the stored vectors were made with (null until migrate has
+            // recorded it). Boot refuses to start when they differ.
+            embedModel: z.string(),
+            schemaEmbedModel: z.string().nullable(),
             dream: z.object({
               lastRun: z.string().nullable(),
               lastRunDurationMs: z.number().nullable(),
@@ -56,23 +63,15 @@ export function registerHealthRoute(app: App, container: Container): void {
     handler: async () => {
       let neo4jOk = false;
       let schemaVectorDim: number | null = null;
+      let schemaEmbedModel: string | null = null;
       let backlog: number | null = null;
       let deadLettered: number | null = null;
       let extraction: { pending: number; deadLettered: number } | null = null;
       try {
         await verifyConnectivity();
         neo4jOk = true;
-        schemaVectorDim = await read(async (tx) => {
-          const result = await tx.run(
-            "SHOW VECTOR INDEX YIELD name, options WHERE name = 'fact_vectors' RETURN options",
-          );
-          const row = result.records[0];
-          if (!row) return null;
-          const options = row.get('options') as { indexConfig?: Record<string, unknown> } | null;
-          const cfg = options?.indexConfig;
-          const v = cfg?.['vector.dimensions'];
-          return typeof v === 'number' ? v : null;
-        });
+        schemaVectorDim = await readVectorIndexDim();
+        schemaEmbedModel = (await readEmbeddingState())?.embedModel ?? null;
         backlog = await container.dreaming.backlogEstimate().catch(() => null);
         deadLettered = await container.dreaming.deadLetteredEstimate().catch(() => null);
         extraction = await container.knowledge.extractionQueueDepth().catch(() => null);
@@ -98,6 +97,8 @@ export function registerHealthRoute(app: App, container: Container): void {
             maxInputTokens: container.embedder.maxInputTokens,
           },
           schemaVectorDim,
+          embedModel: embedModelId(container.env),
+          schemaEmbedModel,
           dream: {
             lastRun: last?.completedAt ? last.completedAt.toISOString() : null,
             lastRunDurationMs: lastDurationMs,

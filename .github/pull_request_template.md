@@ -20,6 +20,6 @@
 
 - [ ] `EXPECTED.md` updated (endpoint behaviour changed)
 - [ ] `SPEC.md` updated (schema, labels, or Cypher changed)
-- [ ] Migration added to `src/migrate.ts`, or a `scripts/backfill-*.ts` with its
-      ordering documented
+- [ ] Schema statement added to `src/migrate.ts`, data migration appended to
+      `src/migrations.ts`, or a `scripts/backfill-*.ts` with its ordering documented
 - [ ] Not applicable

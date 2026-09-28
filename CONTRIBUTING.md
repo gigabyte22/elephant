@@ -88,9 +88,11 @@ is worth reading before a non-trivial change. The deeper references are
   `docs(hermes): …`.
 - `main` is protected: land everything through a pull request with CI green.
 - Keep the PR to one concern. If you touch an endpoint, update `EXPECTED.md`;
-  if you change the schema or Cypher, update `SPEC.md` and add the migration to
-  `src/migrate.ts` (a flat list of `IF NOT EXISTS` statements — migrations are
-  not versioned).
+  if you change the schema or Cypher, update `SPEC.md` and add the migration:
+  an `IF NOT EXISTS` statement in `src/migrate.ts`, or, for a data change, a new
+  entry at the end of `MIGRATIONS` in `src/migrations.ts`. Entries are recorded
+  as `(:SchemaMigration {id})` and run once each; they must be idempotent, and
+  an applied entry is never edited or renumbered.
 - New behaviour needs a test. Unit tests are cheap; use the testcontainer suite
   when the behaviour is really about Cypher.
 

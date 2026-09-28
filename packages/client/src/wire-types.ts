@@ -186,6 +186,10 @@ export interface WireHealth {
   llm: { name: string; maxContextTokens: number };
   embedder: { name: string; dim: number; maxInputTokens: number };
   schemaVectorDim?: number | null;
+  // `<provider>:<model>` configured, and the one the stored vectors were made
+  // with. Optional: older servers do not report them.
+  embedModel?: string;
+  schemaEmbedModel?: string | null;
   dream: {
     lastRun: string | null;
     lastRunDurationMs: number | null;

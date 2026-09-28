@@ -43,6 +43,22 @@ export function buildLLMAdapter(env: Env): LLMAdapter {
   }
 }
 
+/**
+ * The configured embedding model as `<provider>:<model>`. Recorded on the graph
+ * at migrate time (src/embedding-state.ts): vectors from two models are not
+ * comparable even at the same dimension, so boot refuses when this changes.
+ */
+export function embedModelId(env: Env): string {
+  switch (env.MEMORY_EMBED_PROVIDER) {
+    case 'openai':
+      return `openai:${env.OPENAI_EMBED_MODEL}`;
+    case 'voyage':
+      return 'voyage:voyage-3'; // the only model buildEmbeddingAdapter uses for voyage
+    case 'ollama':
+      return `ollama:${env.OLLAMA_EMBED_MODEL}`;
+  }
+}
+
 export function buildEmbeddingAdapter(env: Env): EmbeddingAdapter {
   switch (env.MEMORY_EMBED_PROVIDER) {
     case 'openai':
