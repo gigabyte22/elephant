@@ -43,10 +43,10 @@ jobs:
       # The client and the TypeScript adapters are workspace packages with their
       # own vitest configs; the root `pnpm test` only covers tests/unit.
       - name: package tests
-        run: pnpm --filter ./packages/client --filter ./adapters/mcp --filter ./adapters/openclaw test
+        run: pnpm --filter './packages/*' --filter './adapters/*' test
 
       - name: package typecheck
-        run: pnpm --filter ./packages/client --filter ./adapters/mcp --filter ./adapters/openclaw typecheck
+        run: pnpm --filter './packages/*' --filter './adapters/*' typecheck
 
       # The dashboard is served from web/dist, so a broken build breaks `pnpm serve`.
       - name: build dashboard
