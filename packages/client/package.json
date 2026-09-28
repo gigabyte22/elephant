@@ -1,5 +1,5 @@
 {
-  "name": "@gigabyte22/elephant-client",
+  "name": "@kainappsinc/elephant-client",
   "version": "0.2.0",
   "description": "Typed HTTP client for the elephant memory service",
   "license": "MIT",

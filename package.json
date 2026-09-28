@@ -56,7 +56,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
-    "@gigabyte22/elephant-client": "workspace:*",
+    "@kainappsinc/elephant-client": "workspace:*",
     "@types/node": "^26.6.2",
     "testcontainers": "^12.1.0",
     "tsx": "^4.23.15",

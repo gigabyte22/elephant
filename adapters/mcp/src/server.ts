@@ -1,4 +1,4 @@
-import { ElephantClient } from '@gigabyte22/elephant-client';
+import { ElephantClient } from '@kainappsinc/elephant-client';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpConfig } from './config.ts';
 import { registerTools } from './tools.ts';

@@ -62,7 +62,7 @@ importers:
       '@biomejs/biome':
         specifier: ^2.5.14
         version: 2.5.14
-      '@gigabyte22/elephant-client':
+      '@kainappsinc/elephant-client':
         specifier: workspace:*
         version: link:packages/client
       '@types/node':
@@ -83,7 +83,7 @@ importers:
 
   adapters/mcp:
     dependencies:
-      '@gigabyte22/elephant-client':
+      '@kainappsinc/elephant-client':
         specifier: workspace:*
         version: link:../../packages/client
       '@modelcontextprotocol/sdk':
