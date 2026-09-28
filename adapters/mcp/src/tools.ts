@@ -1,8 +1,8 @@
 // The elephant tools, per EXPECTED.md §2. /dream is deliberately not a
 // tool — consolidation runs on elephant's own cron.
 
-import type { ElephantClient } from '@elephant/client';
-import { ElephantError } from '@elephant/client';
+import type { ElephantClient } from '@gigabyte22/elephant-client';
+import { ElephantError } from '@gigabyte22/elephant-client';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { McpScopeConfig } from './config.ts';

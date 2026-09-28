@@ -125,7 +125,8 @@ over the HTTP API above — the service is the source of truth.
 | [`mcp`](adapters/mcp) | see its README | An MCP server exposing recall, facts, knowledge, procedures, and intentions as tools. |
 | [`openclaw`](adapters/openclaw) | see its README | An OpenClaw plugin over the vendored TypeScript client. |
 
-`packages/client` is the TypeScript client the TS adapters share.
+[`packages/client`](packages/client) is the TypeScript client the TS adapters share, published
+to npm as `@gigabyte22/elephant-client`.
 
 ## Dashboard
 

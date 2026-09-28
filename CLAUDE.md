@@ -74,6 +74,7 @@ That last stage closes a loop with pruning: recall bumps `referenceCount`, and `
 - **Two error regimes.** Request path: throw typed `HttpError`, let the handler build the envelope. Background/best-effort paths: catch, log, continue.
 - **Layering**: `src/` never imports from `scripts/`. That's why `vault/sync.ts` lives in `src/adapters/` despite a CLI being its main caller.
 - **Migrations aren't versioned.** `src/migrate.ts` is a flat list of `IF NOT EXISTS` statements applied in order, imported by both the CLI and the integration setup so tests run real schema. Backfills that can't be idempotent are separate one-shot `scripts/backfill-*.ts` with documented ordering (e.g. `backfill-entity-norm.ts` must run *before* `migrate` on DBs predating the `entity_name_norm` constraint).
+- **`packages/client` is published** as `@gigabyte22/elephant-client` (tag `client-v<version>` → `.github/workflows/publish-client.yml`). In the workspace its `exports` point at `src/` so nothing needs a build; `publishConfig` swaps in `dist/` at pack time, so publish with `pnpm publish`, never `npm publish`.
 - **`packages/client` duplicates wire types on purpose** — consumers never import service source; pin compatibility at startup via `GET /health`. `adapters/openclaw` can't carry a `workspace:` dep (it installs standalone), so `pnpm sync:vendored-client` copies the client into `adapters/openclaw/vendor/`; a test fails on drift.
 - Commits are conventional (`feat(scope): …`) on `type/slug` branches merged via PR.
 
