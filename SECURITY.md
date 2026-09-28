@@ -21,7 +21,7 @@ Please include:
 - the smallest reproduction you have — a `curl` against a local instance is
   ideal;
 - the commit SHA you tested, and any non-default configuration required
-  (`SCOPE_*`, `AUTH_TOKEN`, adapter selection).
+  (`SCOPE_*`, `MEMORY_SERVICE_TOKEN`, adapter selection).
 
 You should get an acknowledgement within 7 days and a fix or a decision within
 30. This is a solo-maintained project, so please allow for that pace before
@@ -43,7 +43,7 @@ In scope — anything that lets a caller read or write memory it should not:
 
 Out of scope:
 
-- running Elephant with `AUTH_TOKEN` unset or Neo4j exposed to the internet —
+- running Elephant with `MEMORY_SERVICE_TOKEN` unset or Neo4j exposed to the internet —
   the service expects to sit on a trusted network behind a token;
 - denial of service from unbounded ingestion, embedding, or LLM cost. Report
   these as ordinary issues;
@@ -57,7 +57,7 @@ Elephant stores raw conversation content and its embeddings. Treat the Neo4j
 database, the `KNOWLEDGE_BLOB_DIR` blob store, and the OKF vault as holding the
 same sensitivity as the conversations you feed it:
 
-- always set `AUTH_TOKEN`; every route except `/health` and the dashboard shell
+- always set `MEMORY_SERVICE_TOKEN`; every route except `/health` and the dashboard shell
   requires it;
 - never expose the Neo4j bolt port publicly, and change the default password;
 - keep provider API keys in the environment, not in committed `.env` files —

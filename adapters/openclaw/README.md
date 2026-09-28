@@ -1,6 +1,6 @@
 # openclaw-memory-elephant
 
-OpenClaw memory plugin backed by the [elephant](https://github.com/kainappsinc/elephant)
+OpenClaw memory plugin backed by the [elephant](https://github.com/gigabyte22/elephant)
 memory service: hybrid GraphRAG recall, bi-temporal facts (valid time vs
 transaction time), versioned preferences, and nightly consolidation
 ("dreaming") on Neo4j.

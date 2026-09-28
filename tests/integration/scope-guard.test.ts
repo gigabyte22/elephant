@@ -458,8 +458,8 @@ describe('semantics', () => {
     expect((await get(markdown)).statusCode).toBe(200);
   });
 
-  // Both rules again on facts, because that is where dobby's Commons tier lives:
-  // its shared rows are NULL on both axes and must stay reachable from every
+  // Both rules again on facts, because that is where a host agent's shared tier
+  // lives: its shared rows are NULL on both axes and must stay reachable from every
   // scope, while its existing single-tenant callers send no scope at all.
   test('an unscoped fact stays deletable by a scoped caller', async () => {
     const id = await createFact();

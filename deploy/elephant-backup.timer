@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Elephant Neo4j backup
+
+[Timer]
+# Off-peak and clear of the default dream cycle (MEMORY_DREAM_CRON=0 3 * * *).
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=10m
+# Run on the next boot if the machine was off at the scheduled time.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

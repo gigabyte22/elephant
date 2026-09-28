@@ -35,7 +35,7 @@ A typical agent loop today stuffs a static markdown blob into every system promp
 └───────────────────────────┘                                   └───────────────────────────┘
 ```
 
-The HTTP API is the only public surface. There is no SDK, no shared library, no in-process embedding. That is intentional — elephant is a service, and a service is the only thing that can be consolidated by a background dreamer without coordinating with every consumer.
+The HTTP API is the public surface. For TypeScript callers, [`packages/client`](packages/client) is a typed client for it — one method per route, Bearer auth, envelope unwrapping, retries — and the adapters in `adapters/` are built on it. There is no in-process embedding and no library that touches the graph directly. That is intentional — elephant is a service, and a service is the only thing that can be consolidated by a background dreamer without coordinating with every consumer.
 
 ---
 
@@ -116,6 +116,8 @@ Six changes. Each section names an example file, states the change, and gives th
 ### 3.1 Add the client wrapper
 
 **New file: `src/memory/elephant-client.ts`**
+
+> If your orchestrator is TypeScript, depend on [`packages/client`](packages/client) instead of writing this file; it implements every route below. The wrapper is spelled out here for other languages and for readers who want to see the wire contract.
 
 A thin wrapper over the HTTP API. One method per route, returning the wire types lifted from [`src/models/wire.ts`](src/models/wire.ts). Bearer auth, retries on 5xx, typed errors.
 

@@ -24,22 +24,32 @@ const boolEnv = (defaultValue: boolean) =>
       return s === 'true' || s === '1' || s === 'yes' || s === 'on';
     });
 
-const EnvSchema = z
+// Every variable the service reads. .env.example is generated from this object
+// by scripts/gen-env-example.ts: the comments directly above a key become its
+// documentation there, and a `// --- Title ---` line starts a new section. CI
+// fails when the two drift, so regenerate after editing (`pnpm gen:env-example`).
+export const EnvSchema = z
   .object({
+    // --- HTTP service ---
     MEMORY_PORT: z.coerce.number().int().positive().default(18790),
     MEMORY_BIND: z.string().default('127.0.0.1'),
+    // Shared secret; callers send it as `Authorization: Bearer <token>`.
     MEMORY_SERVICE_TOKEN: z.string().min(8, 'MEMORY_SERVICE_TOKEN must be at least 8 chars'),
 
+    // --- Neo4j ---
     NEO4J_URI: z.string().default('bolt://localhost:7687'),
     NEO4J_USER: z.string().default('neo4j'),
     NEO4J_PASSWORD: z.string().min(1),
     NEO4J_DATABASE: z.string().default('neo4j'),
 
+    // --- LLM adapter (extraction + dreaming) ---
     MEMORY_LLM_PROVIDER: LlmProvider.default('anthropic'),
     ANTHROPIC_API_KEY: z.string().optional(),
     ANTHROPIC_EXTRACTION_MODEL: z.string().default('claude-sonnet-4-6'),
     ANTHROPIC_DREAMING_MODEL: z.string().default('claude-opus-4-7'),
 
+    // OpenAI adapter, also used for OpenAI-compatible local servers via
+    // OPENAI_BASE_URL.
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_BASE_URL: z
       .string()
@@ -48,10 +58,20 @@ const EnvSchema = z
       .or(z.literal('').transform(() => undefined)),
     OPENAI_EXTRACTION_MODEL: z.string().default('gpt-4.1-mini'),
 
+    // --- Embedding adapter ---
     MEMORY_EMBED_PROVIDER: EmbedProvider.default('openai'),
     OPENAI_EMBED_MODEL: z.string().default('text-embedding-3-large'),
+    // MUST equal the active embedding adapter's dimension. It sizes the vector
+    // indexes at migrate time, so changing it on an existing graph means
+    // recreating those indexes and re-embedding every stored vector.
     EMBED_DIM: z.coerce.number().int().positive().default(1536),
 
+    // Voyage embeddings (MEMORY_EMBED_PROVIDER=voyage).
+    VOYAGE_API_KEY: z.string().optional(),
+
+    // --- Local-server adapters ---
+    // MEMORY_LLM_PROVIDER=llamacpp requires LLAMACPP_BASE_URL;
+    // MEMORY_EMBED_PROVIDER=ollama requires OLLAMA_BASE_URL.
     LLAMACPP_BASE_URL: z
       .string()
       .url()
@@ -65,6 +85,7 @@ const EnvSchema = z
       .or(z.literal('').transform(() => undefined)),
     OLLAMA_EMBED_MODEL: z.string().default('nomic-embed-text'),
 
+    // --- Schedulers ---
     MEMORY_DREAM_CRON: z.string().default('0 3 * * *'),
     // OKF vault sweep. Staggered off MEMORY_DREAM_CRON because the dream cycle
     // can run for DREAM_DEADLINE_MS against the same driver pool. Only starts
@@ -72,6 +93,7 @@ const EnvSchema = z
     OKF_SYNC_CRON: z.string().default('30 3 * * *'),
     MEMORY_OBSERVATION_TTL_DAYS: z.coerce.number().int().positive().default(7),
 
+    // --- Research retention ---
     // A GRACE PERIOD measured from each document's own `expiresAt`, not a TTL —
     // callers set their own expiry, and this says how long an already-lapsed
     // document is kept before its storage goes back. That gap is what makes the
@@ -86,6 +108,7 @@ const EnvSchema = z
     // sweeps don't contend for the same driver pool.
     RESEARCH_REAP_CRON: z.string().default('15 * * * *'),
 
+    // --- Working state (opaque KV; not a memory item) ---
     // Working-state backend selection. Default Neo4j keeps everything in one
     // graph; Redis is opt-in for hot-path orchestration state.
     WORKING_STATE_BACKEND: z.enum(['neo4j', 'redis']).default('neo4j'),
@@ -95,19 +118,23 @@ const EnvSchema = z
       .optional()
       .or(z.literal('').transform(() => undefined)),
 
+    // --- Chunking, summarization and limits ---
     // Chunking / size limits. See SPEC.md §"Size limits and chunking".
     CHUNK_TARGET_TOKENS: z.coerce.number().int().positive().default(480),
     CHUNK_OVERLAP_TOKENS: z.coerce.number().int().nonnegative().default(50),
     SUMMARY_THRESHOLD_TOKENS: z.coerce.number().int().positive().default(2000),
     SUMMARY_TARGET_TOKENS: z.coerce.number().int().positive().default(300),
+    // Both optional; they default to the active adapter's own reported limits.
     EMBED_MAX_INPUT_TOKENS: z.coerce.number().int().positive().optional(),
     LLM_MAX_CONTEXT_TOKENS: z.coerce.number().int().positive().optional(),
     MAX_BODY_BYTES: z.coerce.number().int().positive().default(10_000_000),
 
+    // --- OKF vault ---
     // OKF vault: one-way markdown projection of research + knowledge docs.
     OKF_ENABLED: boolEnv(false),
     OKF_DIR: z.string().default('./.okf-vault'),
 
+    // --- Knowledge attachments ---
     // Knowledge attachments: filesystem blob store + multimodal extraction.
     KNOWLEDGE_BLOB_DIR: z.string().default('./.knowledge-blobs'),
     KNOWLEDGE_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(26_214_400), // 25 MiB
@@ -193,6 +220,7 @@ const EnvSchema = z
     KNOWLEDGE_EXTRACTION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(4),
     KNOWLEDGE_EXTRACTION_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(300_000),
 
+    // --- Dream cycle ---
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),
     DREAM_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
@@ -202,6 +230,7 @@ const EnvSchema = z
     DREAM_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
     DREAM_RETRY_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(60_000),
 
+    // --- Knowledge graph construction (dream cycle) ---
     // Knowledge-graph construction (dream cycle, off the hot path). Relation
     // extraction builds (:Entity)-[:RELATES]->(:Entity) triples; entity
     // resolution re-embeds entities by name and adds :SYNONYM alias edges.
@@ -211,6 +240,7 @@ const EnvSchema = z
     DREAM_ENTITY_SYNONYM_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
     DREAM_ENTITY_SYNONYM_CANDIDATES: z.coerce.number().int().positive().default(5),
 
+    // --- Fact hygiene (dream cycle) ---
     // Fact hygiene (dream cycle). Dedup skips a new fact whose cosine to an
     // existing live fact exceeds the threshold; supersede/promote gates mirror
     // the previously hardcoded constants in DreamingService.
@@ -276,6 +306,7 @@ const EnvSchema = z
     DREAM_CONSOLIDATION_MIN_SIMILARITY: z.coerce.number().min(0).max(1).default(0.8),
     DREAM_CONSOLIDATION_MIN_ENTITY_FACTS: z.coerce.number().int().min(2).default(3),
 
+    // --- Personalized PageRank retrieval ---
     // HippoRAG-style Personalized PageRank retrieval. OFF by default — the
     // default recall pipeline is unchanged when disabled. The GDS projection is
     // refreshed at the end of each dream cycle when this is on.
@@ -288,6 +319,7 @@ const EnvSchema = z
     RETRIEVAL_PPR_DAMP_FACTOR: z.coerce.number().min(0).max(1).default(0.5),
     RETRIEVAL_PPR_USE_RECOGNITION_FILTER: boolEnv(false),
 
+    // --- Retrieval ---
     // Retrieval pipeline config. See src/services/retrieval/config.ts.
     RETRIEVAL_ENABLE_CHUNKS: boolEnv(true),
     RETRIEVAL_ENABLE_SIBLING_EXPANSION: boolEnv(true),

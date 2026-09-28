@@ -53,7 +53,10 @@ def main():
 
     http = cfg("NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
     user = cfg("NEO4J_USER", "neo4j")
-    password = cfg("NEO4J_PASSWORD", "neo4j-dev")
+    password = cfg("NEO4J_PASSWORD", None)
+    if not password:
+        print("[restore] NEO4J_PASSWORD is not set (environment or .env)", file=sys.stderr)
+        return 1
     database = cfg("NEO4J_DATABASE", "neo4j")
     backup_dir = cfg("BACKUP_DIR", os.path.expanduser("~/backups/neo4j"))
 

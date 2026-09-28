@@ -23,7 +23,7 @@ from plugins.memory.config_schema import (
 CONFIG_SCHEMA = ProviderConfigSchema(
     name="elephant",
     label="Elephant",
-    docs_url="https://github.com/kainappsinc/elephant/tree/main/adapters/hermes",
+    docs_url="https://github.com/gigabyte22/elephant/tree/main/adapters/hermes",
     fields=(
         ProviderField(
             key="token",

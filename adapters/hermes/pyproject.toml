@@ -22,8 +22,8 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/kainappsinc/elephant"
-Source = "https://github.com/kainappsinc/elephant/tree/main/adapters/hermes"
+Homepage = "https://github.com/gigabyte22/elephant"
+Source = "https://github.com/gigabyte22/elephant/tree/main/adapters/hermes"
 
 [project.scripts]
 hermes-elephant = "hermes_elephant.install:main"

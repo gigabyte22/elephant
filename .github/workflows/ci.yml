@@ -37,6 +37,9 @@ jobs:
       - name: typecheck
         run: pnpm typecheck
 
+      - name: .env.example matches the env schema
+        run: pnpm gen:env-example --check
+
       - name: unit tests
         run: pnpm test
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install boot-time units: elephant-neo4j (recreates the Neo4j container on
-# every reboot) and elephant (the memory service, which waits for Neo4j).
+# every reboot), elephant (the memory service, which waits for Neo4j) and
+# elephant-backup.timer (a daily online Neo4j dump).
 #
 # Run with: sudo bash deploy/install-boot-units.sh
 #
@@ -38,6 +39,11 @@ echo "Installing elephant.service ..."
 render "$HERE/elephant.service" > /etc/systemd/system/elephant.service
 chmod 0644 /etc/systemd/system/elephant.service
 
+echo "Installing elephant-backup.service + elephant-backup.timer ..."
+render "$HERE/elephant-backup.service" > /etc/systemd/system/elephant-backup.service
+chmod 0644 /etc/systemd/system/elephant-backup.service
+install -m 0644 "$HERE/elephant-backup.timer" /etc/systemd/system/elephant-backup.timer
+
 echo "Installing elephant drop-in ..."
 install -d -m 0755 /etc/systemd/system/elephant.service.d
 install -m 0644 "$HERE/elephant.service.d/neo4j.conf" /etc/systemd/system/elephant.service.d/neo4j.conf
@@ -51,6 +57,11 @@ systemctl enable elephant-neo4j.service
 echo "Enabling elephant.service ..."
 systemctl enable elephant.service
 
+echo "Enabling elephant-backup.timer ..."
+systemctl enable --now elephant-backup.timer
+
 echo
 echo "Done. Test now without rebooting with:"
 echo "  sudo systemctl restart elephant-neo4j.service && systemctl status elephant-neo4j.service --no-pager"
+echo "Run a backup immediately with:"
+echo "  sudo systemctl start elephant-backup.service && journalctl -u elephant-backup.service -n 5 --no-pager"
