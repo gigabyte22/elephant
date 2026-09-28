@@ -50,9 +50,11 @@ A single unit test: `pnpm vitest run tests/unit/decay.test.ts -t "name"`.
 Python adapter tests: `cd adapters/hermes && uv run --with pytest pytest -q`.
 The live-server tests skip themselves unless an instance is reachable.
 
-CI runs lint, typecheck, unit tests, the dashboard build, and the Python
-adapter tests on every pull request. Integration tests are not in the PR gate —
-run them locally when you touch repositories, Cypher, or the dream cycle.
+CI runs lint, typecheck, unit tests, the client and adapter package tests, the
+dashboard build, the Python adapter tests, and the integration suite against a
+Neo4j testcontainer on every pull request. The integration job takes several
+minutes, so run the relevant spec locally first when you touch repositories,
+Cypher, or the dream cycle.
 
 ## House style
 
