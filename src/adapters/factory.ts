@@ -54,11 +54,11 @@ export function buildEmbeddingAdapter(env: Env): EmbeddingAdapter {
       });
     case 'voyage':
       // Voyage requires an API key; surface a clearer error than the generic env validator.
-      if (!env.OPENAI_API_KEY && !process.env.VOYAGE_API_KEY) {
+      if (!env.OPENAI_API_KEY && !env.VOYAGE_API_KEY) {
         throw new Error('VOYAGE_API_KEY required when MEMORY_EMBED_PROVIDER=voyage');
       }
       return createVoyageEmbeddingAdapter({
-        apiKey: process.env.VOYAGE_API_KEY ?? '',
+        apiKey: env.VOYAGE_API_KEY ?? '',
         model: 'voyage-3',
         dim: env.EMBED_DIM,
       });

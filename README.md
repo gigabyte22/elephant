@@ -64,14 +64,15 @@ tree** (which API for facts vs observations vs research vs state).
 Requirements: Node ≥ 22, pnpm, Docker.
 
 ```bash
-# 1. Start Neo4j (community image with APOC + GDS plugins)
-docker compose up -d neo4j
-
-# 2. Configure
+# 1. Configure
 cp .env.example .env
 #    Set MEMORY_SERVICE_TOKEN, NEO4J_PASSWORD, and LLM/embedding keys
 #    (ANTHROPIC_API_KEY and/or OPENAI_API_KEY; EMBED_DIM must match your
 #    embedding model — see comments in .env.example).
+
+# 2. Start Neo4j (community image with APOC + GDS plugins). Compose reads
+#    NEO4J_PASSWORD from .env and publishes Neo4j on 127.0.0.1 only.
+docker compose up -d neo4j
 
 # 3. Create the schema (idempotent)
 pnpm install
@@ -89,6 +90,10 @@ The service listens on `127.0.0.1:18790` by default; the dashboard is at
 `pnpm dev` runs the server in watch mode. `pnpm dream` triggers a dream cycle
 manually. `scripts/backup-neo4j.py` / `restore-neo4j.py` provide online
 logical backups.
+
+To run the service in a container instead, `docker compose --profile app up -d`
+builds the `Dockerfile` and starts it next to Neo4j. For a systemd host (boot
+units plus a daily backup timer), see [`deploy/README.md`](deploy/README.md).
 
 ## API at a glance
 

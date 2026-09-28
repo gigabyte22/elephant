@@ -8,15 +8,17 @@ no `docker exec`, no sudo, no in-container file write — the dump comes back ov
 the wire on port 7474.
 
 Why this exists: on 2026-06-09 a stray `bun test` in this repo wiped the live
-graph and there was NO backup. See tests/integration/guard.ts and the
-elephant-tests-wipe-live-db memory note.
+graph and there was NO backup. See tests/integration/guard.ts.
+
+Scheduled daily by deploy/elephant-backup.timer (installed by
+deploy/install-boot-units.sh).
 
 Restore with scripts/restore-neo4j.py.
 
 Env (read from elephant/.env, overridable):
   NEO4J_HTTP   default http://127.0.0.1:7474
   NEO4J_USER   default neo4j
-  NEO4J_PASSWORD
+  NEO4J_PASSWORD required, no default
   NEO4J_DATABASE default neo4j
   BACKUP_DIR   default ~/backups/neo4j
   BACKUP_KEEP  default 14
@@ -56,7 +58,10 @@ def main():
 
     http = cfg("NEO4J_HTTP", "http://127.0.0.1:7474").rstrip("/")
     user = cfg("NEO4J_USER", "neo4j")
-    password = cfg("NEO4J_PASSWORD", "neo4j-dev")
+    password = cfg("NEO4J_PASSWORD", None)
+    if not password:
+        print("[backup] NEO4J_PASSWORD is not set (environment or .env)", file=sys.stderr)
+        return 1
     database = cfg("NEO4J_DATABASE", "neo4j")
     backup_dir = cfg("BACKUP_DIR", os.path.expanduser("~/backups/neo4j"))
     keep = int(cfg("BACKUP_KEEP", "14"))

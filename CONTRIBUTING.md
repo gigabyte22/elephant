@@ -14,7 +14,7 @@ Node ≥ 22, [pnpm](https://pnpm.io), and Docker.
 ```bash
 pnpm install
 docker compose up -d neo4j          # Neo4j 5.26 with APOC + GDS
-cp .env.example .env                # then fill in NEO4J_PASSWORD, AUTH_TOKEN, provider keys
+cp .env.example .env                # then fill in NEO4J_PASSWORD, MEMORY_SERVICE_TOKEN, provider keys
 pnpm migrate                        # idempotent — constraints + vector/full-text indexes
 pnpm --filter @elephant/web build   # the dashboard is served from web/dist
 pnpm serve                          # or `pnpm dev` to watch
@@ -51,7 +51,9 @@ Python adapter tests: `cd adapters/hermes && uv run --with pytest pytest -q`.
 The live-server tests skip themselves unless an instance is reachable.
 
 CI runs lint, typecheck, unit tests, the dashboard build, and the Python
-adapter tests on every pull request. Integration tests are not in the PR gate —
+adapter tests on every pull request. It also checks that `.env.example` matches
+the env schema: `.env.example` is generated from `src/config/env.ts`, so after
+adding or documenting a variable there, run `pnpm gen:env-example`. Integration tests are not in the PR gate —
 run them locally when you touch repositories, Cypher, or the dream cycle.
 
 ## House style

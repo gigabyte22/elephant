@@ -129,14 +129,16 @@ CREATE TEXT INDEX entity_name_fulltext IF NOT EXISTS FOR (e:Entity) ON e.name;
 CREATE FULLTEXT INDEX fact_fulltext IF NOT EXISTS FOR (f:Fact) ON f.content OPTIONS {indexConfig: {`fulltext.analyzer`: 'english'}};
 
 // 3. Vector Indexes (2026 native VECTOR type – cosine is best for memory)
-CREATE VECTOR INDEX memory_vectors IF NOT EXISTS
-FOR (n:Fact|Preference|Insight|Episode)
+// One index per label, named `<label>_vectors` (fact_vectors, episode_vectors,
+// ...): a Neo4j vector index covers a single label. The full label list is
+// VECTOR_INDEX_LABELS in src/migrate.ts.
+CREATE VECTOR INDEX fact_vectors IF NOT EXISTS
+FOR (n:Fact)
 ON n.embedding
 OPTIONS {
   indexConfig: {
-    `vector.dimensions`: 1536,           // e.g. text-embedding-3-large or voyage-3
-    `vector.similarity_function`: 'cosine',
-    `vector.quantization.enabled`: true
+    `vector.dimensions`: 1536,           // EMBED_DIM
+    `vector.similarity_function`: 'cosine'
   }
 };
 
@@ -236,7 +238,7 @@ TypeScriptasync retrieve(context: {
     WITH e
     MATCH (e)-[:HAS_FACT]->(f:Fact)
     WHERE f.validTo IS NULL OR f.validTo > $now
-    SEARCH f IN (VECTOR INDEX memory_vectors FOR $queryVector LIMIT 20)
+    SEARCH f IN (VECTOR INDEX fact_vectors FOR $queryVector LIMIT 20)
     WHERE f.importance >= $minImportance
     OPTIONAL MATCH (f)-[:SUPERSEDES]->(old:Fact)
     RETURN f, old, gds.alpha.similarity.cosine(f.embedding, $queryVector) AS score

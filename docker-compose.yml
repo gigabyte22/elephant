@@ -7,11 +7,15 @@ services:
     restart: unless-stopped
     security_opt:
       - apparmor=unconfined
+    # Loopback only: the service and the backup script reach Neo4j from this
+    # host. Publishing on all interfaces would expose the graph to the network.
     ports:
-      - '7474:7474'
-      - '7687:7687'
+      - '127.0.0.1:7474:7474'
+      - '127.0.0.1:7687:7687'
     environment:
-      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neo4j-dev}
+      # No default password: compose refuses to start until one is set (in .env
+      # or the environment), so a fresh install never runs on a known secret.
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
       NEO4J_PLUGINS: '["apoc","graph-data-science"]'
       NEO4J_dbms_security_procedures_unrestricted: 'apoc.*,gds.*'
       NEO4J_dbms_security_procedures_allowlist: 'apoc.*,gds.*,db.*'
@@ -31,7 +35,26 @@ services:
       timeout: 5s
       retries: 12
 
+  # The service itself, opt-in: `docker compose --profile app up -d`. The
+  # systemd units run it from the checkout instead and only start `neo4j`.
+  elephant:
+    profiles: ['app']
+    build: .
+    container_name: elephant
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NEO4J_URI: bolt://neo4j:7687
+    ports:
+      - '127.0.0.1:${MEMORY_PORT:-18790}:${MEMORY_PORT:-18790}'
+    volumes:
+      - elephant-data:/data
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
 volumes:
+  elephant-data:
   neo4j-data:
   neo4j-logs:
   neo4j-import:

@@ -18,7 +18,8 @@ function describeDisposition(
 // Drains attachments parked as 'pending' by the upload path.
 //
 // Why this exists at all: a vision or transcription call takes seconds to
-// minutes, while dobby's memory client aborts an upload after 30s and retries.
+// minutes, while a host agent's memory client may abort an upload after 30s and
+// retry.
 // Running extraction inline therefore returned an error to the user *and* left
 // one extra attachment row per retry. Uploads now return as soon as the bytes
 // are stored, and the slow part happens here.

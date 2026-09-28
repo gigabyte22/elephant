@@ -1,0 +1,16 @@
+[Unit]
+Description=Elephant Neo4j backup (online APOC dump)
+After=elephant-neo4j.service
+Requires=elephant-neo4j.service
+
+[Service]
+Type=oneshot
+User=__ELEPHANT_USER__
+Group=__ELEPHANT_GROUP__
+WorkingDirectory=__ELEPHANT_DIR__
+
+# The script reads NEO4J_* and BACKUP_DIR / BACKUP_KEEP from the environment,
+# falling back to ./.env in the repo root. Set BACKUP_DIR there to choose where
+# dumps land (default ~/backups/neo4j). The dump streams over the HTTP API, so
+# Neo4j stays online and nothing needs root.
+ExecStart=/usr/bin/python3 __ELEPHANT_DIR__/scripts/backup-neo4j.py
