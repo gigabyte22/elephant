@@ -19,7 +19,7 @@ interface Statement {
   cypher: string;
 }
 
-const VECTOR_INDEX_LABELS = [
+export const VECTOR_INDEX_LABELS = [
   'Fact',
   'Preference',
   'Insight',
