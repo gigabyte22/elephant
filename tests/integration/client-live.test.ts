@@ -213,6 +213,21 @@ describe('knowledge', () => {
     });
     expect(att.filename).toBe('note.txt');
 
+    // The scope guard sees the declared scope: a foreign project 404s, the
+    // document's own project is admitted.
+    const input = () => ({
+      filename: 'scoped.txt',
+      mimeType: 'text/plain',
+      dataBase64: Buffer.from('scoped').toString('base64'),
+    });
+    const foreign = { projectId: `other-${randomUUID()}` };
+    await expect(client.uploadAttachment(doc.id, input(), foreign)).rejects.toThrow();
+    const scopedAtt = await client.uploadAttachment(doc.id, input(), { projectId: PROJECT });
+    await expect(client.deleteAttachment(doc.id, scopedAtt.id, foreign)).rejects.toThrow();
+    expect(
+      (await client.deleteAttachment(doc.id, scopedAtt.id, { projectId: PROJECT })).deleted,
+    ).toBe(true);
+
     // The one route that does NOT use the {ok,data} envelope.
     const blob = await client.fetchAttachmentBlob(att.blobId);
     expect(await blob.text()).toBe('hello');
@@ -282,6 +297,17 @@ describe('procedures, intentions, state, audit', () => {
     });
     // Note the envelope: this route returns `{observations: [...]}`, not a bare array.
     expect((await client.listObservations(SESSION)).observations.length).toBeGreaterThan(0);
+  });
+
+  test('scoped preferences are separate rows from the unscoped one', async () => {
+    const key = `pref-${randomUUID()}`;
+    const scope = { projectId: PROJECT, userId: `user-${randomUUID()}` };
+    await client.putPreference(key, 'commons');
+    await client.putPreference(key, 'scoped', { ...scope, actor: 'spec' });
+    expect((await client.getPreference(key)).value).toBe('commons');
+    expect((await client.getPreference(key, scope)).value).toBe('scoped');
+    const listed = (await client.listPreferences(scope)).preferences.filter((p) => p.key === key);
+    expect(listed.map((p) => p.value)).toEqual(['scoped']);
   });
 
   test('audit list and timeline accept date params', async () => {
