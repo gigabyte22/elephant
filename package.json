@@ -19,6 +19,7 @@
     "backfill:bitemporal": "tsx scripts/backfill-fact-bitemporal.ts",
     "backfill:fact-supersede-checked": "tsx scripts/backfill-fact-supersede-checked.ts",
     "backfill:attachment-extraction": "tsx scripts/backfill-attachment-extraction.ts",
+    "reembed": "tsx scripts/reembed.ts",
     "wipe": "tsx scripts/wipe.ts",
     "dream": "tsx scripts/dream.ts",
     "dev": "tsx watch scripts/serve.ts",

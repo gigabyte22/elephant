@@ -1602,6 +1602,18 @@ End-to-end smoke test once the integration is wired.
 
 If any of the above fails, check the elephant `/health` endpoint first — `dream.backlogEstimate`, `embedder.dim`, and `neo4j: true` are the usual culprits.
 
+### Changing the embedding model
+
+Elephant records which embedder made its vectors (`/health` → `schemaEmbedModel`, next to the configured `embedModel`) and refuses to boot when you change `MEMORY_EMBED_PROVIDER`, the embedding model or `EMBED_DIM` under an existing graph. Vectors from two models are not comparable, even at the same dimension. To switch models:
+
+1. Stop elephant and back up the graph (`scripts/backup-neo4j.py`).
+2. Put the new provider, model and matching `EMBED_DIM` in `.env`.
+3. Run `pnpm reembed --dry-run`. It shows the vectors per label, whether the vector indexes will be rebuilt, and makes one probe call to the new model.
+4. Run `pnpm reembed --yes`. Every vector is re-derived from the text it was made from. When the dimension changes, the vector indexes are dropped and recreated at the new size.
+5. Start elephant. `/health` now shows `schemaEmbedModel` equal to `embedModel`.
+
+An interrupted run leaves the old model on record, so boot keeps refusing. Run it again.
+
 ---
 
 ## 8. Open questions and follow-ups

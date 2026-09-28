@@ -38,7 +38,8 @@ export interface UpdateProcedureInput {
   reason?: string;
 }
 
-const procedureEmbedText = (whenToUse: string, content: string) => `${whenToUse}\n\n${content}`;
+export const procedureEmbedText = (whenToUse: string, content: string) =>
+  `${whenToUse}\n\n${content}`;
 
 export function createProcedureService(deps: Deps) {
   const { embedder, config } = deps;

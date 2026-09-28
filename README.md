@@ -147,6 +147,12 @@ so you can see what's about to be forgotten before it is.
 service itself) and an install script — see
 [deploy/README.md](deploy/README.md).
 
+The graph records which embedding model made its vectors, and the service
+refuses to start under a different one. `pnpm reembed` (`--dry-run` first)
+re-embeds everything with the model configured in `.env`, which is the
+supported way to change provider, model or `EMBED_DIM`. See
+[INTEGRATION.md](INTEGRATION.md#changing-the-embedding-model).
+
 ## How Elephant compares
 
 Most memory systems optimize for *remembering more*. Elephant is built around
