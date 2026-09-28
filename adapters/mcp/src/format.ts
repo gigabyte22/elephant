@@ -10,7 +10,7 @@ import type {
   WirePreference,
   WireProcedure,
   WireWorkingStateEntry,
-} from '@elephant/client';
+} from '@gigabyte22/elephant-client';
 
 export function formatFactLine(f: WireFact & { score?: number }): string {
   const bits: string[] = [];

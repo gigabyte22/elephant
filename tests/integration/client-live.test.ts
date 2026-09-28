@@ -12,7 +12,7 @@
 // null-vs-absent bugs at once.
 
 import { randomUUID } from 'node:crypto';
-import { ElephantClient } from '@elephant/client';
+import { ElephantClient } from '@gigabyte22/elephant-client';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import { buildHttpServer } from '../../src/http/server.ts';

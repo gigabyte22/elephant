@@ -7,7 +7,7 @@
 // default) matching elephant's /recall contract.
 
 import { randomUUID } from 'node:crypto';
-import type { ScopeMode } from '@elephant/client';
+import type { ScopeMode } from '@gigabyte22/elephant-client';
 
 export interface McpScopeConfig {
   agentId: string;

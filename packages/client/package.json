@@ -1,13 +1,45 @@
 {
-  "name": "@elephant/client",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@gigabyte22/elephant-client",
+  "version": "0.2.0",
   "description": "Typed HTTP client for the elephant memory service",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gigabyte22/elephant.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/gigabyte22/elephant/tree/main/packages/client",
+  "keywords": [
+    "elephant",
+    "memory",
+    "agent",
+    "neo4j",
+    "client"
+  ],
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
   "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

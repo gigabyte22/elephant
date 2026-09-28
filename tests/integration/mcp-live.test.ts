@@ -15,7 +15,7 @@
 // half of each handler that talks to elephant.
 
 import { randomUUID } from 'node:crypto';
-import { ElephantClient } from '@elephant/client';
+import { ElephantClient } from '@gigabyte22/elephant-client';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import type { McpScopeConfig } from '../../adapters/mcp/src/config.ts';
 import { registerTools } from '../../adapters/mcp/src/tools.ts';
