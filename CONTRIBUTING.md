@@ -13,8 +13,8 @@ Node ≥ 22, [pnpm](https://pnpm.io), and Docker.
 
 ```bash
 pnpm install
-docker compose up -d neo4j          # Neo4j 5.26 with APOC + GDS
 cp .env.example .env                # then fill in NEO4J_PASSWORD, MEMORY_SERVICE_TOKEN, provider keys
+docker compose up -d neo4j          # Neo4j 5.26 with APOC + GDS; needs NEO4J_PASSWORD
 pnpm migrate                        # idempotent — constraints + vector/full-text indexes
 pnpm --filter @elephant/web build   # the dashboard is served from web/dist
 pnpm serve                          # or `pnpm dev` to watch
