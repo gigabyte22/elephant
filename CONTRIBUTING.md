@@ -20,6 +20,9 @@ pnpm --filter @elephant/web build   # the dashboard is served from web/dist
 pnpm serve                          # or `pnpm dev` to watch
 ```
 
+`.env.example` is generated from `src/config/env.ts`, and CI fails when they
+drift: after adding or documenting a variable there, run `pnpm gen:env-example`.
+
 There is **no build step for the backend** — it runs from TypeScript source via
 `tsx`, which is why imports carry explicit `.ts` extensions.
 
@@ -51,9 +54,7 @@ Python adapter tests: `cd adapters/hermes && uv run --with pytest pytest -q`.
 The live-server tests skip themselves unless an instance is reachable.
 
 CI runs lint, typecheck, unit tests, the dashboard build, and the Python
-adapter tests on every pull request. It also checks that `.env.example` matches
-the env schema: `.env.example` is generated from `src/config/env.ts`, so after
-adding or documenting a variable there, run `pnpm gen:env-example`. Integration tests are not in the PR gate —
+adapter tests on every pull request. Integration tests are not in the PR gate —
 run them locally when you touch repositories, Cypher, or the dream cycle.
 
 ## House style
