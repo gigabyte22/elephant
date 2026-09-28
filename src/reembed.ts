@@ -24,33 +24,33 @@ interface Source {
   text(row: Row): string;
 }
 
-const field =
-  (name: string): Source['text'] =>
-  (row) =>
-    row[name] ?? '';
+// A label embedded from one property, verbatim.
+function field(name: string): Source {
+  return { fields: [name], text: (row) => row[name] ?? '' };
+}
 
 // What each label's writer passes to the embedder. Keyed by the full label
 // list, so adding a vector label to migrate.ts fails the build until it is
 // described here.
 const SOURCES: Record<VectorLabel, Source> = {
-  Fact: { fields: ['content'], text: field('content') },
+  Fact: field('content'),
   // Promoted from a fact and stored with that fact's vector.
-  Insight: { fields: ['content'], text: field('content') },
+  Insight: field('content'),
   Preference: { fields: ['key', 'value'], text: (r) => `${r.key ?? ''}: ${r.value ?? ''}` },
-  Observation: { fields: ['content'], text: field('content') },
-  Episode: { fields: ['summary'], text: field('summary') },
-  Chunk: { fields: ['text'], text: field('text') },
-  KnowledgeDocument: { fields: ['summary'], text: field('summary') },
-  KnowledgeChunk: { fields: ['text'], text: field('text') },
+  Observation: field('content'),
+  Episode: field('summary'),
+  Chunk: field('text'),
+  KnowledgeDocument: field('summary'),
+  KnowledgeChunk: field('text'),
   Procedure: {
     fields: ['whenToUse', 'content'],
     text: (r) => procedureEmbedText(r.whenToUse ?? '', r.content ?? ''),
   },
-  Research: { fields: ['summary'], text: field('summary') },
-  ResearchChunk: { fields: ['text'], text: field('text') },
-  Intention: { fields: ['content'], text: field('content') },
+  Research: field('summary'),
+  ResearchChunk: field('text'),
+  Intention: field('content'),
   // Entity resolution in the dream cycle embeds the entity by name.
-  Entity: { fields: ['name'], text: field('name') },
+  Entity: field('name'),
 };
 
 export interface ReembedOptions {
@@ -81,13 +81,13 @@ async function countVectors(label: VectorLabel): Promise<number> {
   });
 }
 
-async function setVectorIndexes(dim: number | null): Promise<void> {
-  if (dim === null) {
-    for (const label of VECTOR_INDEX_LABELS) {
-      await write((tx) => tx.run(`DROP INDEX ${label.toLowerCase()}_vectors IF EXISTS`));
-    }
-    return;
+async function dropVectorIndexes(): Promise<void> {
+  for (const label of VECTOR_INDEX_LABELS) {
+    await write((tx) => tx.run(`DROP INDEX ${label.toLowerCase()}_vectors IF EXISTS`));
   }
+}
+
+async function createVectorIndexes(dim: number): Promise<void> {
   for (const stmt of buildStatements(dim).filter((s) => s.name.startsWith('vector:'))) {
     await write((tx) => tx.run(stmt.cypher));
   }
@@ -119,7 +119,7 @@ export async function reembed(opts: ReembedOptions): Promise<ReembedReport> {
 
   if (recreateIndexes) {
     log('[reembed] dropping vector indexes (dimension changes)');
-    await setVectorIndexes(null);
+    await dropVectorIndexes();
   }
 
   for (const label of VECTOR_INDEX_LABELS) {
@@ -164,7 +164,7 @@ export async function reembed(opts: ReembedOptions): Promise<ReembedReport> {
 
   if (recreateIndexes) {
     log(`[reembed] recreating vector indexes at dim ${to.embedDim}`);
-    await setVectorIndexes(to.embedDim);
+    await createVectorIndexes(to.embedDim);
   }
   await writeEmbeddingState(to);
   return report;
