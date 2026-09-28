@@ -43,6 +43,7 @@ function buildApp(): App {
   app.setErrorHandler(errorHandler);
 
   const container = {
+    env: { MEMORY_EMBED_PROVIDER: 'openai', OPENAI_EMBED_MODEL: 'fake-embed' },
     ingestion: { ingestEpisode },
     llm: { name: 'fake-llm', maxContextTokens: 8192 },
     embedder: { name: 'fake-embedder', dim: 8, maxInputTokens: 512 },

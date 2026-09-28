@@ -87,6 +87,9 @@ GET    /health                      liveness + config readback (no auth required
       schemaVectorDim: number | null,   // read back from SHOW VECTOR INDEX;
                                         // compare to embedder.dim to catch a
                                         // migrate/EMBED_DIM mismatch
+      embedModel: string,               // configured embedder, `<provider>:<model>`
+      schemaEmbedModel: string | null,  // embedder the stored vectors came from;
+                                        // boot refuses while the two differ
       dream: { lastRun, lastRunDurationMs, running, runningJobId, backlogEstimate,
                deadLetteredEpisodes },
       extraction: { pending, deadLettered },  // attachment text extraction queue;

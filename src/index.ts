@@ -19,6 +19,7 @@ import type { WorkingStateAdapter } from './adapters/working-state/types.ts';
 import type { Env } from './config/env.ts';
 import { loadEnv } from './config/env.ts';
 import { closeDriver, verifyConnectivity, write } from './config/neo4j.ts';
+import { assertEmbeddingMatchesGraph } from './embedding-state.ts';
 import { DreamRunRepository } from './repositories/DreamRunRepository.ts';
 import { createDashboardService, type DashboardService } from './services/DashboardService.ts';
 import { createDreamingService, type DreamingService } from './services/DreamingService.ts';
@@ -213,6 +214,8 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
 export async function bootstrap(overrides?: ContainerOverrides): Promise<Container> {
   await verifyConnectivity();
   const container = await buildContainer(overrides);
+  // Refuse to serve recall against vectors made by a different embedder.
+  await assertEmbeddingMatchesGraph(container.env);
   // Announce where attachments go. Silence here is what let a key set for
   // dreaming quietly become the OCR provider for every uploaded image.
   if (!overrides?.extraction) {

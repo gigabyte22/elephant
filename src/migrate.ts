@@ -1,8 +1,18 @@
 // Schema migration. Imported by both scripts/migrate.ts (CLI) and the
-// integration test setup. Runs idempotently — safe to call repeatedly.
+// integration test setup. Safe to call repeatedly: step 0 is a list of
+// `IF NOT EXISTS` statements, and the data migrations after it (src/migrations.ts)
+// are recorded as (:SchemaMigration {id}) nodes and each applied once.
 
 import { loadEnv } from './config/env.ts';
-import { verifyConnectivity, write } from './config/neo4j.ts';
+import { read, verifyConnectivity, write } from './config/neo4j.ts';
+import {
+  configuredEmbedding,
+  describeEmbeddingMismatch,
+  readEmbeddingState,
+  readVectorIndexDim,
+  writeEmbeddingState,
+} from './embedding-state.ts';
+import { MIGRATIONS } from './migrations.ts';
 
 interface Statement {
   name: string;
@@ -66,6 +76,11 @@ export function buildStatements(embedDim: number): Statement[] {
       cypher: 'CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE',
     },
     {
+      name: 'constraint:schema_migration_id',
+      cypher:
+        'CREATE CONSTRAINT schema_migration_id IF NOT EXISTS FOR (m:SchemaMigration) REQUIRE m.id IS UNIQUE',
+    },
+    {
       name: 'constraint:system_state_key',
       cypher:
         'CREATE CONSTRAINT system_state_key IF NOT EXISTS FOR (s:SystemState) REQUIRE s.key IS UNIQUE',
@@ -121,15 +136,9 @@ export function buildStatements(embedDim: number): Statement[] {
       name: 'index:entity_name',
       cypher: 'CREATE TEXT INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)',
     },
-    {
-      // Canonical entity identity: case/whitespace-folded name. Entities are
-      // merged on this so variants don't splinter. Run the backfill migration
-      // (scripts/backfill-entity-norm.ts) once on pre-existing data before this
-      // uniqueness constraint can be created cleanly.
-      name: 'constraint:entity_name_norm',
-      cypher:
-        'CREATE CONSTRAINT entity_name_norm IF NOT EXISTS FOR (e:Entity) REQUIRE e.nameNorm IS UNIQUE',
-    },
+    // The entity_name_norm uniqueness constraint is created by migration
+    // 0002-entity-name-norm, which first merges the duplicates that would stop
+    // it from being created on an older graph.
     {
       name: 'fulltext:fact_content',
       cypher:
@@ -334,16 +343,54 @@ export async function migrate(opts: { log?: (msg: string) => void } = {}): Promi
   await verifyConnectivity();
   log(`[migrate] connected. embedding dim = ${env.EMBED_DIM}`);
 
-  const statements = buildStatements(env.EMBED_DIM);
-  for (const stmt of statements) {
+  // Step 0: constraints and indexes.
+  for (const stmt of buildStatements(env.EMBED_DIM)) {
     await write(async (tx) => {
       await tx.run(stmt.cypher);
     });
     log(`[migrate] applied ${stmt.name}`);
   }
-
   await write(async (tx) => {
     await tx.run('CALL db.awaitIndexes(60000)');
   });
   log('[migrate] all indexes online');
+
+  // Then the data migrations, each exactly once.
+  const applied = await read(async (tx) => {
+    const r = await tx.run('MATCH (m:SchemaMigration) RETURN m.id AS id');
+    return new Set(r.records.map((rec) => rec.get('id') as string));
+  });
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.id)) continue;
+    log(`[migrate] running ${migration.id}: ${migration.description}`);
+    await migration.run(log);
+    await write((tx) =>
+      tx.run(
+        `MERGE (m:SchemaMigration {id: $id})
+         SET m.description = $description, m.appliedAt = datetime()`,
+        { id: migration.id, description: migration.description },
+      ),
+    );
+  }
+
+  await recordEmbeddingState(log);
+}
+
+// Record which embedder the graph's vectors belong to, the first time we see
+// the graph. The dimension comes from the vector index itself, since an index
+// created under an older EMBED_DIM keeps its size. After that the record only
+// changes through scripts/reembed.ts; a mismatch is left for boot to refuse.
+async function recordEmbeddingState(log: (msg: string) => void): Promise<void> {
+  const env = loadEnv();
+  const configured = configuredEmbedding(env);
+  const stored = await readEmbeddingState();
+  if (!stored) {
+    const indexDim = await readVectorIndexDim();
+    const state = { ...configured, embedDim: indexDim ?? configured.embedDim };
+    await writeEmbeddingState(state);
+    log(`[migrate] recorded embedding ${state.embedModel} (dim ${state.embedDim})`);
+    return;
+  }
+  const mismatch = describeEmbeddingMismatch(configured, stored);
+  if (mismatch) log(`[migrate] WARNING: ${mismatch}`);
 }
