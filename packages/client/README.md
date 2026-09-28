@@ -1,11 +1,11 @@
-# @gigabyte22/elephant-client
+# @kainappsinc/elephant-client
 
 Typed HTTP client for the elephant memory service. One method per route,
 Bearer auth, `{ ok, data } / { ok, error }` envelope unwrapping, retries with
 exponential backoff on 5xx and network errors, AbortSignal-aware timeouts.
 
 ```bash
-npm install @gigabyte22/elephant-client
+npm install @kainappsinc/elephant-client
 ```
 
 The published package is compiled ESM with type declarations (Node ≥ 22, no
@@ -14,7 +14,7 @@ its TypeScript source, so the adapters in `adapters/` and the integration tests
 use it without a build step.
 
 ```ts
-import { ElephantClient } from '@gigabyte22/elephant-client';
+import { ElephantClient } from '@kainappsinc/elephant-client';
 
 const elephant = new ElephantClient({
   url: process.env.MEMORY_SERVICE_URL ?? 'http://127.0.0.1:18790',
@@ -52,5 +52,5 @@ The version in `package.json` is the release. Bump it, merge, then push a tag
 named `client-v<version>` (for example `client-v0.2.0`). The `publish-client`
 workflow checks that the tag matches the version, runs typecheck, tests and
 build, and publishes to npm with `pnpm publish`, which swaps in the `dist`
-entry points from `publishConfig`. `pnpm --filter @gigabyte22/elephant-client
+entry points from `publishConfig`. `pnpm --filter @kainappsinc/elephant-client
 pack` builds the same tarball locally.

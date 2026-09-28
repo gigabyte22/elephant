@@ -131,7 +131,7 @@ over the HTTP API above — the service is the source of truth.
 | [`openclaw`](adapters/openclaw) | see its README | An OpenClaw plugin over the vendored TypeScript client. |
 
 [`packages/client`](packages/client) is the TypeScript client the TS adapters share, published
-to npm as `@gigabyte22/elephant-client`.
+to npm as `@kainappsinc/elephant-client`.
 
 ## Dashboard
 

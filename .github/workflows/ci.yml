@@ -58,7 +58,7 @@ jobs:
       # The npm tarball for packages/client; a broken build would only surface
       # at release time otherwise.
       - name: pack client
-        run: pnpm --filter @gigabyte22/elephant-client pack --pack-destination "$RUNNER_TEMP"
+        run: pnpm --filter @kainappsinc/elephant-client pack --pack-destination "$RUNNER_TEMP"
 
   python:
     name: python
