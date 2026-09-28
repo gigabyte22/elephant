@@ -3,7 +3,7 @@
 // `IF NOT EXISTS` statements, and the data migrations after it (src/migrations.ts)
 // are recorded as (:SchemaMigration {id}) nodes and each applied once.
 
-import { loadEnv } from './config/env.ts';
+import { type Env, loadEnv } from './config/env.ts';
 import { read, verifyConnectivity, write } from './config/neo4j.ts';
 import {
   configuredEmbedding,
@@ -373,15 +373,14 @@ export async function migrate(opts: { log?: (msg: string) => void } = {}): Promi
     );
   }
 
-  await recordEmbeddingState(log);
+  await recordEmbeddingState(env, log);
 }
 
 // Record which embedder the graph's vectors belong to, the first time we see
 // the graph. The dimension comes from the vector index itself, since an index
 // created under an older EMBED_DIM keeps its size. After that the record only
 // changes through scripts/reembed.ts; a mismatch is left for boot to refuse.
-async function recordEmbeddingState(log: (msg: string) => void): Promise<void> {
-  const env = loadEnv();
+async function recordEmbeddingState(env: Env, log: (msg: string) => void): Promise<void> {
   const configured = configuredEmbedding(env);
   const stored = await readEmbeddingState();
   if (!stored) {
