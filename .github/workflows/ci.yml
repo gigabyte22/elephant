@@ -40,6 +40,14 @@ jobs:
       - name: unit tests
         run: pnpm test
 
+      # The client and the TypeScript adapters are workspace packages with their
+      # own vitest configs; the root `pnpm test` only covers tests/unit.
+      - name: package tests
+        run: pnpm --filter './packages/*' --filter './adapters/*' test
+
+      - name: package typecheck
+        run: pnpm --filter './packages/*' --filter './adapters/*' typecheck
+
       # The dashboard is served from web/dist, so a broken build breaks `pnpm serve`.
       - name: build dashboard
         run: pnpm --filter @elephant/web build
@@ -65,3 +73,30 @@ jobs:
       # Live tests skip themselves unless an Elephant instance is reachable.
       - name: hermes adapter tests
         run: uv run --with pytest pytest -q
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The dashboard specs serve web/dist.
+      - name: build dashboard
+        run: pnpm --filter @elephant/web build
+
+      # Starts a throwaway Neo4j testcontainer (the runner has Docker); see
+      # tests/integration/setup.ts.
+      - name: integration tests
+        run: pnpm test:integration
