@@ -195,16 +195,28 @@ export class ElephantClient {
   }
 
   // ─ Preferences ──
-  listPreferences(opts?: RequestOpts): Promise<{ preferences: WirePreference[] }> {
-    return this.request('GET', '/preferences', undefined, opts);
+  // A preference is keyed by (key, projectId, userId). Declaring no scope
+  // addresses the unscoped row — its own preference, not a wildcard over every
+  // scope's value. `defaultProjectId` is NOT applied here, so existing callers
+  // keep reading and writing the unscoped row.
+  listPreferences(
+    query: WireScope = {},
+    opts?: RequestOpts,
+  ): Promise<{ preferences: WirePreference[] }> {
+    return this.request('GET', scoped('/preferences', query), undefined, opts);
   }
-  getPreference(key: string, opts?: RequestOpts): Promise<WirePreference> {
-    return this.request('GET', `/preferences/${encodeURIComponent(key)}`, undefined, opts);
+  getPreference(key: string, query: WireScope = {}, opts?: RequestOpts): Promise<WirePreference> {
+    return this.request(
+      'GET',
+      scoped(`/preferences/${encodeURIComponent(key)}`, query),
+      undefined,
+      opts,
+    );
   }
   putPreference(
     key: string,
     value: string,
-    extras?: { confidence?: number; actor?: string },
+    extras?: { confidence?: number; actor?: string } & WireScope,
     opts?: RequestOpts,
   ): Promise<WirePreference> {
     return this.request(
@@ -420,18 +432,25 @@ export class ElephantClient {
       dataBase64: string;
       actor?: string;
     },
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireKnowledgeAttachment> {
-    return this.request('POST', `/knowledge/documents/${seg(documentId)}/attachments`, input, opts);
+    return this.request(
+      'POST',
+      scoped(`/knowledge/documents/${seg(documentId)}/attachments`, query),
+      input,
+      opts,
+    );
   }
   deleteAttachment(
     documentId: string,
     attachmentId: string,
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<{ deleted: true }> {
     return this.request(
       'DELETE',
-      `/knowledge/documents/${seg(documentId)}/attachments/${seg(attachmentId)}`,
+      scoped(`/knowledge/documents/${seg(documentId)}/attachments/${seg(attachmentId)}`, query),
       undefined,
       opts,
     );

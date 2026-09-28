@@ -108,6 +108,66 @@ describe('query-string building', () => {
     });
   });
 
+  test('preference reads and writes carry the declared scope', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { preferences: [] } }));
+    const client = new ElephantClient(cfg);
+    const scope = { projectId: 'p1', userId: 'u1' };
+    await client.listPreferences(scope);
+    await client.getPreference('a/b', scope);
+    await client.putPreference('a/b', 'v', { confidence: 0.5, ...scope });
+    const calls = fetchMock.mock.calls;
+    expect(calls[0]![0]).toBe('http://elephant.test/preferences?projectId=p1&userId=u1');
+    expect(calls[1]![0]).toBe('http://elephant.test/preferences/a%2Fb?projectId=p1&userId=u1');
+    // PUT takes its scope in the body, as the route declares it.
+    expect(calls[2]![0]).toBe('http://elephant.test/preferences/a%2Fb');
+    expect(JSON.parse(calls[2]![1]?.body as string)).toEqual({
+      value: 'v',
+      confidence: 0.5,
+      projectId: 'p1',
+      userId: 'u1',
+    });
+  });
+
+  test('preference calls without a scope address the unscoped row', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { preferences: [] } }));
+    // defaultProjectId must not leak into preferences: that would silently move
+    // existing callers off the unscoped row.
+    const client = new ElephantClient({ ...cfg, defaultProjectId: 'dflt' });
+    await client.listPreferences();
+    await client.getPreference('k');
+    await client.putPreference('k', 'v');
+    const calls = fetchMock.mock.calls;
+    expect(calls[0]![0]).toBe('http://elephant.test/preferences');
+    expect(calls[1]![0]).toBe('http://elephant.test/preferences/k');
+    expect(JSON.parse(calls[2]![1]?.body as string)).toEqual({ value: 'v' });
+  });
+
+  test('attachment upload and delete carry the scope guard query', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { deleted: true } }));
+    const client = new ElephantClient(cfg);
+    const input = { filename: 'a.png', mimeType: 'image/png', dataBase64: 'AA==' };
+    await client.uploadAttachment('d1', input, { projectId: 'p1', userId: 'u1' });
+    await client.deleteAttachment('d1', 'a1', { userId: 'u1' });
+    await client.uploadAttachment('d1', input);
+    const calls = fetchMock.mock.calls;
+    expect(calls[0]![0]).toBe(
+      'http://elephant.test/knowledge/documents/d1/attachments?projectId=p1&userId=u1',
+    );
+    expect(calls[0]![1]?.method).toBe('POST');
+    expect(JSON.parse(calls[0]![1]?.body as string)).toEqual(input);
+    expect(calls[1]![0]).toBe(
+      'http://elephant.test/knowledge/documents/d1/attachments/a1?userId=u1',
+    );
+    expect(calls[1]![1]?.method).toBe('DELETE');
+    expect(calls[2]![0]).toBe('http://elephant.test/knowledge/documents/d1/attachments');
+  });
+
   test('saveFact forwards origin scope and actor', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
