@@ -5,7 +5,8 @@
 //   pnpm gen:env-example --check   # exit 1 if it is out of date (CI)
 //
 // Documentation comes from the source: the `//` comment lines directly above a
-// key become its `#` comment, and a `// --- Title ---` line opens a section.
+// key become its `#` comment (so a `// --- Title ---` line becomes a section
+// header).
 // Values: a required key is left blank to fill in, a key with a default is
 // shown commented out at that default, and an optional key is commented out
 // blank.
@@ -55,11 +56,7 @@ function renderEnvExample(): string {
   for (const [key, field] of Object.entries(EnvSchema.innerType().shape)) {
     const docs = comments.get(key) ?? [];
     if (docs.length > 0) lines.push('');
-    for (const text of docs) {
-      const section = /^--- (.+) ---$/.exec(text);
-      if (section) lines.push(`# --- ${section[1]} ---`);
-      else lines.push(text ? `# ${text}` : '#');
-    }
+    for (const text of docs) lines.push(text ? `# ${text}` : '#');
     lines.push(valueLine(key, field as ZodTypeAny));
   }
   return `${lines.join('\n')}\n`;
