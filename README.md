@@ -159,6 +159,26 @@ re-embeds everything with the model configured in `.env`, which is the
 supported way to change provider, model or `EMBED_DIM`. See
 [INTEGRATION.md](INTEGRATION.md#changing-the-embedding-model).
 
+## Releases
+
+Pushing a `v<version>` tag that matches the root `package.json` version
+publishes a multi-arch (`linux/amd64`, `linux/arm64`) image of the root
+`Dockerfile` to the GitHub Container Registry, tagged `vX.Y.Z`, `X.Y.Z` and
+`latest`:
+
+```bash
+docker pull ghcr.io/gigabyte22/elephant:latest
+```
+
+The image applies the schema migration on start and then serves on port 18790
+as the unprivileged `node` user; mount a volume at `/data` for knowledge blobs
+and the OKF vault, and pass the same environment as `.env`. The client library
+is released separately under `client-v*` tags.
+
+GHCR packages start out private. Set the package's visibility to public once
+(package settings on GitHub); until then, pulling needs `docker login ghcr.io`
+with a token that has `read:packages`.
+
 ## How Elephant compares
 
 Most memory systems optimize for *remembering more*. Elephant is built around
