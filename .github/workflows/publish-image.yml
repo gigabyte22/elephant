@@ -18,11 +18,9 @@ permissions:
 
 concurrency:
   group: publish-image-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   image:
-    name: image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
