@@ -31,7 +31,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
     MEMORY_BIND=0.0.0.0 \
     KNOWLEDGE_BLOB_DIR=/data/knowledge-blobs \
-    OKF_DIR=/data/okf-vault
+    OKF_DIR=/data/okf-vault \
+    ELEPHANT_STATE_DIR=/data/state
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package.json tsconfig.json ./

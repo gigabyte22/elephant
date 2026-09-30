@@ -13,6 +13,7 @@ import {
 import type { Container } from '../index.ts';
 import { bearerAuth } from './auth.ts';
 import { errorHandler } from './errors.ts';
+import { registerAdminSettingsRoutes } from './routes/admin-settings.ts';
 import { registerAuditRoutes } from './routes/audit.ts';
 import { registerDashboardRoutes } from './routes/dashboard.ts';
 import { registerDreamRoutes } from './routes/dream.ts';
@@ -59,6 +60,7 @@ export async function buildHttpServer(container: Container): Promise<FastifyInst
   registerStateRoutes(app, container);
   registerIntentionsRoutes(app, container);
   registerAuditRoutes(app, container);
+  registerAdminSettingsRoutes(app, container);
   registerDashboardRoutes(app, container);
   await registerDashboardStatic(app);
 
