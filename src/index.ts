@@ -52,6 +52,11 @@ import {
   createWorkingStateService,
   type WorkingStateService,
 } from './services/WorkingStateService.ts';
+import {
+  createKnowledgeMediaSettings,
+  type KnowledgeMediaSettings,
+} from './settings/knowledge-media.ts';
+import { createSettingsStore } from './settings/secure-store.ts';
 
 export interface Container {
   env: Env;
@@ -60,6 +65,7 @@ export interface Container {
   blobStore: BlobStore;
   vault?: VaultWriter;
   extraction: ExtractionService;
+  mediaSettings: KnowledgeMediaSettings;
   ingestion: MemoryIngestionService;
   retrieval: RetrievalService;
   temporal: TemporalService;
@@ -111,7 +117,14 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
 
   const blobStore = overrides.blobStore ?? buildBlobStore(env);
   const vault = overrides.vault ?? buildVaultWriter(env);
-  const extraction = overrides.extraction ?? buildExtractionService(env);
+  // `extraction` is a stable handle over clients that are rebuilt when an admin
+  // changes the vision/transcription settings, so nothing holding it goes stale.
+  const mediaSettings = createKnowledgeMediaSettings({
+    store: createSettingsStore(env.ELEPHANT_STATE_DIR, env.ELEPHANT_SETTINGS_KEY),
+    build: buildExtractionService,
+    initial: overrides.extraction,
+  });
+  const extraction = mediaSettings.extraction;
   const graphProjection = createGraphProjectionService();
 
   return {
@@ -121,6 +134,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     blobStore,
     vault,
     extraction,
+    mediaSettings,
     ingestion: createMemoryIngestionService({
       llm,
       embedder,
@@ -219,7 +233,7 @@ export async function bootstrap(overrides?: ContainerOverrides): Promise<Contain
   // Announce where attachments go. Silence here is what let a key set for
   // dreaming quietly become the OCR provider for every uploaded image.
   if (!overrides?.extraction) {
-    for (const line of describeExtractionCapabilities(container.env)) {
+    for (const line of describeExtractionCapabilities(container.mediaSettings.effectiveEnv())) {
       // eslint-disable-next-line no-console
       console.log(line);
     }

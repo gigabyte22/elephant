@@ -134,6 +134,15 @@ export const EnvSchema = z
     OKF_ENABLED: boolEnv(false),
     OKF_DIR: z.string().default('./.okf-vault'),
 
+    // --- Local state ---
+    // Where Elephant keeps state that belongs to the service rather than the
+    // graph: currently the encrypted admin-settings store (settings set through
+    // PUT /admin/settings/knowledge-media, which win over the matching env vars).
+    ELEPHANT_STATE_DIR: z.string().default('./.elephant-state'),
+    // 32-byte AES-256-GCM key (base64 or hex) for that store. Unset, a key file
+    // is created next to the store on first write, mode 0600.
+    ELEPHANT_SETTINGS_KEY: z.string().optional(),
+
     // --- Knowledge attachments ---
     // Knowledge attachments: filesystem blob store + multimodal extraction.
     KNOWLEDGE_BLOB_DIR: z.string().default('./.knowledge-blobs'),
@@ -473,16 +482,28 @@ export type Env = z.infer<typeof EnvSchema>;
 
 let cached: Env | undefined;
 
-export function loadEnv(): Env {
-  if (cached) return cached;
-  const result = EnvSchema.safeParse(process.env);
+export class EnvValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EnvValidationError';
+  }
+}
+
+/** Parse and validate an arbitrary key/value source against the env schema. */
+export function parseEnv(source: Record<string, string | undefined>): Env {
+  const result = EnvSchema.safeParse(source);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  - ${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('\n');
-    throw new Error(`Invalid environment configuration:\n${issues}`);
+    throw new EnvValidationError(`Invalid environment configuration:\n${issues}`);
   }
-  cached = result.data;
+  return result.data;
+}
+
+export function loadEnv(): Env {
+  if (cached) return cached;
+  cached = parseEnv(process.env);
   return cached;
 }
 
