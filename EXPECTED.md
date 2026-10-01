@@ -99,6 +99,26 @@ GET    /health                      liveness + config readback (no auth required
                                        // servers — feature-detect, don't assume.
     }
 
+GET    /admin/settings/knowledge-media
+                                    runtime-editable KNOWLEDGE_VISION_* / KNOWLEDGE_TRANSCRIBE_*
+  → data: { settings: [{ name, secret, isSet, value?, source: 'stored'|'env'|'default' }] }
+                                    // value is the effective value for non-secrets (schema
+                                    // defaults included) and never present for a secret
+                                    // (*_API_KEY). isSet is false only when source is 'default'.
+PUT    /admin/settings/knowledge-media
+                                    { set?: { NAME: string }, unset?: [NAME] } → same shape as GET
+                                    // Names outside the KNOWLEDGE_VISION_* / KNOWLEDGE_TRANSCRIBE_*
+                                    // set, a name in both set and unset, an empty value (unset it
+                                    // instead), or a combination the env schema rejects → 400 and
+                                    // nothing is persisted. Validation runs the real EnvSchema over
+                                    // env + stored values, so cross-field rules apply: send a
+                                    // provider and its credentials in the same PUT.
+                                    // Stored AES-256-GCM in <ELEPHANT_STATE_DIR>/settings.enc
+                                    // (key: ELEPHANT_SETTINGS_KEY, else a 0600 settings.key beside
+                                    // it). Resolution at use time: stored → env → schema default.
+                                    // A successful PUT rebuilds the extraction clients in place —
+                                    // no restart; a rejected one keeps the current clients.
+
 # v1.2 — knowledge / procedural / research / working-state / audit
 POST   /knowledge/documents         ingest a shared/RAG document (chunked + embedded)
 GET    /knowledge/documents/:id     fetch one document
