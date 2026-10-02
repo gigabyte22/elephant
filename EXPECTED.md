@@ -97,6 +97,8 @@ GET    /health                      liveness + config readback (no auth required
       episodeMetadata: true            // capability flag: POST /episodes accepts the
                                        // optional `metadata` map. Absent on older
                                        // servers — feature-detect, don't assume.
+      researchMetadata: true           // capability flag: POST /research accepts `metadata`.
+      researchSimilar: true            // capability flag: GET /research/:id/similar exists.
     }
 
 GET    /admin/settings/knowledge-media
@@ -151,6 +153,13 @@ GET    /research/:id                fetch one (includes full `content` body; sco
                                     ?projectId=…&userId=… as above — the userId leg is enforced,
                                     not just accepted)
 PUT    /research/:id                update (auto :ArchivedRevision snapshot; projectId/userId immutable)
+GET    /research/:id/similar        research near-duplicates of one item, by embedding
+                                    # query: limit (1-50, default 10), minScore (0-1, default
+                                    # 0.85), plus the ?projectId=…&userId=… scope guard as
+                                    # /research/:id (out-of-scope id -> 404). Matches are confined
+                                    # to the item's own project; userId, if given, filters the
+                                    # user axis. Expired item -> 404; item without an embedding -> [].
+                                    # → data: [{ ...WireResearch, score }] (score desc, self excluded)
 GET    /research?projectId=…        list (rows include `content`)
                                     # projectId is required UNLESS an explicit projectScope is
                                     # sent; omitting both would select 'none', which spans every

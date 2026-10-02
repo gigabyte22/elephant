@@ -26,6 +26,9 @@ export function createOpenAIEmbeddingAdapter(config: OpenAIEmbedAdapterConfig): 
     const response = await client.embeddings.create({
       model: config.model,
       input: texts,
+      // Only text-embedding-3* can shorten its output; other OpenAI-compatible
+      // endpoints reject the parameter.
+      ...(config.model.startsWith('text-embedding-3') ? { dimensions: config.dim } : {}),
     });
     return response.data.sort((a, b) => a.index - b.index).map((d) => d.embedding as number[]);
   }

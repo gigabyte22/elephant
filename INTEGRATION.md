@@ -97,8 +97,10 @@ Defaults (see [src/http/routes/recall.ts](src/http/routes/recall.ts)):
 | ----------- | -------- |
 | `agentId`   | `boost`  |
 | `sessionId` | `boost`  |
-| `projectId` | `none`   |
-| `userId`    | `none`   |
+| `projectId` | `boost` when a `projectId` is supplied, else `none` |
+| `userId`    | `boost` when a `userId` is supplied, else `none`    |
+
+List routes (`/knowledge/documents`, `/procedures`, `/research`, `/intentions`) differ: `projectScope` / `userScope` default to `filter` when the corresponding id is supplied, and `none` otherwise.
 
 Map your orchestrator's identifiers to scope:
 
