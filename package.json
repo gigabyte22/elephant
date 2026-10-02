@@ -38,7 +38,7 @@
     "gen:env-example": "tsx scripts/gen-env-example.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.127.0",
+    "@anthropic-ai/sdk": "^0.129.0",
     "@fastify/sensible": "^6.0.6",
     "@fastify/static": "^10.1.5",
     "croner": "^10.0.1",
