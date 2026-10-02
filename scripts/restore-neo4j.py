@@ -4,14 +4,20 @@
 Replays the gzipped Cypher dump over the HTTP API via apoc.cypher.runMany
 (server-side statement splitting). Intended for an EMPTY/freshly-wiped database
 (schema already applied by `pnpm migrate`) — restoring over existing data would
-duplicate nodes, so this refuses to run against a non-empty DB unless --force.
+duplicate nodes, so this refuses to run against a database that holds real
+nodes unless --force.
+
+`pnpm migrate` always writes :SchemaMigration and :SystemState bookkeeping
+nodes, and the dump carries the source's copies of them under unique
+constraints. So those two labels do not count as "data" for the emptiness
+check, and they are deleted before the dump runs (the dump recreates them).
 
 Usage:
   python3 scripts/restore-neo4j.py [BACKUP_FILE] [--yes] [--force]
 
   BACKUP_FILE  path to a neo4j-*.cypher.gz; defaults to the newest in BACKUP_DIR.
   --yes        skip the interactive confirmation.
-  --force      allow restoring into a non-empty DB (duplicates possible).
+  --force      allow restoring into a DB that already holds real nodes (duplicates possible).
 
 Env mirrors backup-neo4j.py (NEO4J_HTTP/USER/PASSWORD/DATABASE, BACKUP_DIR).
 """
@@ -82,15 +88,20 @@ def main():
             return json.load(resp)
 
     # Refuse to clobber a populated DB unless forced.
-    cnt = run("MATCH (n) RETURN count(n) AS c")
+    # :SchemaMigration / :SystemState are bookkeeping written by every migrate;
+    # they do not make a database "populated".
+    cnt = run(
+        "MATCH (n) WHERE NOT n:SchemaMigration AND NOT n:SystemState RETURN count(n) AS c"
+    )
     if cnt.get("errors"):
         print(f"[restore] connectivity error: {cnt['errors']}", file=sys.stderr)
         return 1
     existing = cnt["results"][0]["data"][0]["row"][0]
     if existing and not force:
         print(
-            f"[restore] target DB is not empty ({existing} nodes). Restoring would duplicate "
-            "data. Wipe first (pnpm migrate on a fresh DB) or pass --force.",
+            f"[restore] target DB already holds data ({existing} nodes other than "
+            ":SchemaMigration/:SystemState). Restoring would duplicate it. Wipe first "
+            "(pnpm wipe --yes) or pass --force.",
             file=sys.stderr,
         )
         return 1
@@ -105,6 +116,21 @@ def main():
         if ans != "yes":
             print("[restore] aborted.")
             return 1
+
+    # The dump recreates these under unique constraints; leaving the freshly
+    # migrated copies in place would make the replay fail.
+    removed = run(
+        "MATCH (n) WHERE n:SchemaMigration OR n:SystemState "
+        "DETACH DELETE n RETURN count(n) AS c"
+    )
+    if removed.get("errors"):
+        print(f"[restore] could not clear bookkeeping nodes: {removed['errors']}", file=sys.stderr)
+        return 1
+    removed_n = removed["results"][0]["data"][0]["row"][0]
+    print(
+        f"[restore] removed {removed_n} bookkeeping node(s) (:SchemaMigration/:SystemState); "
+        "the dump recreates them."
+    )
 
     res = run("CALL apoc.cypher.runMany($cypher, {}, {statistics:false})", {"cypher": cypher})
     if res.get("errors"):

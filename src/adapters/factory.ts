@@ -28,17 +28,20 @@ export function buildLLMAdapter(env: Env): LLMAdapter {
         apiKey: env.ANTHROPIC_API_KEY!,
         extractionModel: env.ANTHROPIC_EXTRACTION_MODEL,
         dreamingModel: env.ANTHROPIC_DREAMING_MODEL,
+        maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
       });
     case 'openai':
       return createOpenAILLMAdapter({
         apiKey: env.OPENAI_API_KEY,
         baseURL: env.OPENAI_BASE_URL,
         model: env.OPENAI_EXTRACTION_MODEL,
+        maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
       });
     case 'llamacpp':
       return createLlamaCppLLMAdapter({
         baseURL: env.LLAMACPP_BASE_URL!,
         model: env.LLAMACPP_MODEL,
+        maxContextTokens: env.LLM_MAX_CONTEXT_TOKENS,
       });
   }
 }

@@ -288,7 +288,7 @@ Schema additions.
 - `(:Episode)-[:HAS_CHUNK {position}]->(:Chunk)` — every Episode has ≥1 Chunk; short transcripts yield exactly one.
 - `(:Chunk)-[:NEXT]->(:Chunk)` — adjacency within one Episode for context expansion.
 - `(:Fact)-[:DERIVED_FROM]->(:Chunk)` — dream-extracted Facts cite the exact passage that grounded them.
-- `(:SystemState {key:"dream.cursor"})` — persistent dream cursor for time-boxed resumable runs.
+- Per-episode dream markers on `:Episode` — `dreamedAt`, `dreamAttempts`, `dreamNextAttemptAt` (migration `0003`; replaced the old `:SystemState {key:"dream.cursor"}` cursor) — drive time-boxed resumable runs.
 - New vector index `chunk_vectors` on `:Chunk(embedding)` at `EMBED_DIM`.
 
 Adapter contract (src/adapters/embeddings/types.ts, src/adapters/llm/types.ts).
@@ -317,7 +317,7 @@ Extraction flow (DreamingService.processEpisode).
 Dream-cycle bounds (DreamingService.runCycle).
 - `AsyncMutex` serializes `/dream` invocations with the cron. Second caller receives `409 Conflict` naming the running jobId.
 - `DREAM_MAX_EPISODES_PER_RUN` caps episodes per cycle; `DREAM_DEADLINE_MS` is a soft time-box.
-- Persistent cursor on `:SystemState {key:"dream.cursor"}` advances after each episode, so a time-boxed or crashed run resumes at the next invocation instead of starting from `lastCompleted`.
+- Per-episode markers (`dreamedAt`, `dreamAttempts`, `dreamNextAttemptAt`) are written as each episode finishes or fails, so a time-boxed or crashed run resumes at the next undreamed episode instead of starting from `lastCompleted`; an episode that exhausts its attempts is dead-lettered.
 - Promote + prune phases skip if the cycle hit its deadline.
 
 Configuration (src/config/env.ts).
@@ -370,7 +370,7 @@ Contract:
   request (the graph already committed). `pnpm okf:sync` is the repair path:
   hash-gated (frontmatter `contentHash` + `updatedAt` vs node), idempotent,
   batched; it also tombstones naturally-lapsed research (`deleteReason:
-  expired`) since expiry is enforced on read and no graph-side reaper exists.
+  expired`) since expiry is enforced on read. A graph-side reaper exists but is opt-in: `ResearchReaper` (`RESEARCH_RETENTION_DAYS`) hard-purges research whose expiry lapsed that many days ago.
   The same sweep runs on `OKF_SYNC_CRON` while `OKF_ENABLED`, so lapsed
   research reaches `_trash/` without a manual run; `pnpm okf:sync` remains the
   on-demand path. Overruns are skipped per-process, but there is no
