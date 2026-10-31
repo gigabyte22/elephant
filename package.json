@@ -39,28 +39,28 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",
-    "@fastify/sensible": "^6.0.6",
-    "@fastify/static": "^10.1.5",
+    "@fastify/sensible": "^6.0.7",
+    "@fastify/static": "^10.1.8",
     "croner": "^10.0.1",
-    "dotenv": "^18.0.4",
-    "fastify": "^5.12.5",
+    "dotenv": "^18.0.9",
+    "fastify": "^5.12.7",
     "fastify-type-provider-zod": "^4.0.0",
     "ioredis": "^6.0.0",
     "jimp": "^1.6.1",
     "neo4j-driver": "^6.2.0",
-    "openai": "^7.23.0",
+    "openai": "^7.45.1",
     "pdf-parse": "^2.4.5",
-    "uuid": "^14.0.2",
+    "uuid": "^14.0.3",
     "yaml": "^2.9.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "^2.6.3",
     "@kainappsinc/elephant-client": "workspace:*",
-    "@types/node": "^26.6.3",
-    "testcontainers": "^12.2.0",
+    "@types/node": "^26.6.6",
+    "testcontainers": "^12.2.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.5"
   }
 }
