@@ -129,8 +129,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     }
   }
 
-  // A document longer than the LLM context is summarized in pieces, not sent
-  // whole (a 16k-token note used to fail every update with "context exceeded").
+  // Long content is summarized in pieces that fit the LLM context.
   const summarizeBounded = createBoundedSummarizer(llm, config.summaryTargetTokens);
 
   // Resolve the text to embed/store as the document summary: an explicit
