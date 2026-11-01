@@ -15,6 +15,7 @@ import { ResearchRepository } from '../repositories/ResearchRepository.ts';
 import type { RetrievalScope } from '../repositories/scope.ts';
 import { newId } from '../utils/ids.ts';
 import { AuditService } from './AuditService.ts';
+import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import { type Chunker, createChunker } from './Chunker.ts';
 
 interface Deps {
@@ -97,6 +98,9 @@ export function createResearchService(deps: Deps) {
     return { embedding: vectors[0] ?? [], chunks };
   }
 
+  // Long content is summarized in pieces that fit the LLM context.
+  const summarizeBounded = createBoundedSummarizer(llm, config.summaryTargetTokens);
+
   // Explicit summary is validated against the embedder limit; otherwise long
   // content is LLM-summarized and short content doubles as its own summary.
   async function resolveSummary(content: string, explicit?: string): Promise<string> {
@@ -111,7 +115,7 @@ export function createResearchService(deps: Deps) {
     }
     const tokens = await embedder.countTokens(content);
     if (tokens > config.summaryThresholdTokens) {
-      return llm.summarize({ text: content, targetTokens: config.summaryTargetTokens });
+      return summarizeBounded(content, await llm.countTokens(content));
     }
     return content;
   }

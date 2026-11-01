@@ -17,7 +17,10 @@ scope?: {projectId, userId}, actor?, id?}`.
 - The body is chunked (about 480 tokens, 50 overlap) into `:KnowledgeChunk` nodes and every chunk is embedded.
 - The document's summary: the caller's `summary`, or the content itself when it is short, or an **LLM summary**
   when the content exceeds `SUMMARY_THRESHOLD_TOKENS` (2000). Knowledge and research ingestion still summarize
-  inline (operator-driven, not the chat hot path), so a long upload waits on the LLM.
+  inline (operator-driven, not the chat hot path), so a long upload waits on the LLM. Content longer than
+  60% of `LLM_MAX_CONTEXT_TOKENS` is summarized in pieces and the piece summaries are summarized again, so a
+  document of any length fits the model; if `LLM_MAX_CONTEXT_TOKENS` is set larger than the model server's real
+  context, a long document can still fail with the server's "context exceeded" (HTTP 500).
 - `GET /knowledge/documents/:id` fetches one (with its attachments); `GET /knowledge/documents?projectId=&userId=
   &projectScope=&userScope=&limit=` lists (max 200).
 - `PUT /knowledge/documents/:id` updates title/content/summary/tags/expiresAt; the prior state is archived as a

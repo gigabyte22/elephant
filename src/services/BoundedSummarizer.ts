@@ -1,6 +1,7 @@
-// Summarization that respects the LLM's context window, shared by the two
-// callers that need it: ingestion (when it summarizes inline) and the dream
-// cycle's pass that replaces the clipped-head summaries ingestion leaves behind.
+// Summarization that respects the LLM's context window, shared by every caller
+// that summarizes: memory ingestion (when it summarizes inline), the dream
+// cycle's pass that replaces the clipped-head summaries ingestion leaves behind,
+// and knowledge / research documents.
 
 import type { LLMAdapter } from '../adapters/llm/types.ts';
 import { createChunker } from './Chunker.ts';

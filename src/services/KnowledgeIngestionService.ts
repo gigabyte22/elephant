@@ -26,6 +26,7 @@ import { KnowledgeDocumentRepository } from '../repositories/KnowledgeDocumentRe
 import { newId } from '../utils/ids.ts';
 import { nextRetryAt } from '../utils/retry.ts';
 import { AuditService } from './AuditService.ts';
+import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import { type Chunker, type ChunkPiece, createChunker } from './Chunker.ts';
 
 interface Deps {
@@ -128,6 +129,9 @@ export function createKnowledgeIngestionService(deps: Deps) {
     }
   }
 
+  // Long content is summarized in pieces that fit the LLM context.
+  const summarizeBounded = createBoundedSummarizer(llm, config.summaryTargetTokens);
+
   // Resolve the text to embed/store as the document summary: an explicit
   // summary (validated), an LLM summary for long content, or the content
   // itself when it's short enough to stand in as its own summary.
@@ -138,7 +142,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     }
     const tokens = await embedder.countTokens(content);
     if (tokens > config.summaryThresholdTokens) {
-      return llm.summarize({ text: content, targetTokens: config.summaryTargetTokens });
+      return summarizeBounded(content, await llm.countTokens(content));
     }
     return content;
   }
