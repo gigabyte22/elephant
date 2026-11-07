@@ -69,8 +69,13 @@ def main():
     os.makedirs(backup_dir, exist_ok=True)
 
     auth = base64.b64encode(f"{user}:{password}".encode()).decode()
+    # batchSize bounds Neo4j's heap: in stream mode APOC returns one row per
+    # batch and builds that batch's whole script in memory. Nodes carry
+    # 1024-float embeddings (~20 KB of Cypher each), so the default 20000 per
+    # batch needed more than the 2 GB heap once the graph passed ~38k nodes
+    # (java.lang.OutOfMemoryError, 2026-11-07); 1000 keeps a batch under 50 MB.
     stmt = (
-        "CALL apoc.export.cypher.all(null,{stream:true,format:'plain',"
+        "CALL apoc.export.cypher.all(null,{stream:true,format:'plain',batchSize:1000,"
         "useOptimizations:{type:'NONE'}}) "
         "YIELD nodes,relationships,cypherStatements "
         "RETURN nodes,relationships,cypherStatements"
