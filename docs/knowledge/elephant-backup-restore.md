@@ -40,7 +40,11 @@ python3 scripts/backup-neo4j.py
 (`NEO4J_HTTP`, default `http://127.0.0.1:7474`) with `NEO4J_USER`/`NEO4J_PASSWORD` from `.env`, gzips the Cypher to
 `BACKUP_DIR` (Elephant's `.env` sets `$STACK_ROOT/backups/neo4j-daily`; the script's own default is
 `~/backups/neo4j`) and keeps the newest `BACKUP_KEEP` (14). It refuses to write an empty dump. The whole export
-travels in one HTTP response with a 300 s timeout, so a very large graph may need a longer window. Success line:
+travels in one HTTP response with a 300 s timeout, so a very large graph may need a longer window. The export
+runs in batches of 1,000 nodes (`batchSize`): Neo4j builds each batch's Cypher in its heap, and with embeddings on
+most nodes the default batch of 20,000 needs more than the 2 GB heap once the graph passes a few tens of thousands
+of nodes (`java.lang.OutOfMemoryError: Java heap space` from `apoc.export.cypher.all`). Raising the heap is not the
+fix on a small host; keep the batch small. Success line:
 `[backup] wrote ... (N bytes, X nodes, Y rels)`; note the node and relationship counts to compare after a restore.
 
 ## Restoring
