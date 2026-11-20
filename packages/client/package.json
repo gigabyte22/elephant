@@ -1,6 +1,6 @@
 {
   "name": "@kainappsinc/elephant-client",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Typed HTTP client for the elephant memory service",
   "license": "MIT",
   "repository": {
