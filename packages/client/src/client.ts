@@ -36,6 +36,15 @@ export class ElephantError extends Error {
   }
 }
 
+export interface FactListScope extends WireScope {
+  projectScope?: ScopeMode;
+  userScope?: ScopeMode;
+}
+
+export interface GetEntityQuery extends FactListScope {
+  includeSuperseded?: boolean;
+}
+
 export interface ElephantConfig {
   url: string;
   token: string;
@@ -165,23 +174,31 @@ export class ElephantClient {
   recall(q: RecallQuery, opts?: RequestOpts): Promise<RecallResult> {
     return this.request('GET', `/recall?${qs(q)}`, undefined, opts);
   }
+  /** Scope filters the facts like `getEntity`; no scope returns every scope's facts. */
   timeline(
     at: Date,
-    query?: { entityId?: string; preferenceKey?: string; limit?: number },
+    query?: { entityId?: string; preferenceKey?: string; limit?: number } & FactListScope,
     opts?: RequestOpts,
   ): Promise<{ at: string; facts: WireFact[]; preference?: WirePreference | null }> {
     return this.request('GET', `/timeline?${qs({ at, ...query })}`, undefined, opts);
   }
 
   // ─ Entities ──
+  /**
+   * The entity is global; `projectId`/`userId` scope its facts the way the list
+   * routes do (an id alone means `filter`, which keeps shared NULL-scoped facts).
+   * No scope returns every linked fact, and `defaultProjectId` is not applied.
+   * A boolean second argument is the older `includeSuperseded` form.
+   */
   getEntity(
     id: string,
-    includeSuperseded = false,
+    query: boolean | GetEntityQuery = false,
     opts?: RequestOpts,
   ): Promise<{ entity: { id: string; name: string; type: string }; facts: WireFact[] }> {
+    const q = typeof query === 'boolean' ? { includeSuperseded: query } : query;
     return this.request(
       'GET',
-      `/entities/${seg(id)}?${qs({ includeSuperseded })}`,
+      `/entities/${seg(id)}?${qs({ includeSuperseded: false, ...q })}`,
       undefined,
       opts,
     );

@@ -1,13 +1,12 @@
-// Wipe all graph data, keep schema. Refuses to run unless --yes is passed
-// (or NODE_ENV=test) so you can't blow away prod by accident.
+// Wipe all graph data, keep schema. Refuses to run unless --yes is passed, in
+// every environment: NODE_ENV says nothing about which database .env points at.
 
 import { loadEnv } from '../src/config/env.ts';
 import { closeDriver, write } from '../src/config/neo4j.ts';
 
 async function main(): Promise<void> {
   const env = loadEnv();
-  const confirmed = process.argv.includes('--yes') || process.env.NODE_ENV === 'test';
-  if (!confirmed) {
+  if (!process.argv.includes('--yes')) {
     console.error(
       `[wipe] this will DELETE ALL DATA in ${env.NEO4J_URI} (db=${env.NEO4J_DATABASE}).`,
     );

@@ -5,6 +5,7 @@ import { toWireEntity, toWireFact } from '../../models/wire.ts';
 import { EntityRepository } from '../../repositories/EntityRepository.ts';
 import { FactRepository } from '../../repositories/FactRepository.ts';
 import { notFound } from '../errors.ts';
+import { FactListScopeQuery, factListScope } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, queryBool, WireEntitySchema, WireFactSchema } from '../wire-schemas.ts';
 
@@ -14,9 +15,8 @@ export function registerEntitiesRoutes(app: App, _container: Container): void {
     url: '/entities/:id',
     schema: {
       params: z.object({ id: z.string().uuid() }),
-      querystring: z.object({
-        includeSuperseded: queryBool,
-      }),
+      // Entities carry no scope and stay global; the scope narrows the facts.
+      querystring: FactListScopeQuery.extend({ includeSuperseded: queryBool }),
       response: {
         200: okEnvelope(
           z.object({
@@ -33,6 +33,7 @@ export function registerEntitiesRoutes(app: App, _container: Container): void {
         const facts = await FactRepository.listForEntity(tx, {
           entityId: entity.id,
           includeSuperseded: req.query.includeSuperseded ?? false,
+          scope: factListScope(req.query),
         });
         return { entity, facts };
       });

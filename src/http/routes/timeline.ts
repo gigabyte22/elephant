@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
 import { toWireFact, toWirePreference } from '../../models/wire.ts';
+import { FactListScopeQuery, factListScope } from '../scope-guard.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, WireFactSchema, WirePreferenceSchema } from '../wire-schemas.ts';
 
-const Query = z.object({
+// The scope narrows the facts, with or without entityId. The preference lookup
+// ignores it and reads the unscoped row, as it always has.
+const Query = FactListScopeQuery.extend({
   at: z.coerce.date(),
   entityId: z.string().uuid().optional(),
   preferenceKey: z.string().optional(),
@@ -28,7 +31,10 @@ export function registerTimelineRoute(app: App, container: Container): void {
       response: { 200: ResponseShape },
     },
     handler: async (req) => {
-      const snapshot = await container.temporal.snapshotAt(req.query);
+      const snapshot = await container.temporal.snapshotAt({
+        ...req.query,
+        scope: factListScope(req.query),
+      });
       // snapshot.preference is undefined when no preferenceKey was queried,
       // null when queried but no value existed at that time. Both shapes pass through.
       let preference: ReturnType<typeof toWirePreference> | null | undefined;

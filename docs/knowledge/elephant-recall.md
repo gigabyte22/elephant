@@ -94,6 +94,6 @@ curl -s -H "Authorization: Bearer $TOKEN" "$E/recall?q=employer&asOf=2026-03-01T
 
 ## Related read routes
 
-- `GET /timeline?at=<iso>[&entityId=&preferenceKey=&limit=]`: exhaustive valid-time snapshot, no ranking.
-- `GET /entities?name=<text>`: fuzzy entity lookup; `GET /entities/:id`: one entity and its facts.
+- `GET /timeline?at=<iso>[&entityId=&preferenceKey=&limit=]`: exhaustive valid-time snapshot, no ranking. Facts take `projectId`/`userId` (and `projectScope`/`userScope`) like a list route; without a scope every scope's facts are returned.
+- `GET /entities?name=<text>`: fuzzy entity lookup; `GET /entities/:id`: one entity and its facts, filtered by `projectId`/`userId` (and `projectScope`/`userScope`) like a list route; without a scope it returns every linked fact.
 - `GET /facts/:id`: one fact in the same shape recall returns.

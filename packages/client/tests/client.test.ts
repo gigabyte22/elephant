@@ -214,6 +214,48 @@ describe('fact scope query', () => {
   });
 });
 
+describe('entity scope query', () => {
+  test('scope and modes are forwarded; the boolean form keeps its old URL', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { entity: {}, facts: [] } }));
+    const client = new ElephantClient({ ...cfg, defaultProjectId: 'dflt' });
+
+    await client.getEntity('e1', { projectId: 'p1', userId: 'u1', userScope: 'strict' });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://elephant.test/entities/e1?includeSuperseded=false&projectId=p1&userId=u1&userScope=strict',
+    );
+
+    await client.getEntity('e1', { includeSuperseded: true, projectScope: 'shared' });
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'http://elephant.test/entities/e1?includeSuperseded=true&projectScope=shared',
+    );
+
+    await client.getEntity('e1', true);
+    expect(fetchMock.mock.calls[2]![0]).toBe(
+      'http://elephant.test/entities/e1?includeSuperseded=true',
+    );
+  });
+
+  test('timeline forwards scope and modes; a scope-less call is unchanged', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { at: '', facts: [] } }));
+    const client = new ElephantClient({ ...cfg, defaultProjectId: 'dflt' });
+    const at = new Date('2026-01-01T00:00:00.000Z');
+
+    await client.timeline(at, { entityId: 'e1', projectId: 'p1', userScope: 'shared' });
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      'http://elephant.test/timeline?at=2026-01-01T00%3A00%3A00.000Z&entityId=e1&projectId=p1&userScope=shared',
+    );
+
+    await client.timeline(at, { entityId: 'e1' });
+    expect(fetchMock.mock.calls[1]![0]).toBe(
+      'http://elephant.test/timeline?at=2026-01-01T00%3A00%3A00.000Z&entityId=e1',
+    );
+  });
+});
+
 describe('research similar', () => {
   test('forwards scope, limit and minScore; a bare call keeps its bare URL', async () => {
     const fetchMock = vi

@@ -44,8 +44,8 @@ Most writes take an optional `actor` that is recorded in the audit trail. Query 
 | `POST /facts/:id/supersede` | `{newFactId, reason}`; closes `:id` at event time |
 | `DELETE /facts/:id` | redaction: invisible everywhere afterwards |
 | `GET /recall` | hybrid search; see *Elephant: how recall works* |
-| `GET /timeline?at=` | valid-time snapshot: facts valid at `at` (optionally for one `entityId`; `limit` <= 500), plus the value of one preference at that instant when `preferenceKey` is given |
-| `GET /entities?name=` / `GET /entities/:id` | fuzzy entity lookup / entity with its facts |
+| `GET /timeline?at=` | valid-time snapshot: facts valid at `at` (optionally for one `entityId`; `limit` <= 500), plus the value of one preference at that instant when `preferenceKey` is given; facts take the same optional scope as `GET /entities/:id`, the preference is always the unscoped row |
+| `GET /entities?name=` / `GET /entities/:id` | fuzzy entity lookup / entity with its facts; the entity is global, its facts take `projectId`, `userId`, `projectScope`, `userScope` like a list route (no scope returns every linked fact) |
 | `GET /preferences`, `GET /preferences/:key`, `PUT /preferences/:key` | versioned key/value; PUT body `{value, confidence?, actor?, projectId?, userId?}` supersedes the previous value |
 | `POST /observations`, `GET /observations?sessionId=` | session working memory `{agentId, sessionId, content, projectId?, userId?}`, kept `MEMORY_OBSERVATION_TTL_DAYS` |
 
