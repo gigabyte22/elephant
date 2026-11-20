@@ -44,6 +44,10 @@ the same as asking for shared items: it spans every scope.
   `agentScope`/`sessionScope`) override. `GET /research` requires `projectId` unless an explicit `projectScope` is
   sent. `projectScope=shared` on research is always empty (research always has a project); `userScope=shared`
   is the meaningful shared listing there.
+- **`GET /entities/:id` and `GET /timeline`**: the entity is global (entities merge by name across scopes), but
+  the facts both routes return take the list-route params `projectId`, `userId`, `projectScope`, `userScope` with
+  the same defaults, on the timeline with or without `entityId`. Without a scope they return every scope's facts,
+  so a scoped caller must pass its scope here too. The timeline's `preferenceKey` still reads the unscoped row.
 - **Id-addressed reads and writes** (`GET/PUT/DELETE /facts/:id`, `/knowledge/documents/:id`, `/procedures/:id`,
   `/research/:id`, `GET /intentions/:id`, attachment routes): optional `?projectId=&userId=` query guard with
   `filter` semantics. An item in a different scope answers **404, not 403** (existence is itself scoped); a

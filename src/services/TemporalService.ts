@@ -2,12 +2,14 @@ import { read } from '../config/neo4j.ts';
 import type { Fact, Preference } from '../models/types.ts';
 import { FactRepository } from '../repositories/FactRepository.ts';
 import { PreferenceRepository } from '../repositories/PreferenceRepository.ts';
+import type { RetrievalScope } from '../repositories/scope.ts';
 
 export interface SnapshotInput {
   at: Date;
   entityId?: string;
   preferenceKey?: string;
   limit?: number;
+  scope?: RetrievalScope;
 }
 
 export interface SnapshotResult {
@@ -22,6 +24,7 @@ export function createTemporalService() {
         at: input.at,
         entityId: input.entityId,
         limit: input.limit ?? 100,
+        scope: input.scope,
       });
       const preference = input.preferenceKey
         ? await PreferenceRepository.snapshotAt(tx, {

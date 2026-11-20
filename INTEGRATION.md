@@ -100,7 +100,7 @@ Defaults (see [src/http/routes/recall.ts](src/http/routes/recall.ts)):
 | `projectId` | `boost` when a `projectId` is supplied, else `none` |
 | `userId`    | `boost` when a `userId` is supplied, else `none`    |
 
-List routes (`/knowledge/documents`, `/procedures`, `/research`, `/intentions`) differ: `projectScope` / `userScope` default to `filter` when the corresponding id is supplied, and `none` otherwise.
+List routes (`/knowledge/documents`, `/procedures`, `/research`, `/intentions`, and the facts of `/entities/:id` and `/timeline`) differ: `projectScope` / `userScope` default to `filter` when the corresponding id is supplied, and `none` otherwise.
 
 Map your orchestrator's identifiers to scope:
 
@@ -385,17 +385,30 @@ export class ElephantClient {
     }
     return this.get(`/recall?${params.toString()}`);
   }
-  timeline(at: Date, opts?: { entityId?: string; preferenceKey?: string; limit?: number }): Promise<{ at: string; facts: WireFact[]; preference?: WirePreference | null }> {
+  // The scope filters the facts as on getEntity; without it every scope's facts return.
+  timeline(at: Date, opts?: { entityId?: string; preferenceKey?: string; limit?: number; projectId?: string; userId?: string; projectScope?: ScopeMode; userScope?: ScopeMode }): Promise<{ at: string; facts: WireFact[]; preference?: WirePreference | null }> {
     const params = new URLSearchParams({ at: at.toISOString() });
     if (opts?.entityId) params.set('entityId', opts.entityId);
+    if (opts?.projectId) params.set('projectId', opts.projectId);
+    if (opts?.userId) params.set('userId', opts.userId);
+    if (opts?.projectScope) params.set('projectScope', opts.projectScope);
+    if (opts?.userScope) params.set('userScope', opts.userScope);
     if (opts?.preferenceKey) params.set('preferenceKey', opts.preferenceKey);
     if (opts?.limit) params.set('limit', String(opts.limit));
     return this.get(`/timeline?${params.toString()}`);
   }
 
   // ─ Entities ──
-  getEntity(id: string, includeSuperseded = false): Promise<{ entity: { id: string; name: string; type: string }; facts: WireFact[] }> {
-    return this.get(`/entities/${id}?includeSuperseded=${includeSuperseded}`);
+  // The entity is global; the scope filters its facts like a list route. Pass the
+  // caller's projectId/userId, or a tenant can read other projects' facts through
+  // a shared entity name.
+  getEntity(id: string, opts?: { includeSuperseded?: boolean; projectId?: string; userId?: string; projectScope?: ScopeMode; userScope?: ScopeMode }): Promise<{ entity: { id: string; name: string; type: string }; facts: WireFact[] }> {
+    const params = new URLSearchParams({ includeSuperseded: String(opts?.includeSuperseded ?? false) });
+    if (opts?.projectId) params.set('projectId', opts.projectId);
+    if (opts?.userId) params.set('userId', opts.userId);
+    if (opts?.projectScope) params.set('projectScope', opts.projectScope);
+    if (opts?.userScope) params.set('userScope', opts.userScope);
+    return this.get(`/entities/${id}?${params.toString()}`);
   }
   searchEntities(name: string, limit = 10): Promise<{ entities: Array<{ id: string; name: string; type: string }> }> {
     return this.get(`/entities?name=${encodeURIComponent(name)}&limit=${limit}`);

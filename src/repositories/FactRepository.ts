@@ -404,8 +404,9 @@ export const FactRepository = {
 
   async snapshotAt(
     tx: ManagedTransaction,
-    input: { at: Date; entityId?: string; limit?: number },
+    input: { at: Date; entityId?: string; limit?: number; scope?: RetrievalScope },
   ): Promise<Fact[]> {
+    const scope = scopeAndClause('f', input.scope);
     // Valid-time as-of, plus consolidation collapse: a fragment that was merged
     // into a survivor must not double-count when the survivor also covers `at`.
     // Contradiction supersedes are handled by event-time validTo on the old row.
@@ -414,6 +415,7 @@ export const FactRepository = {
        WHERE f.deletedAt IS NULL
          AND f.validFrom <= datetime($at)
          AND (f.validTo IS NULL OR f.validTo > datetime($at))
+         ${scope.clause}
          AND NOT EXISTS {
            MATCH (survivor:Fact)
            WHERE survivor.mergedFromFactIds IS NOT NULL
@@ -426,7 +428,12 @@ export const FactRepository = {
        RETURN f {.*} AS f, entityIds
        ORDER BY f.recordedAt DESC
        LIMIT toInteger($limit)`,
-      { at: dateParam(input.at), entityId: input.entityId ?? null, limit: input.limit ?? 100 },
+      {
+        at: dateParam(input.at),
+        entityId: input.entityId ?? null,
+        limit: input.limit ?? 100,
+        ...scope.params,
+      },
     );
     return result.records.map((r) =>
       toFact(r.get('f'), { entityIds: r.get('entityIds') as string[] }),
@@ -445,9 +452,13 @@ export const FactRepository = {
       // dedup, wrong here, where it would fold one human's facts into
       // another's. Mirrors the partition clusterForConsolidation applies.
       bucket?: { projectId: string | null; userId: string | null };
+      // A request's scope (GET /entities/:id). Unlike `bucket` it follows the
+      // retrieval modes, so `filter` keeps the NULL-scoped shared facts.
+      scope?: RetrievalScope;
     },
   ): Promise<Fact[]> {
     const includeSuperseded = input.includeSuperseded ?? false;
+    const scope = scopeAndClause('f', input.scope);
     const bucketClause = input.bucket
       ? `AND (f.projectId = $bucketProjectId OR (f.projectId IS NULL AND $bucketProjectId IS NULL))
             AND (f.userId = $bucketUserId OR (f.userId IS NULL AND $bucketUserId IS NULL))`
@@ -456,6 +467,7 @@ export const FactRepository = {
       `MATCH (e:Entity {id: $entityId})-[:HAS_FACT]->(f:Fact)
        WHERE f.deletedAt IS NULL${includeSuperseded ? '' : ' AND f.validTo IS NULL'}
        ${bucketClause}
+       ${scope.clause}
        OPTIONAL MATCH (other:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(other.id) AS entityIds
        RETURN f {.*} AS f, entityIds
@@ -464,6 +476,7 @@ export const FactRepository = {
         entityId: input.entityId,
         bucketProjectId: input.bucket?.projectId ?? null,
         bucketUserId: input.bucket?.userId ?? null,
+        ...scope.params,
       },
     );
     return result.records.map((r) =>

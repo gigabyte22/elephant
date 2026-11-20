@@ -65,7 +65,14 @@ GET    /recall                      hybrid retrieve — query params below
                                     // includeObservations=1 + sessionId: session working memory in hybrid recall
 GET    /timeline                    valid-time as-of: facts/prefs whose valid interval covers `at`
                                     // (merge members collapsed when a survivor covers `at`)
+                                    // facts take the same optional scope as /entities/:id
+                                    //   (projectId, userId, projectScope, userScope), with or
+                                    //   without entityId; preferenceKey still reads the unscoped row
 GET    /entities/:id                entity + its facts subgraph
+                                    // ?includeSuperseded, and a list-style scope on the facts:
+                                    //   projectId, userId, projectScope, userScope (a supplied id
+                                    //   infers 'filter', none infers 'none'). The entity itself is
+                                    //   global and always returned; no scope = every linked fact.
 GET    /entities?name=…             fuzzy entity lookup
 
 GET    /preferences/:key            single pref

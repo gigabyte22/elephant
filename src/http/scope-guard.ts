@@ -1,5 +1,27 @@
 import { z } from 'zod';
+import { ScopeModeSchema } from '../models/types.ts';
+import type { RetrievalScope } from '../repositories/scope.ts';
 import { notFound } from './errors.ts';
+
+// List-style scope on a route that returns facts. An explicit mode wins; else a
+// supplied id means 'filter' and a missing one 'none', so a scope-less call
+// spans every scope as these routes always have.
+export const FactListScopeQuery = z.object({
+  projectId: z.string().min(1).optional(),
+  userId: z.string().min(1).optional(),
+  projectScope: ScopeModeSchema.optional(),
+  userScope: ScopeModeSchema.optional(),
+});
+export type FactListScopeQuery = z.infer<typeof FactListScopeQuery>;
+
+export function factListScope(q: FactListScopeQuery): RetrievalScope {
+  return {
+    projectId: q.projectId,
+    userId: q.userId,
+    projectScope: q.projectScope ?? (q.projectId ? 'filter' : 'none'),
+    userScope: q.userScope ?? (q.userId ? 'filter' : 'none'),
+  };
+}
 
 // Scope declared by the caller on an id-addressed request.
 export const ScopeGuardQuery = z.object({
