@@ -1,14 +1,16 @@
 name: Publish client
 
 # Publishes packages/client to npm when a `client-v<version>` tag is pushed.
-# The tag must match packages/client/package.json. Needs the NPM_TOKEN secret
-# (an npm automation token with publish rights on the @kainappsinc scope).
+# The tag must match packages/client/package.json. Authenticates with npm
+# trusted publishing (OIDC): the package on npmjs.com lists this repository and
+# workflow file as a trusted publisher, so no token is stored or expires.
 on:
   push:
     tags: ['client-v*']
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -48,5 +50,3 @@ jobs:
       # the build.
       - name: publish
         run: pnpm --filter @kainappsinc/elephant-client publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
