@@ -168,6 +168,27 @@ describe('query-string building', () => {
     expect(calls[2]![0]).toBe('http://elephant.test/knowledge/documents/d1/attachments');
   });
 
+  test('intention actions and blob fetch carry the scope guard query', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => jsonResponse({ ok: true, data: { id: 'i1' } }));
+    const client = new ElephantClient(cfg);
+    await client.completeIntention('i1', { actor: 'a' }, { projectId: 'p1' });
+    await client.cancelIntention('i1', {}, { userId: 'u1' });
+    await client.markIntentionFired('i1');
+    await client.fetchAttachmentBlob('b1', { projectId: 'p1' });
+    await client.fetchAttachmentBlob('b1');
+    const urls = fetchMock.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual([
+      'http://elephant.test/intentions/i1/complete?projectId=p1',
+      'http://elephant.test/intentions/i1/cancel?userId=u1',
+      'http://elephant.test/intentions/i1/fired',
+      'http://elephant.test/knowledge/attachments/b1?projectId=p1',
+      'http://elephant.test/knowledge/attachments/b1',
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ actor: 'a' });
+  });
+
   test('saveFact forwards origin scope and actor', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

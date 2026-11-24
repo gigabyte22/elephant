@@ -86,9 +86,13 @@ export const DreamRunRepository = {
     tx: ManagedTransaction,
     id: string,
     patch: Partial<Omit<DreamRun, 'id' | 'startedAt'>>,
+    // Only touch a row still at 'running' — for closing out a run from outside
+    // the cycle without overwriting an outcome the cycle already wrote.
+    opts: { onlyIfRunning?: boolean } = {},
   ): Promise<DreamRun | null> {
     const result = await tx.run(
       `MATCH (d:DreamRun {id: $id})
+       WHERE NOT $onlyIfRunning OR d.status = 'running'
        SET d.completedAt = CASE
              WHEN $completedAt IS NULL THEN d.completedAt
              ELSE datetime($completedAt)
@@ -114,6 +118,7 @@ export const DreamRunRepository = {
        RETURN d {.*} AS d`,
       {
         id,
+        onlyIfRunning: opts.onlyIfRunning ?? false,
         completedAt: nullableDateParam(patch.completedAt ?? null),
         status: patch.status ?? null,
         episodesProcessed: patch.episodesProcessed ?? null,
@@ -146,11 +151,12 @@ export const DreamRunRepository = {
   },
 
   // Close out runs abandoned mid-cycle. Counters live in memory until
-  // finalise(), so a crash (or a SIGTERM, which stops the scheduler without
-  // awaiting the in-flight cycle) leaves the row at 'running' with nothing to
-  // ever transition it — GET /dream/:jobId then reports it as in-progress
-  // indefinitely. Called at boot against an age threshold rather than
-  // unconditionally, so a second instance's genuinely-running cycle survives.
+  // finalise(), so a crash, a SIGKILL, or a shutdown whose drain could not
+  // reach the database leaves the row at 'running' with nothing to ever
+  // transition it — GET /dream/:jobId then reports it as in-progress
+  // indefinitely. Called at boot and on every dream cron tick against an age
+  // threshold rather than unconditionally, so a genuinely-running cycle in
+  // another process (a second instance, a manual `pnpm dream`) survives.
   async failStaleRunning(tx: ManagedTransaction, olderThan: Date): Promise<number> {
     const result = await tx.run(
       `MATCH (d:DreamRun {status: 'running'})

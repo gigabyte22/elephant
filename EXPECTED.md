@@ -78,6 +78,8 @@ GET    /entities?name=…             fuzzy entity lookup
 GET    /preferences/:key            single pref
 PUT    /preferences/:key            set/update pref (auto-supersede old)
 GET    /preferences                 all active prefs
+                                    // every preference response (these three, /recall,
+                                    // /timeline) carries projectId/userId when set
 
 POST   /observations                working memory write (TTL 7d)
 GET    /observations?sessionId=…    session-scoped recall
@@ -85,6 +87,8 @@ GET    /observations?sessionId=…    session-scoped recall
                                     // shared session (filter semantics: null-user rows still match)
 
 POST   /dream                       trigger dream cycle (async, returns jobId)
+                                    // 409 when a cycle is already running (no job id is issued);
+                                    // 503 once the service has begun shutting down
 GET    /dream/:jobId                poll status
 GET    /health                      liveness + config readback (no auth required)
   → data: {
@@ -140,6 +144,9 @@ GET    /knowledge/documents         list (scope-filtered: projectId, userId, pro
                                     # (an id present → 'filter', absent → 'none'). Only `shared` lists
                                     # the null-scoped documents alone; omitting an id spans every scope.
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
+                                    # purge also drops attachment nodes and their blobs; the
+                                    # graph changes are one transaction, blobs go best-effort
+                                    # after it commits. → data: { deleted: true, chunksDeleted }
 
 POST   /procedures                  create a skill / workflow / how-to
 GET    /procedures/:id              fetch one procedure (scoped like /knowledge/documents/:id)
@@ -202,13 +209,21 @@ GET    /intentions?status=…         list (pending|completed|cancelled|expired)
 POST   /intentions/:id/complete     terminal: sets validTo
 POST   /intentions/:id/cancel       terminal: sets validTo
 POST   /intentions/:id/fired        record a firing without closing it
+                                    # All three take the same ?projectId=…&userId=… guard as
+                                    # GET /intentions/:id: a cross-scope id is 404 and the
+                                    # intention is left unchanged. No scope = unrestricted.
 
 POST   /knowledge/documents/:id/attachments              upload a binary attachment
 DELETE /knowledge/documents/:id/attachments/:attachmentId
+                                    # ?projectId=…&userId=… guards the document; an
+                                    # attachmentId that belongs to a different document
+                                    # is 404, as if absent.
 GET    /knowledge/attachments/:blobId                    stream the raw blob.
                                     NOTE: the ONLY route that does not return the
                                     {ok,data} envelope — it streams bytes with
                                     Content-Type / Content-Disposition.
+                                    # Optional ?projectId=…&userId=… guard on the
+                                    # attachment's own scope (cross-scope -> 404).
 
 POST   /state                       set working-state value (scope, key, value, ttlSec?)
 GET    /state/:key?agentId=…        read a key

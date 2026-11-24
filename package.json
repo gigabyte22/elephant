@@ -43,7 +43,7 @@
     "@fastify/static": "^10.1.5",
     "croner": "^10.0.1",
     "dotenv": "^18.0.4",
-    "fastify": "^5.12.5",
+    "fastify": "^5.12.6",
     "fastify-type-provider-zod": "^4.0.0",
     "ioredis": "^6.0.0",
     "jimp": "^1.6.1",

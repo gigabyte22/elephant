@@ -18,9 +18,8 @@ import type { VaultWriter } from './adapters/vault/types.ts';
 import type { WorkingStateAdapter } from './adapters/working-state/types.ts';
 import type { Env } from './config/env.ts';
 import { loadEnv } from './config/env.ts';
-import { closeDriver, verifyConnectivity, write } from './config/neo4j.ts';
+import { closeDriver, verifyConnectivity } from './config/neo4j.ts';
 import { assertEmbeddingMatchesGraph } from './embedding-state.ts';
-import { DreamRunRepository } from './repositories/DreamRunRepository.ts';
 import { createDashboardService, type DashboardService } from './services/DashboardService.ts';
 import { createDreamingService, type DreamingService } from './services/DreamingService.ts';
 import {
@@ -187,6 +186,7 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
         consolidationMaxClusterSize: env.DREAM_CONSOLIDATION_MAX_CLUSTER_SIZE,
         consolidationMinSimilarity: env.DREAM_CONSOLIDATION_MIN_SIMILARITY,
         consolidationMinEntityFacts: env.DREAM_CONSOLIDATION_MIN_ENTITY_FACTS,
+        consolidationRejudgeDays: env.DREAM_CONSOLIDATION_REJUDGE_DAYS,
       },
     }),
     graphProjection,
@@ -241,21 +241,18 @@ export async function bootstrap(overrides?: ContainerOverrides): Promise<Contain
       console.log(line);
     }
   }
-  await reconcileStaleDreamRuns(container.env.DREAM_DEADLINE_MS);
+  await reconcileStaleDreamRuns(container);
   return container;
 }
 
 // A dream cycle that died with its process leaves its DreamRun row at
-// 'running' forever. Reap those at boot, but only past a generous multiple of
-// the soft deadline: the deadline is checked between episodes, and the
-// consolidate/promote/prune passes run after it, so a healthy long run can
-// legitimately overshoot. Best-effort — a failed reap must not block startup.
-async function reconcileStaleDreamRuns(deadlineMs: number): Promise<void> {
-  const staleAfterMs = Math.max(deadlineMs * 4, 60 * 60_000);
+// 'running' forever. Reap those at boot (the dream cron tick does the same, so
+// a hard-killed run also heals without a restart); the age threshold lives in
+// DreamingService.reconcileStaleRuns. Best-effort — a failed reap must not
+// block startup.
+async function reconcileStaleDreamRuns(container: Container): Promise<void> {
   try {
-    const reaped = await write((tx) =>
-      DreamRunRepository.failStaleRunning(tx, new Date(Date.now() - staleAfterMs)),
-    );
+    const reaped = await container.dreaming.reconcileStaleRuns();
     if (reaped > 0) {
       // eslint-disable-next-line no-console
       console.warn(`[bootstrap] marked ${reaped} abandoned dream run(s) as failed`);

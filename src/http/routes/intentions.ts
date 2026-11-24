@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
-import { type IntentionStatus, ScopeModeSchema } from '../../models/types.ts';
+import { type Intention, type IntentionStatus, ScopeModeSchema } from '../../models/types.ts';
 import { toWireIntention } from '../../models/wire.ts';
 import type { RetrievalScope } from '../../repositories/scope.ts';
 import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
@@ -80,6 +80,11 @@ function scopeFromQuery(q: ScopeQueryShape): RetrievalScope {
 }
 
 export function registerIntentionsRoutes(app: App, container: Container): void {
+  // Every id-addressed route guards the same two axes; a cross-scope id 404s.
+  async function getInScope(id: string, query: ScopeGuardQuery): Promise<Intention> {
+    return assertInScope(await container.intentions.get(id), query, `intention ${id}`);
+  }
+
   app.route({
     method: 'POST',
     url: '/intentions',
@@ -138,11 +143,7 @@ export function registerIntentionsRoutes(app: App, container: Container): void {
       response: { 200: okEnvelope(WireIntentionSchema) },
     },
     handler: async (req) => {
-      const intention = assertInScope(
-        await container.intentions.get(req.params.id),
-        req.query,
-        `intention ${req.params.id}`,
-      );
+      const intention = await getInScope(req.params.id, req.query);
       return { ok: true as const, data: toWireIntention(intention) };
     },
   });
@@ -169,10 +170,12 @@ export function registerIntentionsRoutes(app: App, container: Container): void {
     url: '/intentions/:id/complete',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: ActionBody,
       response: { 200: okEnvelope(WireIntentionSchema) },
     },
     handler: async (req) => {
+      await getInScope(req.params.id, req.query);
       const updated = await container.intentions.complete(req.params.id, req.body);
       return { ok: true as const, data: toWireIntention(updated) };
     },
@@ -183,10 +186,12 @@ export function registerIntentionsRoutes(app: App, container: Container): void {
     url: '/intentions/:id/cancel',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: ActionBody,
       response: { 200: okEnvelope(WireIntentionSchema) },
     },
     handler: async (req) => {
+      await getInScope(req.params.id, req.query);
       const updated = await container.intentions.cancel(req.params.id, req.body);
       return { ok: true as const, data: toWireIntention(updated) };
     },
@@ -200,10 +205,12 @@ export function registerIntentionsRoutes(app: App, container: Container): void {
     url: '/intentions/:id/fired',
     schema: {
       params: z.object({ id: z.string().uuid() }),
+      querystring: ScopeGuardQuery,
       body: ActionBody,
       response: { 200: okEnvelope(WireIntentionSchema) },
     },
     handler: async (req) => {
+      await getInScope(req.params.id, req.query);
       const updated = await container.intentions.markFired(req.params.id, req.body);
       return { ok: true as const, data: toWireIntention(updated) };
     },

@@ -25,6 +25,8 @@ the id, so a retried write with the same id does not duplicate.
 
 Supporting nodes that are not memory items: `:Entity` (people, places, tools, concepts; `name`, `type`, an
 embedding of the name), `:KnowledgeAttachment` (file metadata + blob id), `:DreamRun` (one per dream cycle),
+`:ConsolidationVerdict` (a remembered "keep separate" consolidation judgement: `key` = sha256 of the cluster's
+sorted fact ids, `factIds`, `outcome`, `decidedAt`; dropped once older than `DREAM_CONSOLIDATION_REJUDGE_DAYS`),
 `:AuditEvent` and `:ArchivedRevision` (history), `:SchemaMigration` (applied migrations), `:SystemState`
 (for example `{key:'embedding'}`, which records the embedding model and dimension the stored vectors came from),
 and working-state entries (opaque key/value, no embedding; with a TTL they are deleted hourly once expired).

@@ -4,6 +4,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
+import { __resetEnvForTests } from '../../src/config/env.ts';
 import { read, write as txWrite } from '../../src/config/neo4j.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import type { Fact } from '../../src/models/types.ts';
@@ -140,5 +141,67 @@ describe('dream prune pass', () => {
       return r.records.map((rec) => rec.get('actor') as string);
     });
     expect(events).toEqual(['dreamer']);
+  });
+});
+
+// Regression: the candidate query was an unordered `LIMIT pruneBatchLimit`
+// with the exemptions applied afterwards in JS. Exempt facts never leave the
+// candidate set, so once a batch-limit's worth of them came first, nothing
+// behind them was ever pruned again.
+describe('prune pages past exempt facts', () => {
+  const BATCH = 2;
+  let small: Container;
+
+  beforeAll(async () => {
+    // loadEnv is memoized across files in the single-fork runner; reset it so
+    // this container (only) sees the small batch limit.
+    process.env.DREAM_PRUNE_BATCH_LIMIT = String(BATCH);
+    __resetEnvForTests();
+    try {
+      small = await bootstrap({ llm: createFakeLLMAdapter({}), embedder });
+    } finally {
+      delete process.env.DREAM_PRUNE_BATCH_LIMIT;
+      __resetEnvForTests();
+    }
+  });
+
+  test('prunable facts behind more than a batch of exempt ones still prune, capped per run', async () => {
+    // Oldest references first, so every one of these sorts ahead of the
+    // prunable facts. Permanently exempt by importance:
+    for (let i = 0; i < BATCH + 1; i++) {
+      await seedFact({ content: `durable biography ${i}`, importance: 0.9, ageDays: 500 + i });
+    }
+    // Temporarily exempt: heavily referenced, so retention is still ~0.94.
+    for (let i = 0; i < BATCH + 1; i++) {
+      await seedFact({
+        content: `well-used fact ${i}`,
+        importance: 0.5,
+        ageDays: 400 + i,
+        referenceCount: 1000,
+      });
+    }
+    // Prunable, and younger than all of the above.
+    const prunable: string[] = [];
+    for (const ageDays of [200, 199, 198]) {
+      prunable.push(
+        await seedFact({ content: `stale detail aged ${ageDays}`, importance: 0.1, ageDays }),
+      );
+    }
+
+    const first = await small.dreaming.runCycle();
+    expect(first.factsPruned).toBe(BATCH);
+    let live = await liveFactIds();
+    // Oldest reference first.
+    expect(live.has(prunable[0]!)).toBe(false);
+    expect(live.has(prunable[1]!)).toBe(false);
+    expect(live.has(prunable[2]!)).toBe(true);
+    expect(live.size).toBe(2 * (BATCH + 1) + 1);
+
+    const second = await small.dreaming.runCycle();
+    expect(second.factsPruned).toBe(1);
+    live = await liveFactIds();
+    expect(live.has(prunable[2]!)).toBe(false);
+    // Every exempt fact survives both runs.
+    expect(live.size).toBe(2 * (BATCH + 1));
   });
 });

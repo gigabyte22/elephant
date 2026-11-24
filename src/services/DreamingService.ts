@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import { JsonExtractionError } from '../adapters/llm/json-prompt.ts';
@@ -14,12 +15,16 @@ import type {
 } from '../models/types.ts';
 import { resolveExtractedEntities, resolveFactUserId } from '../models/types.ts';
 import { ChunkRepository } from '../repositories/ChunkRepository.ts';
+import {
+  type ConsolidationVerdictOutcome,
+  ConsolidationVerdictRepository,
+} from '../repositories/ConsolidationVerdictRepository.ts';
 import { DreamRunRepository } from '../repositories/DreamRunRepository.ts';
 import { EntityRepository } from '../repositories/EntityRepository.ts';
 import { EpisodeRepository } from '../repositories/EpisodeRepository.ts';
 import { FactRepository } from '../repositories/FactRepository.ts';
 import { InsightRepository } from '../repositories/InsightRepository.ts';
-import { AsyncMutex } from '../utils/AsyncMutex.ts';
+import { AsyncMutex, type AsyncMutexLock } from '../utils/AsyncMutex.ts';
 import { clusterForConsolidation } from '../utils/consolidation.ts';
 import { cosine } from '../utils/cosine.ts';
 import { shouldPrune } from '../utils/decay.ts';
@@ -32,6 +37,17 @@ import { createBoundedSummarizer } from './BoundedSummarizer.ts';
 import type { GraphProjectionService } from './graph/GraphProjectionService.ts';
 
 const DREAMER_ACTOR = 'dreamer';
+
+// One row of the prune walk; the last row of a page is the keyset cursor for
+// the next. `rawLastRef` is the Neo4j DateTime as returned, handed back as a
+// parameter so the keyset comparison is exact to the nanosecond.
+interface PruneCandidate {
+  id: string;
+  importance: number;
+  refCount: number;
+  rawLastRef: unknown;
+  lastRef: Date;
+}
 
 interface Deps {
   llm: LLMAdapter;
@@ -92,6 +108,11 @@ interface Deps {
     consolidationMaxClusterSize: number;
     consolidationMinSimilarity: number;
     consolidationMinEntityFacts: number;
+    /**
+     * How long a "keep separate" verdict on one exact cluster stands before
+     * the cluster is sent to the model again. See DREAM_CONSOLIDATION_REJUDGE_DAYS.
+     */
+    consolidationRejudgeDays: number;
   };
   // Optional — only needed when refreshProjection is on (PPR enabled).
   graphProjection?: GraphProjectionService;
@@ -112,6 +133,24 @@ export class DreamInProgressError extends Error {
     super(`dream run ${runningJobId} is already in progress`);
     this.name = 'DreamInProgressError';
   }
+}
+
+// Raised by trigger()/runCycle() once drain() has been called: the process is
+// shutting down and must not start work it will not be around to finish.
+export class DreamShuttingDownError extends Error {
+  constructor() {
+    super('dream cycle refused: the service is shutting down');
+    this.name = 'DreamShuttingDownError';
+  }
+}
+
+// Identity of a consolidation cluster: its exact membership as sent to the
+// model, order-free. A new fact joining the cluster yields a new key, which is
+// what sends a changed cluster back to the judge.
+export function consolidationClusterKey(factIds: string[]): string {
+  return createHash('sha256')
+    .update([...factIds].sort().join(','))
+    .digest('hex');
 }
 
 function newDreamRun(id?: string): DreamRun {
@@ -208,52 +247,77 @@ export function createDreamingService(deps: Deps) {
   // POST /episodes would have produced had it waited.
   const summarize = createBoundedSummarizer(llm, config.summaryTargetTokens);
 
-  // Serializes /dream invocations + the cron. Second caller gets thrown
-  // DreamInProgressError, which HTTP maps to 409.
+  // Serializes POST /dream, the cron and direct runCycle() callers. Whichever
+  // entry point starts a cycle takes the lock synchronously and sets
+  // runningJobId in the same tick, so a second caller is refused with
+  // DreamInProgressError (HTTP maps it to 409) before it is handed a job id.
   const cycleMutex = new AsyncMutex();
   let runningJobId: string | null = null;
   let lastRunDurationMs: number | null = null;
+  // Settles once the in-flight cycle has fully finished and released the lock.
+  // drain() waits on it.
+  let inFlight: Promise<unknown> | null = null;
+  // Set by drain(): no new cycle may start, and the running one stops at its
+  // next deadline check as though its deadline had passed.
+  let stopRequested = false;
 
   // jobs[jobId] is consulted by /dream/:jobId for status polling.
   const jobs = new Map<string, DreamRun>();
 
-  function trigger(): { jobId: string } {
-    // Fast-fail when already running so callers can decide whether to retry
-    // or poll an existing job.
-    if (runningJobId) throw new DreamInProgressError(runningJobId);
+  // The cycle's soft stop, checked between units of work: past the deadline,
+  // or the process is shutting down.
+  function timeUp(deadline: number): boolean {
+    return stopRequested || Date.now() >= deadline;
+  }
 
+  // Take the cycle lock and claim a job id without yielding. Refuses rather
+  // than waits, so callers can decide whether to retry or poll the running job.
+  function claimCycle(): { lock: AsyncMutexLock; run: DreamRun } {
+    if (stopRequested) throw new DreamShuttingDownError();
+    const lock = cycleMutex.tryAcquire();
+    if (!lock) throw new DreamInProgressError(runningJobId ?? '(unknown)');
     const run = newDreamRun();
     jobs.set(run.id, run);
+    runningJobId = run.id;
+    return { lock, run };
+  }
 
-    // Persist the run record then kick off the async cycle.
-    void write((tx) => DreamRunRepository.create(tx, run))
-      .then(() => runCycle(run.id))
-      .catch((err) => {
-        // Whatever went wrong, THIS run never executed, so its row must not be
-        // left at 'running'. An abandoned row is reported as in-progress by
-        // GET /dream/:jobId forever, while /health.dream.running (which reads
-        // the in-memory runningJobId) says false — two sources of truth
-        // disagreeing with no way to tell which is stale.
-        //
-        // The DreamInProgressError case is a *lost race*: trigger()'s
-        // runningJobId guard is only set once runCycle acquires the mutex, two
-        // awaits later, so a second trigger in that window gets this far. We
-        // close out our own row and leave the winner's alone.
-        const updated: DreamRun = {
-          ...(jobs.get(run.id) ?? run),
-          status: 'failed',
-          completedAt: new Date(),
-          error:
-            err instanceof DreamInProgressError
-              ? `not started: run ${err.runningJobId} already in progress`
-              : err instanceof Error
-                ? err.message
-                : String(err),
-        };
-        jobs.set(run.id, updated);
-        void write((tx) => DreamRunRepository.update(tx, run.id, updated));
+  // Persist the run row, then run the cycle under the already-held lock. Every
+  // cycle gets a row, whoever started it, so /health, GET /dream/:jobId and the
+  // dashboard see manual `pnpm dream` runs too. The lock is released exactly
+  // once: by recordAndExecute when the row cannot be written (the cycle never
+  // starts), otherwise by executeCycle's finally.
+  function launch(lock: AsyncMutexLock, run: DreamRun): Promise<DreamRun> {
+    const cycle = recordAndExecute(lock, run);
+    inFlight = cycle.catch(() => undefined);
+    return cycle;
+  }
+
+  async function recordAndExecute(lock: AsyncMutexLock, run: DreamRun): Promise<DreamRun> {
+    try {
+      await write((tx) => DreamRunRepository.create(tx, run));
+    } catch (err) {
+      // The run never executed and nothing reached the graph, so the
+      // in-memory record is the only one to close out.
+      logLLMError(`[dream ${run.id}] could not record the run, not started`, err);
+      jobs.set(run.id, {
+        ...run,
+        status: 'failed',
+        completedAt: new Date(),
+        error: err instanceof Error ? err.message : String(err),
       });
+      runningJobId = null;
+      lock.release();
+      throw err;
+    }
+    return executeCycle(run, lock);
+  }
 
+  function trigger(): { jobId: string } {
+    const { lock, run } = claimCycle();
+    // Failures are logged and recorded on the run by launch/executeCycle;
+    // nobody awaits a triggered cycle, so swallow the rejection here.
+    void launch(lock, run).catch(() => undefined);
     return { jobId: run.id };
   }
 
@@ -280,16 +344,70 @@ export function createDreamingService(deps: Deps) {
     return read((tx) => EpisodeRepository.countDeadLetteredDream(tx, config.maxDreamAttempts));
   }
 
-  // Awaitable variant for tests / CLI.
-  async function runCycle(jobId?: string): Promise<DreamRun> {
-    const lock = cycleMutex.tryAcquire();
-    if (!lock) {
-      throw new DreamInProgressError(runningJobId ?? '(unknown)');
-    }
+  // A cycle that died with its process (crash, SIGKILL, a drain that ran out
+  // of grace before it could write) leaves its DreamRun row at 'running'. Fail
+  // those, but only past a generous multiple of the soft deadline: the
+  // deadline is checked between units of work, so a healthy long run can
+  // overshoot it, and the row may belong to another process — a second
+  // instance, or a manual `pnpm dream` — whose cycle is genuinely running.
+  // Called at boot and on every dream cron tick. Returns the number reaped.
+  async function reconcileStaleRuns(): Promise<number> {
+    const staleAfterMs = Math.max(config.deadlineMs * 4, 60 * 60_000);
+    return write((tx) =>
+      DreamRunRepository.failStaleRunning(tx, new Date(Date.now() - staleAfterMs)),
+    );
+  }
 
-    const run = (jobId && jobs.get(jobId)) || newDreamRun(jobId);
-    jobs.set(run.id, run);
-    runningJobId = run.id;
+  // Stop accepting cycles and give the running one up to `graceMs` to wind
+  // down. The stop flag makes the cycle behave as if its deadline had passed:
+  // it finishes the episode in hand, skips the deadline-gated passes and
+  // finalises. If it is still running when the grace expires, its row is
+  // failed here, because the process is about to exit and nothing else would
+  // ever move it off 'running'. No-op when nothing is running.
+  async function drain(graceMs: number): Promise<void> {
+    stopRequested = true;
+    const jobId = runningJobId;
+    const pending = inFlight;
+    if (!jobId || !pending) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finished = await Promise.race([
+      pending.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), graceMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (finished) return;
+
+    const interrupted: DreamRun = {
+      ...(jobs.get(jobId) ?? newDreamRun(jobId)),
+      status: 'failed',
+      completedAt: new Date(),
+      error: `interrupted by shutdown: still running after the ${graceMs} ms grace period`,
+    };
+    jobs.set(jobId, interrupted);
+    try {
+      // Conditional: if the cycle finalised in the meantime, its outcome stands.
+      await write((tx) =>
+        DreamRunRepository.update(tx, jobId, interrupted, { onlyIfRunning: true }),
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[dream ${jobId}] could not mark the interrupted run failed`, err);
+    }
+  }
+
+  // Awaitable cycle for scripts and tests. Same lock and run record as
+  // trigger(), so a direct call is refused while another cycle runs.
+  async function runCycle(): Promise<DreamRun> {
+    const { lock, run } = claimCycle();
+    return launch(lock, run);
+  }
+
+  // The cycle body. The caller holds `lock` and has persisted `run`; this
+  // releases the lock when it returns or throws.
+  async function executeCycle(run: DreamRun, lock: AsyncMutexLock): Promise<DreamRun> {
     const t0 = Date.now();
     const deadline = t0 + config.deadlineMs;
 
@@ -327,7 +445,7 @@ export function createDreamingService(deps: Deps) {
       let hitDeadline = false;
 
       for (const ep of episodes) {
-        if (Date.now() >= deadline) {
+        if (timeUp(deadline)) {
           hitDeadline = true;
           break;
         }
@@ -362,8 +480,8 @@ export function createDreamingService(deps: Deps) {
       run.episodesProcessed = processed;
 
       // Skip promotion/prune if we're time-boxed out — those walk the whole
-      // Fact graph and would blow the budget further.
-      if (!hitDeadline) {
+      // Fact graph and would blow the budget further — or shutting down.
+      if (!hitDeadline && !stopRequested) {
         // Entity resolution is best-effort: a failure here must not fail the
         // cycle (facts are already persisted), so it's caught and logged.
         try {
@@ -388,7 +506,7 @@ export function createDreamingService(deps: Deps) {
           logLLMError(`[dream ${run.id}] consolidation failed, skipping`, err);
         }
         await promoteHighImportanceInsights(allCreated, supersededInCycle, run);
-        await pruneStale(run);
+        await pruneStale(run, deadline);
         await reconcileInsights(run);
       }
 
@@ -399,7 +517,8 @@ export function createDreamingService(deps: Deps) {
       // gating this behind !hitDeadline would mean the projection never rebuilds.
       // Best-effort: a GDS hiccup (or missing plugin) must not fail the cycle —
       // recall just keeps using the prior projection.
-      if (config.refreshProjection && deps.graphProjection) {
+      // Skipped when shutting down: the driver is about to close under it.
+      if (config.refreshProjection && deps.graphProjection && !stopRequested) {
         try {
           await deps.graphProjection.refresh();
         } catch (err) {
@@ -772,7 +891,7 @@ export function createDreamingService(deps: Deps) {
       EpisodeRepository.listProvisionalSummaries(tx, config.summarySweepMaxEpisodes),
     );
     for (const ep of pending) {
-      if (Date.now() >= deadline) break;
+      if (timeUp(deadline)) break;
       try {
         const tokens = await llm.countTokens(ep.rawTranscript);
         const summary = await summarize(ep.rawTranscript, tokens);
@@ -819,7 +938,7 @@ export function createDreamingService(deps: Deps) {
     );
     const checked: string[] = [];
     for (const fact of pending) {
-      if (Date.now() >= deadline) break;
+      if (timeUp(deadline)) break;
       // Already closed by an earlier pass this cycle — nothing left to judge,
       // but it is done with the queue either way.
       if (supersededInCycle.has(fact.id)) {
@@ -1026,8 +1145,30 @@ export function createDreamingService(deps: Deps) {
     const consumed = new Set<string>();
     let judged = 0;
 
+    // A cluster the model already declined is not asked about again until its
+    // verdict ages out of the rejudge window, so the busiest buckets stop
+    // spending the whole nightly budget on the same calls. Verdicts past the
+    // window skip nothing any more, so they are dropped here.
+    const rejudgeCutoff = new Date(Date.now() - config.consolidationRejudgeDays * 86_400_000);
+    await write((tx) => ConsolidationVerdictRepository.deleteOlderThan(tx, rejudgeCutoff));
+    async function hasFreshVerdict(key: string): Promise<boolean> {
+      const fresh = await read((tx) =>
+        ConsolidationVerdictRepository.listFresh(tx, [key], rejudgeCutoff),
+      );
+      return fresh.has(key);
+    }
+    function recordVerdict(
+      key: string,
+      factIds: string[],
+      outcome: ConsolidationVerdictOutcome,
+    ): Promise<void> {
+      return write((tx) =>
+        ConsolidationVerdictRepository.record(tx, { key, factIds, outcome, at: new Date() }),
+      );
+    }
+
     for (const { entityId, projectId, userId } of ordered) {
-      if (judged >= config.consolidationMaxClustersPerRun || Date.now() >= deadline) break;
+      if (judged >= config.consolidationMaxClustersPerRun || timeUp(deadline)) break;
 
       // One bucket's facts, not the entity's whole population: the rest could
       // not have merged anyway, and fetching them means carrying every other
@@ -1048,13 +1189,30 @@ export function createDreamingService(deps: Deps) {
         minSimilarity: config.consolidationMinSimilarity,
         maxClusterSize: config.consolidationMaxClusterSize,
       });
+      // Keyed on the membership as clustered here. A fact consumed by an
+      // earlier merge this pass shrinks a cluster below, and that smaller
+      // cluster is keyed again before it is looked up or recorded.
+      const declined = await read((tx) =>
+        ConsolidationVerdictRepository.listFresh(
+          tx,
+          clusters.map((ids) => consolidationClusterKey(ids)),
+          rejudgeCutoff,
+        ),
+      );
 
       for (const clusterIds of clusters) {
-        if (judged >= config.consolidationMaxClustersPerRun || Date.now() >= deadline) break;
+        if (judged >= config.consolidationMaxClustersPerRun || timeUp(deadline)) break;
         const cluster = clusterIds
           .map((id) => byId.get(id))
           .filter((f): f is Fact => f !== undefined && !consumed.has(f.id));
         if (cluster.length < 2) continue;
+
+        const clusterFactIds = cluster.map((f) => f.id);
+        const key = consolidationClusterKey(clusterFactIds);
+        const shrunk = cluster.length !== clusterIds.length;
+        const alreadyJudged = shrunk ? await hasFreshVerdict(key) : declined.has(key);
+        // Judged within the window: skipped without spending the budget.
+        if (alreadyJudged) continue;
 
         judged += 1;
         let decision: Awaited<ReturnType<typeof consolidate>>;
@@ -1069,13 +1227,21 @@ export function createDreamingService(deps: Deps) {
             })),
           });
         } catch (err) {
+          // No verdict: a model failure is not a judgement, so the cluster is
+          // retried next cycle.
           logLLMError(
             `[dream ${run.id}] consolidateFacts failed for entity=${entityId}, skipping cluster`,
             err,
           );
           continue;
         }
-        if (decision?.decision !== 'merge') continue;
+        // null is the adapter declining to judge (it only does so for a
+        // trivial cluster), not a verdict on this one.
+        if (!decision) continue;
+        if (decision.decision !== 'merge') {
+          await recordVerdict(key, clusterFactIds, 'keep');
+          continue;
+        }
 
         // Validate the LLM's subset: ids must come from this cluster, unmerged,
         // and at least 2 of them; content must be a plausible single fact.
@@ -1083,7 +1249,14 @@ export function createDreamingService(deps: Deps) {
           (id) => byId.has(id) && clusterIds.includes(id) && !consumed.has(id),
         );
         const content = decision.content.trim();
-        if (memberIds.length < 2 || content.length === 0 || content.length > 500) continue;
+        if (memberIds.length < 2 || content.length === 0 || content.length > 500) {
+          // Remembered like a "keep": the same cluster tends to draw the same
+          // malformed answer, and re-asking nightly is exactly the budget
+          // drain the verdict exists to stop. The rejudge window bounds how
+          // long a merge that a later answer would have got right is delayed.
+          await recordVerdict(key, clusterFactIds, 'rejected_merge');
+          continue;
+        }
         const members = memberIds.map((id) => byId.get(id)!);
 
         // A merge is a restatement, not new evidence: confidence stays within
@@ -1238,62 +1411,112 @@ export function createDreamingService(deps: Deps) {
   }
 
   // Soft-prune low-importance, long-unreferenced facts via the Ebbinghaus curve.
-  async function pruneStale(run: DreamRun): Promise<void> {
-    const stale = await read(async (tx) => {
+  //
+  // Candidates are walked oldest-reference first in keyset pages until
+  // pruneBatchLimit facts have actually been pruned, the candidates run out, or
+  // the cycle's deadline passes. The old single unordered LIMIT stalled for
+  // good once that many exempt facts happened to come first: an exempt fact
+  // never leaves the candidate set, so nothing behind it was ever looked at.
+  // The permanent (importance) exemption is applied in Cypher so it never
+  // occupies a page; the retention check stays in shouldPrune, the one decay
+  // formula, and a fact it spares is simply paged past.
+  async function pruneStale(run: DreamRun, deadline: number): Promise<void> {
+    const pageSize = config.pruneBatchLimit;
+    let after: PruneCandidate | null = null;
+    let prunedThisRun = 0;
+
+    while (prunedThisRun < config.pruneBatchLimit && !stopRequested) {
+      const page = await listPruneCandidates(after, pageSize);
+      after = page.at(-1) ?? null;
+      if (!after) break;
+
+      for (const s of page) {
+        if (prunedThisRun >= config.pruneBatchLimit) break;
+        const days = (Date.now() - s.lastRef.getTime()) / 86_400_000;
+        const prune = shouldPrune({
+          importance: s.importance,
+          daysSinceLastReference: days,
+          referenceCount: s.refCount,
+          config: {
+            importanceExempt: config.pruneImportanceExempt,
+            minWindowDays: config.pruneWindowDays,
+            retentionFloor: config.pruneRetentionFloor,
+          },
+        });
+        if (!prune) continue;
+        const pruned = await write(async (tx) => {
+          // prune(), not softDelete(): a pruned fact is a transaction-time
+          // system forget, so it stays visible to /timeline, asOf and
+          // includeSuperseded. Only a user DELETE redacts. Stays on record()
+          // rather than revise() deliberately — prune runs up to
+          // DREAM_PRUNE_BATCH_LIMIT times a night and is fully reversible from
+          // validTo/prunedAt, so an :ArchivedRevision each would be pure bloat.
+          if (!(await FactRepository.prune(tx, s.id, new Date()))) return false;
+          await retireInsights(tx, run, [s.id], 'source_pruned');
+          await recordDreamerEvent(tx, run, {
+            kind: 'prune',
+            targetId: s.id,
+            targetKind: 'fact',
+            payload: {
+              importance: s.importance,
+              referenceCount: s.refCount,
+              daysSinceLastReference: days,
+            },
+          });
+          return true;
+        });
+        if (pruned) {
+          run.factsPruned += 1;
+          prunedThisRun += 1;
+        }
+      }
+
+      // The first page always runs, as the single batch did before; later
+      // pages only while the deadline holds.
+      if (page.length < pageSize || timeUp(deadline)) break;
+    }
+  }
+
+  // One keyset page of prune candidates, oldest reference first, starting
+  // after `after` (the previous page's last row). Facts exempt by importance
+  // are filtered here so they never occupy a page.
+  async function listPruneCandidates(
+    after: PruneCandidate | null,
+    limit: number,
+  ): Promise<PruneCandidate[]> {
+    return read(async (tx) => {
       const result = await tx.run(
         `MATCH (f:Fact)
          WHERE f.validTo IS NULL
-           AND coalesce(f.lastReferencedAt, f.recordedAt) < datetime() - duration({days: $days})
+           AND (f.importance IS NULL OR f.importance < $exempt)
+         WITH f, coalesce(f.lastReferencedAt, f.recordedAt) AS lastRef
+         WHERE lastRef < datetime() - duration({days: $days})
+           AND ($afterRef IS NULL
+                OR lastRef > $afterRef
+                OR (lastRef = $afterRef AND f.id > $afterId))
          RETURN f.id AS id, f.importance AS importance,
                 coalesce(f.referenceCount, 0) AS refCount,
-                coalesce(f.lastReferencedAt, f.recordedAt) AS lastRef
+                lastRef
+         ORDER BY lastRef ASC, f.id ASC
          LIMIT toInteger($limit)`,
-        { days: config.pruneWindowDays, limit: config.pruneBatchLimit },
+        {
+          // Null importance is never exempt, matching shouldPrune (and
+          // ebbinghausRetention then treats it as 0.5).
+          exempt: config.pruneImportanceExempt,
+          days: config.pruneWindowDays,
+          afterRef: after?.rawLastRef ?? null,
+          afterId: after?.id ?? null,
+          limit,
+        },
       );
       return result.records.map((r) => ({
         id: r.get('id') as string,
         importance: r.get('importance') as number,
         refCount: r.get('refCount') as number,
+        rawLastRef: r.get('lastRef') as unknown,
         lastRef: new Date(r.get('lastRef').toString()),
       }));
     });
-
-    for (const s of stale) {
-      const days = (Date.now() - s.lastRef.getTime()) / 86_400_000;
-      const prune = shouldPrune({
-        importance: s.importance,
-        daysSinceLastReference: days,
-        referenceCount: s.refCount,
-        config: {
-          importanceExempt: config.pruneImportanceExempt,
-          minWindowDays: config.pruneWindowDays,
-          retentionFloor: config.pruneRetentionFloor,
-        },
-      });
-      if (!prune) continue;
-      const pruned = await write(async (tx) => {
-        // prune(), not softDelete(): a pruned fact is a transaction-time
-        // system forget, so it stays visible to /timeline, asOf and
-        // includeSuperseded. Only a user DELETE redacts. Stays on record()
-        // rather than revise() deliberately — prune runs up to
-        // DREAM_PRUNE_BATCH_LIMIT times a night and is fully reversible from
-        // validTo/prunedAt, so an :ArchivedRevision each would be pure bloat.
-        if (!(await FactRepository.prune(tx, s.id, new Date()))) return false;
-        await retireInsights(tx, run, [s.id], 'source_pruned');
-        await recordDreamerEvent(tx, run, {
-          kind: 'prune',
-          targetId: s.id,
-          targetKind: 'fact',
-          payload: {
-            importance: s.importance,
-            referenceCount: s.refCount,
-            daysSinceLastReference: days,
-          },
-        });
-        return true;
-      });
-      if (pruned) run.factsPruned += 1;
-    }
   }
 
   async function finalise(run: DreamRun): Promise<DreamRun> {
@@ -1307,6 +1530,8 @@ export function createDreamingService(deps: Deps) {
     trigger,
     status,
     runCycle,
+    drain,
+    reconcileStaleRuns,
     lastCompleted,
     backlogEstimate,
     deadLetteredEstimate,

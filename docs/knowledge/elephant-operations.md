@@ -39,8 +39,12 @@ Healthy looks like: `curl -s http://127.0.0.1:18790/health | jq .data` shows `ne
 `elephant listening on http://127.0.0.1:18790 (llm=..., embedder=..., dim=..., dreamCron=..., extractionCron=...)`
 and one `[extraction]` line per attachment capability.
 
-On SIGTERM the service stops its schedulers and closes cleanly. A dream cycle cut off by a restart leaves its run
-marked `running` until the next boot reaps it (after max(4 x `DREAM_DEADLINE_MS`, 1 h)).
+On SIGTERM/SIGINT the service stops its schedulers, then closes the HTTP listener while giving a running dream
+cycle up to `DREAM_SHUTDOWN_GRACE_MS` (default 8000, inside Docker's 10 s stop timeout) to stop at its next
+deadline check. A cycle still running when the grace expires has its run marked `failed`
+(`interrupted by shutdown`). A cycle killed outright (SIGKILL, OOM) leaves its run `running` until the next boot
+or the next dream cron tick marks it failed, once it is older than max(4 x `DREAM_DEADLINE_MS`, 1 h).
+`pnpm dream` runs are recorded as `:DreamRun` rows like scheduled ones.
 
 ## Background jobs inside the service
 

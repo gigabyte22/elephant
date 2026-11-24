@@ -1,9 +1,8 @@
 import { z } from 'zod';
-import { read, write } from '../../config/neo4j.ts';
+import { read } from '../../config/neo4j.ts';
 import type { Container } from '../../index.ts';
 import { ScopeModeSchema } from '../../models/types.ts';
 import { toWireKnowledgeAttachment, toWireKnowledgeDocument } from '../../models/wire.ts';
-import { KnowledgeChunkRepository } from '../../repositories/KnowledgeChunkRepository.ts';
 import { KnowledgeDocumentRepository } from '../../repositories/KnowledgeDocumentRepository.ts';
 import { notFound } from '../errors.ts';
 import { assertInScope, ScopeGuardQuery } from '../scope-guard.ts';
@@ -152,16 +151,13 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
         req.query,
         `knowledge document ${req.params.id}`,
       );
-      const purge = req.query.purge === 'true';
       let chunksDeleted = 0;
-      if (purge) {
-        // Remove attachment nodes + their blobs, then all chunks (body + attachment).
-        await container.knowledge.purgeAttachmentBlobs(req.params.id);
-        chunksDeleted = await write((tx) =>
-          KnowledgeChunkRepository.deleteForDocument(tx, req.params.id),
-        );
+      if (req.query.purge === 'true') {
+        // One transaction: soft delete + attachment nodes + all chunks; blobs after.
+        chunksDeleted = (await container.knowledge.purge(req.params.id)).chunksDeleted;
+      } else {
+        await container.knowledge.softDelete(req.params.id);
       }
-      await container.knowledge.softDelete(req.params.id, { actor: undefined });
       return {
         ok: true as const,
         data: { deleted: true as const, chunksDeleted },
@@ -214,7 +210,7 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
         req.query,
         `knowledge document ${req.params.id}`,
       );
-      await container.knowledge.deleteAttachment(req.params.attachmentId);
+      await container.knowledge.deleteAttachment(req.params.id, req.params.attachmentId);
       return { ok: true as const, data: { deleted: true as const } };
     },
   });
@@ -224,10 +220,16 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
   app.route({
     method: 'GET',
     url: '/knowledge/attachments/:blobId',
-    schema: { params: z.object({ blobId: z.string().min(1) }) },
+    schema: {
+      params: z.object({ blobId: z.string().min(1) }),
+      querystring: ScopeGuardQuery,
+    },
     handler: async (req, reply) => {
-      const att = await container.knowledge.getAttachmentByBlob(req.params.blobId);
-      if (!att) throw notFound(`attachment blob ${req.params.blobId}`);
+      const att = assertInScope(
+        await container.knowledge.getAttachmentByBlob(req.params.blobId),
+        req.query,
+        `attachment blob ${req.params.blobId}`,
+      );
       const stream = await container.knowledge.openBlob(att.blobId);
       void reply
         .header('Content-Type', att.mimeType)
