@@ -505,9 +505,25 @@ export function createDreamingService(deps: Deps) {
         } catch (err) {
           logLLMError(`[dream ${run.id}] consolidation failed, skipping`, err);
         }
-        await promoteHighImportanceInsights(allCreated, supersededInCycle, run);
-        await pruneStale(run, deadline);
-        await reconcileInsights(run);
+        // Promotion, prune and reconcile are isolated the same way: each is
+        // caught on its own so one failing neither fails the run nor skips the
+        // passes after it. Counters a pass bumped before throwing stand — that
+        // work is committed.
+        try {
+          await promoteHighImportanceInsights(allCreated, supersededInCycle, run);
+        } catch (err) {
+          logLLMError(`[dream ${run.id}] insight promotion failed, skipping`, err);
+        }
+        try {
+          await pruneStale(run, deadline);
+        } catch (err) {
+          logLLMError(`[dream ${run.id}] prune failed, skipping`, err);
+        }
+        try {
+          await reconcileInsights(run);
+        } catch (err) {
+          logLLMError(`[dream ${run.id}] insight reconcile failed, skipping`, err);
+        }
       }
 
       // Rebuild the GDS projection so PPR retrieval sees this cycle's new
