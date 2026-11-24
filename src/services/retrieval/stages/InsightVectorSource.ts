@@ -5,7 +5,7 @@
 
 import { read } from '../../../config/neo4j.ts';
 import { InsightRepository } from '../../../repositories/InsightRepository.ts';
-import { annWithEscalation } from '../../../repositories/vector-search.ts';
+import { annWithEscalation, countLabel } from '../../../repositories/vector-search.ts';
 import type { RetrievalStage } from '../types.ts';
 import { overfetchLimit, recordSourceDiagnostics } from './helpers.ts';
 import { buildRetrievalScope, PROJECT_USER_AXES } from './scope-helpers.ts';
@@ -28,6 +28,7 @@ export function InsightVectorSource(): RetrievalStage {
               scope,
             }),
           ),
+        population: () => read((tx) => countLabel(tx, 'Insight')),
       });
       recordSourceDiagnostics(ctx, 'InsightVectorSource', outcome, 'ann');
       for (const insight of outcome.hits) {

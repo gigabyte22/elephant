@@ -57,7 +57,7 @@ export const ObservationRepository = {
        WHERE o.expiresAt > datetime()
          ${clause}
        RETURN o {.*} AS o
-       ORDER BY o.recordedAt DESC
+       ORDER BY o.recordedAt DESC, o.id DESC
        LIMIT toInteger($limit)`,
       { sessionId, limit, ...params },
     );

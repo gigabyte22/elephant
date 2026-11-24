@@ -21,13 +21,13 @@ the id, so a retried write with the same id does not duplicate.
 | `knowledge_document` / `knowledge_chunk` | `:KnowledgeDocument`, `:KnowledgeChunk` | Reference documents; body chunked and embedded; file attachments become more chunks | callers, `POST /knowledge/documents` | permanent unless deleted; optional `expiresAt` |
 | `research` / `research_chunk` | `:Research`, `:ResearchChunk` | Project-scoped research notes (`projectId` required), full body kept, chunked | callers, `POST /research` | often expiring (`expiresAt`) |
 | `procedure` | `:Procedure` | Reusable skill/how-to: `name`, `content`, `whenToUse`, `version`, `successRate`, `invocationCount` | callers, `POST /procedures` | versioned |
-| `intention` | `:Intention` | A forward-looking commitment: `content` plus `dueAt` or `triggerHint`, status `pending`/`completed`/`cancelled`/`expired` | callers, `POST /intentions` | until a terminal status |
+| `intention` | `:Intention` | A forward-looking commitment: `content` plus `dueAt` or `triggerHint`, status `pending`/`completed`/`cancelled`/`expired` | callers, `POST /intentions` | until a terminal status; a one-time pending intention overdue by more than `INTENTION_EXPIRE_GRACE_DAYS` (7) is marked `expired` hourly (recurring ones never are) |
 
 Supporting nodes that are not memory items: `:Entity` (people, places, tools, concepts; `name`, `type`, an
 embedding of the name), `:KnowledgeAttachment` (file metadata + blob id), `:DreamRun` (one per dream cycle),
 `:AuditEvent` and `:ArchivedRevision` (history), `:SchemaMigration` (applied migrations), `:SystemState`
 (for example `{key:'embedding'}`, which records the embedding model and dimension the stored vectors came from),
-and working-state entries (opaque key/value, no embedding).
+and working-state entries (opaque key/value, no embedding; with a TTL they are deleted hourly once expired).
 
 ## Relationships
 

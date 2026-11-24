@@ -182,7 +182,14 @@ POST   /intentions                  record a forward-looking commitment
 GET    /intentions/due?before=…     open commitments past/near their dueAt.
                                     For boot-time reconciliation, NOT polling —
                                     elephant never fires intentions, the caller
-                                    owns the clock.
+                                    owns the clock. Lists status=pending only,
+                                    ordered by dueAt asc (ties by id). A one-time
+                                    intention more than INTENTION_EXPIRE_GRACE_DAYS
+                                    (default 7) past its dueAt is set to
+                                    `expired` (validTo set, audit event with
+                                    actor `intention-reaper`) by an hourly job
+                                    and so drops out; recurring intentions are
+                                    never expired.
 GET    /intentions/:id              fetch one. Scoped by ?projectId=…&userId=… — project and
                                     user only, since the guard carries no agent/session axis,
                                     while the list routes below take all four.

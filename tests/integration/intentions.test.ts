@@ -8,6 +8,7 @@ import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adap
 import { write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
+import { newId } from '../../src/utils/ids.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 const TOKEN = process.env.__TEST_TOKEN ?? 'test-token';
@@ -251,5 +252,131 @@ describe('recall integration (flag-gated)', () => {
     const recalledIds = recalled.map((i) => i.id);
     expect(recalledIds).toContain(pending.json().data.id);
     expect(recalledIds).not.toContain(completed.json().data.id);
+  });
+});
+
+// The hourly IntentionReaper calls container.intentions.reapExpired(); these
+// drive the service directly rather than waiting on the cron.
+describe('intention reaper', () => {
+  const agentId = 'reap-agent';
+  const DAY = 86_400_000;
+  const graceDays = 7; // INTENTION_EXPIRE_GRACE_DAYS default
+
+  async function create(payload: Record<string, unknown>): Promise<string> {
+    const res = await postJson('/intentions', { scope: { agentId }, ...payload });
+    expect(res.statusCode).toBe(200);
+    return res.json().data.id as string;
+  }
+
+  async function status(id: string): Promise<string> {
+    const res = await getAuth(`/intentions/${id}`);
+    expect(res.statusCode).toBe(200);
+    return res.json().data.status as string;
+  }
+
+  test('expires one-time pending intentions overdue beyond the grace, and only those', async () => {
+    const stale = await create({ content: 'stale one-time', dueAt: iso(-(graceDays + 1) * DAY) });
+    const recent = await create({
+      content: 'overdue within grace',
+      dueAt: iso(-(graceDays - 1) * DAY),
+    });
+    const recurring = await create({
+      content: 'recurring with a long-past first fire',
+      recurring: true,
+      schedule: '0 9 * * *',
+      dueAt: iso(-(graceDays + 30) * DAY),
+    });
+    const completed = await create({ content: 'completed', dueAt: iso(-(graceDays + 1) * DAY) });
+    await postJson(`/intentions/${completed}/complete`, {});
+    const cancelled = await create({ content: 'cancelled', dueAt: iso(-(graceDays + 1) * DAY) });
+    await postJson(`/intentions/${cancelled}/cancel`, {});
+
+    const dueBefore = (await getAuth(`/intentions/due?agentId=${agentId}`))
+      .json()
+      .data.map((i: { id: string }) => i.id);
+    expect(dueBefore).toEqual(expect.arrayContaining([stale, recent, recurring]));
+
+    const expired = await container.intentions.reapExpired();
+    expect(expired).toBe(1);
+
+    expect(await status(stale)).toBe('expired');
+    expect(await status(recent)).toBe('pending');
+    expect(await status(recurring)).toBe('pending');
+    expect(await status(completed)).toBe('completed');
+    expect(await status(cancelled)).toBe('cancelled');
+
+    const staleRes = await getAuth(`/intentions/${stale}`);
+    expect(staleRes.json().data.validTo).not.toBeNull();
+
+    const dueAfter = (await getAuth(`/intentions/due?agentId=${agentId}`))
+      .json()
+      .data.map((i: { id: string }) => i.id);
+    expect(dueAfter).not.toContain(stale);
+    expect(dueAfter).toEqual(expect.arrayContaining([recent, recurring]));
+
+    // The transition is audited like complete/cancel, attributed to the reaper.
+    const audit = await getAuth(`/audit/${stale}`);
+    const events = audit.json().data.events as Array<{
+      kind: string;
+      actor?: string;
+      payload: { transition?: string };
+    }>;
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        actor: 'intention-reaper',
+        payload: expect.objectContaining({ transition: 'pending->expired' }),
+      }),
+    );
+
+    // Idempotent: nothing left to expire.
+    expect(await container.intentions.reapExpired()).toBe(0);
+  });
+
+  // One reap writes every event with the same `at`, so the id tie-break is
+  // what makes a LIMITed audit listing stable.
+  test('same-instant audit events list in a stable id order under a LIMIT', async () => {
+    for (let n = 0; n < 5; n++) {
+      await create({ content: `batch stale ${n}`, dueAt: iso(-(graceDays + 2) * DAY) });
+    }
+    expect(await container.intentions.reapExpired()).toBe(5);
+
+    const all = (await getAuth('/audit?actor=intention-reaper&limit=500')).json().data as Array<{
+      id: string;
+      at: string;
+    }>;
+    const batch = all.filter((e) => e.at === all[0]?.at);
+    expect(batch).toHaveLength(5);
+    const byIdDesc = [...batch].map((e) => e.id).sort((a, b) => (a < b ? 1 : -1));
+    expect(batch.map((e) => e.id)).toEqual(byIdDesc);
+
+    for (let n = 0; n < 5; n++) {
+      const page = (await getAuth('/audit?actor=intention-reaper&limit=3')).json().data as Array<{
+        id: string;
+      }>;
+      expect(page.map((e) => e.id)).toEqual(byIdDesc.slice(0, 3));
+    }
+  });
+
+  test('same-instant archived revisions list in a stable id order under a LIMIT', async () => {
+    const id = await create({ content: 'revision ordering', dueAt: iso(DAY) });
+    const revisionIds = Array.from({ length: 5 }, () => newId());
+    await txWrite(async (tx) => {
+      await tx.run(
+        `UNWIND $ids AS rid
+         CREATE (:ArchivedRevision {
+           id: rid, originalId: $id, originalKind: 'intention', snapshot: '{}',
+           archivedAt: datetime('2026-01-01T00:00:00Z'), reason: 'tie-break test'
+         })`,
+        { ids: revisionIds, id },
+      );
+    });
+    const expected = [...revisionIds].sort((a, b) => (a < b ? 1 : -1)).slice(0, 3);
+
+    for (let n = 0; n < 5; n++) {
+      const res = await getAuth(`/audit/${id}?limit=3`);
+      const revs = res.json().data.revisions as Array<{ id: string }>;
+      expect(revs.map((r) => r.id)).toEqual(expected);
+    }
   });
 });

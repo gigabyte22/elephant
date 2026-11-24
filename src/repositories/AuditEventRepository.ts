@@ -45,7 +45,7 @@ export const AuditEventRepository = {
     const result = await tx.run(
       `MATCH (e:AuditEvent {targetId: $targetId})
        RETURN e {.*} AS e
-       ORDER BY e.at DESC
+       ORDER BY e.at DESC, e.id DESC
        LIMIT toInteger($limit)`,
       { targetId: input.targetId, limit: input.limit ?? 100 },
     );
@@ -79,7 +79,7 @@ export const AuditEventRepository = {
       `MATCH (e:AuditEvent)
        ${whereClause}
        RETURN e {.*} AS e
-       ORDER BY e.at DESC
+       ORDER BY e.at DESC, e.id DESC
        LIMIT toInteger($limit)`,
       params,
     );

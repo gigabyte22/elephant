@@ -204,7 +204,7 @@ export const ResearchRepository = {
       `MATCH (r:Research)
        ${where}
        RETURN r {.*} AS r
-       ORDER BY r.updatedAt DESC
+       ORDER BY r.updatedAt DESC, r.id DESC
        LIMIT toInteger($limit)`,
       { ...params, limit },
     );

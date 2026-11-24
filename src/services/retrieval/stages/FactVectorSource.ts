@@ -10,7 +10,7 @@
 
 import { read } from '../../../config/neo4j.ts';
 import { FactRepository } from '../../../repositories/FactRepository.ts';
-import { annWithEscalation } from '../../../repositories/vector-search.ts';
+import { annWithEscalation, countLabel } from '../../../repositories/vector-search.ts';
 import type { RetrievalStage } from '../types.ts';
 import {
   asOfOverfetchLimit,
@@ -40,6 +40,7 @@ export function FactVectorSource(): RetrievalStage {
               scope,
             }),
           ),
+        population: () => read((tx) => countLabel(tx, 'Fact')),
       });
       recordSourceDiagnostics(ctx, 'FactVectorSource', outcome, 'ann');
       upsertFactHits(state, outcome.hits, 'fact_vector');

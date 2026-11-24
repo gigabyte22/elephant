@@ -51,6 +51,8 @@ marked `running` until the next boot reaps it (after max(4 x `DREAM_DEADLINE_MS`
 | Attachment extraction worker | `KNOWLEDGE_EXTRACTION_CRON` (`*/2 * * * *`) | one pending attachment per tick |
 | OKF vault sync | `OKF_SYNC_CRON` (`30 3 * * *`) | only with `OKF_ENABLED=true` |
 | Research reaper | `RESEARCH_REAP_CRON` (`15 * * * *`) | only with `RESEARCH_RETENTION_DAYS` set |
+| Intention reaper | hourly (`45 * * * *`, fixed) | flips one-time `pending` intentions overdue by more than `INTENTION_EXPIRE_GRACE_DAYS` (7) to `expired`, with an audit event (actor `intention-reaper`); recurring intentions are never expired |
+| Working-state reaper | hourly (`55 * * * *`, fixed) | deletes expired `:WorkingState` nodes (Neo4j backend; Redis expires keys itself) |
 
 ## Upgrades and migrations
 

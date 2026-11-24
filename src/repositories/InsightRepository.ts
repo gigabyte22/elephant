@@ -167,7 +167,7 @@ export const InsightRepository = {
       `MATCH (i:Insight)
        WHERE $includeRetired OR i.validTo IS NULL
        RETURN i {.*} AS i
-       ORDER BY i.createdAt DESC
+       ORDER BY i.createdAt DESC, i.id DESC
        LIMIT toInteger($limit)`,
       { limit, includeRetired: opts.includeRetired ?? false },
     );

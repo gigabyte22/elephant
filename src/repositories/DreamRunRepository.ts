@@ -168,7 +168,7 @@ export const DreamRunRepository = {
     const result = await tx.run(
       `MATCH (d:DreamRun {status: 'completed'})
        RETURN d {.*} AS d
-       ORDER BY d.completedAt DESC
+       ORDER BY d.completedAt DESC, d.id DESC
        LIMIT 1`,
     );
     const record = result.records[0];

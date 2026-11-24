@@ -609,6 +609,31 @@ describe('F. working state lifecycle', () => {
     expect(miss.statusCode).toBe(404);
     expect(miss.json().ok).toBe(false);
   });
+
+  // The hourly WorkingStateReaper calls container.workingState.reapExpired();
+  // reads already hide expired entries, so the reap only reclaims the nodes.
+  test('reapExpired deletes expired :WorkingState nodes and keeps live and no-TTL ones', async () => {
+    await postJson('/state', { scope: scopeBase, key: 'reap:expired', value: 1, ttlSec: 60 });
+    await postJson('/state', { scope: scopeBase, key: 'reap:live', value: 2, ttlSec: 3600 });
+    await postJson('/state', { scope: scopeBase, key: 'reap:no-ttl', value: 3 });
+    await txWrite(async (tx) => {
+      await tx.run(
+        `MATCH (w:WorkingState {key: 'reap:expired'})
+         SET w.expiresAt = datetime() - duration({minutes: 1})`,
+      );
+    });
+
+    const deleted = await container.workingState.reapExpired();
+    expect(deleted).toBeGreaterThanOrEqual(1);
+
+    const keys = await txRead(async (tx) => {
+      const res = await tx.run(
+        `MATCH (w:WorkingState) WHERE w.key STARTS WITH 'reap:' RETURN w.key AS key ORDER BY key`,
+      );
+      return res.records.map((r) => r.get('key') as string);
+    });
+    expect(keys).toEqual(['reap:live', 'reap:no-ttl']);
+  });
 });
 
 describe('G. audit cross-cutting verification', () => {

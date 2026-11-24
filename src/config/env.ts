@@ -108,6 +108,13 @@ export const EnvSchema = z
     // sweeps don't contend for the same driver pool.
     RESEARCH_REAP_CRON: z.string().default('15 * * * *'),
 
+    // --- Intention expiry ---
+    // How many days past its `dueAt` a one-time pending intention waits before
+    // the hourly intention reaper (src/jobs/IntentionReaper.ts) flips it to
+    // 'expired', which drops it from GET /intentions/due. Recurring intentions
+    // are never expired.
+    INTENTION_EXPIRE_GRACE_DAYS: z.coerce.number().int().positive().default(7),
+
     // --- Working state (opaque KV; not a memory item) ---
     // Working-state backend selection. Default Neo4j keeps everything in one
     // graph; Redis is opt-in for hot-path orchestration state.

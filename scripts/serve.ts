@@ -2,9 +2,11 @@ import { buildHttpServer } from '../src/http/server.ts';
 import { bootstrap, shutdown } from '../src/index.ts';
 import { startAttachmentExtractionWorker } from '../src/jobs/AttachmentExtractionWorker.ts';
 import { startDreamScheduler } from '../src/jobs/DreamScheduler.ts';
+import { startIntentionReaper } from '../src/jobs/IntentionReaper.ts';
 import { startObservationReaper } from '../src/jobs/ObservationReaper.ts';
 import { startOkfSyncScheduler } from '../src/jobs/OkfSyncScheduler.ts';
 import { startResearchReaper } from '../src/jobs/ResearchReaper.ts';
+import { startWorkingStateReaper } from '../src/jobs/WorkingStateReaper.ts';
 
 async function main(): Promise<void> {
   const container = await bootstrap();
@@ -12,6 +14,8 @@ async function main(): Promise<void> {
 
   const dream = startDreamScheduler(container);
   const reaper = startObservationReaper(container);
+  const intentionReaper = startIntentionReaper(container);
+  const workingStateReaper = startWorkingStateReaper(container);
   const extraction = startAttachmentExtractionWorker(container);
   // Mirrors buildVaultWriter's gate — no vault, nothing to sweep.
   const okfSync = container.env.OKF_ENABLED ? startOkfSyncScheduler(container) : undefined;
@@ -37,6 +41,8 @@ async function main(): Promise<void> {
     app.log.info(`received ${signal}, shutting down`);
     dream.stop();
     reaper.stop();
+    intentionReaper.stop();
+    workingStateReaper.stop();
     extraction.stop();
     okfSync?.stop();
     researchReaper?.stop();
