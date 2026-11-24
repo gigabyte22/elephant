@@ -325,23 +325,26 @@ export class ElephantClient {
   completeIntention(
     id: string,
     input: { actor?: string; reason?: string } = {},
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${seg(id)}/complete`, input, opts);
+    return this.request('POST', scoped(`/intentions/${seg(id)}/complete`, query), input, opts);
   }
   cancelIntention(
     id: string,
     input: { actor?: string; reason?: string } = {},
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${seg(id)}/cancel`, input, opts);
+    return this.request('POST', scoped(`/intentions/${seg(id)}/cancel`, query), input, opts);
   }
   markIntentionFired(
     id: string,
     input: { actor?: string; reason?: string } = {},
+    query: WireScope = {},
     opts?: RequestOpts,
   ): Promise<WireIntention> {
-    return this.request('POST', `/intentions/${seg(id)}/fired`, input, opts);
+    return this.request('POST', scoped(`/intentions/${seg(id)}/fired`, query), input, opts);
   }
 
   // ─ Dream ──
@@ -475,16 +478,24 @@ export class ElephantClient {
     );
   }
   /** Raw blob fetch (binary, not the JSON envelope). Returns the underlying
-   *  Response so callers can stream it through their own transport. */
-  async fetchAttachmentBlob(blobId: string, opts?: RequestOpts): Promise<Response> {
+   *  Response so callers can stream it through their own transport. `query`
+   *  scopes it like the other id-addressed reads: a cross-scope blob 404s. */
+  async fetchAttachmentBlob(
+    blobId: string,
+    query: WireScope = {},
+    opts?: RequestOpts,
+  ): Promise<Response> {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), opts?.timeoutMs ?? this.cfg.timeoutMs ?? 30_000);
     opts?.signal?.addEventListener('abort', () => ctl.abort(opts.signal?.reason), { once: true });
     try {
-      const res = await fetch(`${this.cfg.url}/knowledge/attachments/${seg(blobId)}`, {
-        signal: ctl.signal,
-        headers: { authorization: `Bearer ${this.cfg.token}` },
-      });
+      const res = await fetch(
+        `${this.cfg.url}${scoped(`/knowledge/attachments/${seg(blobId)}`, query)}`,
+        {
+          signal: ctl.signal,
+          headers: { authorization: `Bearer ${this.cfg.token}` },
+        },
+      );
       if (!res.ok) throw new ElephantError(res.status, `GET blob ${blobId} -> ${res.status}`);
       return res;
     } finally {

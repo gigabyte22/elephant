@@ -18,8 +18,9 @@ sensitive as the conversations themselves.
   compose refuses to start Neo4j without `NEO4J_PASSWORD`. Never bind either to a public interface; if remote
   access is needed, put a TLS reverse proxy in front, because the token is the only authentication layer.
 - **Scope is not authentication.** Project/user separation relies on the caller sending the right
-  `projectId`/`userId` and scope modes. Id-addressed routes refuse cross-scope ids with 404 when the caller
-  declares its scope, but a caller that declares no scope is unrestricted. Cerebro is the component that decides
+  `projectId`/`userId` and scope modes. Id-addressed routes (including intention complete/cancel/fired and the
+  attachment blob download) refuse cross-scope ids with 404 when the caller declares its scope, but a caller that
+  declares no scope is unrestricted. Cerebro is the component that decides
   which scope each agent and user gets.
 
 ## Data leaving the host

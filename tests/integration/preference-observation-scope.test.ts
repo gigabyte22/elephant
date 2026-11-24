@@ -159,6 +159,47 @@ describe('preferences are identified by (key, projectId, userId)', () => {
   });
 });
 
+// toWirePreference always emitted projectId/userId, but neither preference wire
+// schema declared them, so the zod serializer stripped them off every response.
+describe('preferences carry their scope on the wire', () => {
+  const scope = { projectId: 'acme', userId: 'ravi' };
+
+  test('PUT, GET /preferences/:key and GET /preferences return projectId/userId', async () => {
+    const put = await setPref('tone', 'formal', scope);
+    expect(put.statusCode).toBe(200);
+    expect(put.json().data).toMatchObject({ key: 'tone', ...scope });
+
+    expect((await getPref('tone', scope)).json().data).toMatchObject(scope);
+
+    const list = await app.inject({
+      method: 'GET',
+      url: `/preferences?${new URLSearchParams(scope)}`,
+      headers: auth,
+    });
+    expect(list.json().data.preferences).toEqual([expect.objectContaining(scope)]);
+  });
+
+  test('recall returns projectId/userId on preferences', async () => {
+    await setPref('tone', 'prefers concise answers', scope);
+    const params = new URLSearchParams({
+      q: 'prefers concise answers',
+      includePreferences: 'true',
+      ...scope,
+      limit: '5',
+    });
+    const res = await app.inject({ method: 'GET', url: `/recall?${params}`, headers: auth });
+    expect(res.statusCode).toBe(200);
+    const prefs = (res.json().data.preferences ?? []) as Array<{ key: string }>;
+    expect(prefs.find((p) => p.key === 'tone')).toMatchObject(scope);
+  });
+
+  test('an unscoped preference carries no scope fields', async () => {
+    const put = await setPref('tone', 'neutral');
+    expect(put.json().data.projectId).toBeUndefined();
+    expect(put.json().data.userId).toBeUndefined();
+  });
+});
+
 describe('preference recall pushes scope into the vector query', () => {
   // The vector index returns the GLOBAL top-K, so a fixed K plus a caller-side
   // filter lets other users' semantically-similar rows crowd this user's out

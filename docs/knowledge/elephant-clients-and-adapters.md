@@ -28,6 +28,11 @@ is checked at runtime through `GET /health` (embedder dimension, schema vector d
 fields). When the wire shapes change, the client must be updated in the same change. Releases: bump the version,
 tag `client-v<version>`; CI publishes with `pnpm publish`.
 
+Id-addressed methods take an optional `{projectId, userId}` scope after their input, which the service uses as the
+404 scope guard; since 0.2.2 that includes `completeIntention`, `cancelIntention`, `markIntentionFired` and
+`fetchAttachmentBlob`. The MCP server and the OpenClaw plugin pass their configured project/user scope to the
+intention actions; the hermes provider's intention calls send no scope, so they stay unrestricted.
+
 Cerebro keeps a vendored copy of this client in its own source tree (`src/vendor/elephant-client`), so a new
 Elephant field reaches Cerebro only when that copy is refreshed.
 

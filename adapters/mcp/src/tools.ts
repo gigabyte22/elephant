@@ -32,6 +32,9 @@ export function registerTools(
   client: ElephantClient,
   scope: McpScopeConfig,
 ): void {
+  // Project + user: the two axes id-addressed reads and actions are guarded on.
+  const docScope = { projectId: scope.projectId, userId: scope.userId };
+
   server.registerTool(
     'memory_save',
     {
@@ -285,7 +288,7 @@ export function registerTools(
         sourceUri,
         summary,
         tags,
-        scope: { projectId: scope.projectId, userId: scope.userId },
+        scope: docScope,
         actor: scope.agentId,
       });
       return textResult(`Saved knowledge document ${doc.id} — ${doc.title}`);
@@ -300,12 +303,7 @@ export function registerTools(
       inputSchema: { id: z.string().uuid() },
       annotations: { readOnlyHint: true },
     },
-    async ({ id }) =>
-      textResult(
-        formatDocument(
-          await client.getKnowledge(id, { projectId: scope.projectId, userId: scope.userId }),
-        ),
-      ),
+    async ({ id }) => textResult(formatDocument(await client.getKnowledge(id, docScope))),
   );
 
   server.registerTool(
@@ -509,7 +507,7 @@ export function registerTools(
         name,
         content,
         whenToUse,
-        scope: { projectId: scope.projectId, userId: scope.userId },
+        scope: docScope,
         actor: scope.agentId,
       });
       return textResult(`Saved procedure ${proc.id} — ${proc.name} (v${proc.version})`);
@@ -716,7 +714,11 @@ export function registerTools(
       },
     },
     async ({ id, reason }) => {
-      const intention = await client.completeIntention(id, { reason, actor: scope.agentId });
+      const intention = await client.completeIntention(
+        id,
+        { reason, actor: scope.agentId },
+        docScope,
+      );
       return textResult(`Completed intention ${id} (status ${intention.status}).`);
     },
   );
@@ -732,7 +734,11 @@ export function registerTools(
       },
     },
     async ({ id, reason }) => {
-      const intention = await client.cancelIntention(id, { reason, actor: scope.agentId });
+      const intention = await client.cancelIntention(
+        id,
+        { reason, actor: scope.agentId },
+        docScope,
+      );
       return textResult(`Cancelled intention ${id} (status ${intention.status}).`);
     },
   );
@@ -746,7 +752,7 @@ export function registerTools(
       inputSchema: { id: z.string().uuid() },
     },
     async ({ id }) => {
-      const intention = await client.markIntentionFired(id, { actor: scope.agentId });
+      const intention = await client.markIntentionFired(id, { actor: scope.agentId }, docScope);
       return textResult(`Marked intention ${id} as fired (${intention.fireCount} times).`);
     },
   );
