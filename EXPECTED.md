@@ -78,6 +78,8 @@ GET    /entities?name=…             fuzzy entity lookup
 GET    /preferences/:key            single pref
 PUT    /preferences/:key            set/update pref (auto-supersede old)
 GET    /preferences                 all active prefs
+                                    // every preference response (these three, /recall,
+                                    // /timeline) carries projectId/userId when set
 
 POST   /observations                working memory write (TTL 7d)
 GET    /observations?sessionId=…    session-scoped recall
@@ -195,13 +197,21 @@ GET    /intentions?status=…         list (pending|completed|cancelled|expired)
 POST   /intentions/:id/complete     terminal: sets validTo
 POST   /intentions/:id/cancel       terminal: sets validTo
 POST   /intentions/:id/fired        record a firing without closing it
+                                    # All three take the same ?projectId=…&userId=… guard as
+                                    # GET /intentions/:id: a cross-scope id is 404 and the
+                                    # intention is left unchanged. No scope = unrestricted.
 
 POST   /knowledge/documents/:id/attachments              upload a binary attachment
 DELETE /knowledge/documents/:id/attachments/:attachmentId
+                                    # ?projectId=…&userId=… guards the document; an
+                                    # attachmentId that belongs to a different document
+                                    # is 404, as if absent.
 GET    /knowledge/attachments/:blobId                    stream the raw blob.
                                     NOTE: the ONLY route that does not return the
                                     {ok,data} envelope — it streams bytes with
                                     Content-Type / Content-Disposition.
+                                    # Optional ?projectId=…&userId=… guard on the
+                                    # attachment's own scope (cross-scope -> 404).
 
 POST   /state                       set working-state value (scope, key, value, ttlSec?)
 GET    /state/:key?agentId=…        read a key

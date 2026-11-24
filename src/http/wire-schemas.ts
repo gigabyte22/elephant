@@ -104,6 +104,7 @@ export const WirePreferenceWithScoreSchema = z.object({
   confidence: z.number(),
   validFrom: z.string(),
   validTo: z.string().nullable(),
+  ...ScopeFields,
   ...ScoreFields,
 });
 
@@ -164,6 +165,9 @@ export const WirePreferenceSchema = z.object({
   validTo: z.string().nullable(),
   // Additive: clients that ignore unknown fields stay compatible.
   recordedAt: z.string().optional(),
+  // toWirePreference has always emitted these via pickScope; without them
+  // declared here zod stripped them off every response.
+  ...ScopeFields,
 });
 
 export const WireObservationSchema = z.object({

@@ -550,13 +550,18 @@ export function createKnowledgeIngestionService(deps: Deps) {
     }));
   }
 
+  // Scoped to the owning document: the route guards the document in the URL,
+  // so an attachment of any other document answers 404, as if absent.
   async function deleteAttachment(
+    documentId: string,
     attachmentId: string,
     opts: { actor?: string } = {},
   ): Promise<void> {
     const { blobStore } = requireAttachmentDeps();
     const attachment = await read((tx) => KnowledgeAttachmentRepository.getById(tx, attachmentId));
-    if (!attachment) throw notFound(`attachment ${attachmentId}`);
+    if (!attachment || attachment.documentId !== documentId) {
+      throw notFound(`attachment ${attachmentId}`);
+    }
 
     await write(async (tx) => {
       await KnowledgeChunkRepository.deleteForAttachment(tx, attachmentId);

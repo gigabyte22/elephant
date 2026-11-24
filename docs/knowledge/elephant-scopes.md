@@ -49,12 +49,15 @@ the same as asking for shared items: it spans every scope.
   the same defaults, on the timeline with or without `entityId`. Without a scope they return every scope's facts,
   so a scoped caller must pass its scope here too. The timeline's `preferenceKey` still reads the unscoped row.
 - **Id-addressed reads and writes** (`GET/PUT/DELETE /facts/:id`, `/knowledge/documents/:id`, `/procedures/:id`,
-  `/research/:id`, `GET /intentions/:id`, attachment routes): optional `?projectId=&userId=` query guard with
+  `/research/:id`, `GET /intentions/:id`, `POST /intentions/:id/complete|cancel|fired`, attachment upload/delete,
+  `GET /knowledge/attachments/:blobId`): optional `?projectId=&userId=` query guard with
   `filter` semantics. An item in a different scope answers **404, not 403** (existence is itself scoped); a
   shared (null) item stays reachable; a caller that declares no scope is unrestricted. Supersede checks both facts.
+  Attachment delete guards the document in the URL and answers 404 for an attachment of any other document.
 - `GET /observations?sessionId=` is per session; `&userId=` separates one participant in a shared session
   (null-user rows still match).
-- `GET /preferences` and `/preferences/:key` take `?projectId=&userId=`.
+- `GET /preferences` and `/preferences/:key` take `?projectId=&userId=`. Preference responses (these, `PUT`,
+  `/recall`, `/timeline`) carry `projectId`/`userId` when set.
 
 ## Writes
 

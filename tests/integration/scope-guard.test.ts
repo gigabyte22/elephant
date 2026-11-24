@@ -120,6 +120,37 @@ async function createIntention(projectId?: string): Promise<string> {
 
 type Response = Awaited<ReturnType<typeof app.inject>>;
 
+async function uploadAttachment(
+  documentId: string,
+  projectId: string,
+): Promise<{ id: string; blobId: string }> {
+  const res = await app.inject({
+    method: 'POST',
+    url: `/knowledge/documents/${documentId}/attachments?projectId=${projectId}`,
+    headers: json,
+    payload: {
+      filename: 'note.txt',
+      mimeType: 'text/plain',
+      dataBase64: Buffer.from('hello').toString('base64'),
+    },
+  });
+  expect(res.statusCode).toBe(200);
+  return res.json().data as { id: string; blobId: string };
+}
+
+function intentionAction(
+  id: string,
+  action: 'complete' | 'cancel' | 'fired',
+  query = '',
+): Promise<Response> {
+  return app.inject({
+    method: 'POST',
+    url: `/intentions/${id}/${action}${query}`,
+    headers: json,
+    payload: {},
+  });
+}
+
 // The id-addressed reads guarded alongside the mutations. `query` carries the
 // caller's declared scope, including the empty string for a caller declaring none.
 function get(url: string, query = ''): Promise<Response> {
@@ -318,6 +349,47 @@ describe('knowledge documents', () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  // The route guarded the document in the URL, then deleted the attachment by
+  // its own id without checking it belonged to that document — so a caller
+  // could name a document it owns and delete any other project's attachment.
+  test("an attachment cannot be deleted through another document's id", async () => {
+    const mine = await createDocument(INTRUDER);
+    const theirs = await createDocument(OWNER);
+    const att = await uploadAttachment(theirs, OWNER);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/knowledge/documents/${mine}/attachments/${att.id}?projectId=${INTRUDER}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(404);
+
+    const doc = await get(`/knowledge/documents/${theirs}`, `?projectId=${OWNER}`);
+    expect(doc.json().data.attachments.map((a: { id: string }) => a.id)).toEqual([att.id]);
+    expect((await get(`/knowledge/attachments/${att.blobId}`)).statusCode).toBe(200);
+  });
+
+  test('the owning document can still delete its attachment', async () => {
+    const id = await createDocument(OWNER);
+    const att = await uploadAttachment(id, OWNER);
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/knowledge/documents/${id}/attachments/${att.id}?projectId=${OWNER}`,
+      headers: auth,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('blob download from another project is refused, and from the owning one is not', async () => {
+    const id = await createDocument(OWNER);
+    const att = await uploadAttachment(id, OWNER);
+    const url = `/knowledge/attachments/${att.blobId}`;
+    expect((await get(url, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+    const ok = await get(url, `?projectId=${OWNER}`);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.body).toBe('hello');
+  });
 });
 
 describe('intentions', () => {
@@ -326,6 +398,26 @@ describe('intentions', () => {
     expect((await get(`/intentions/${id}`, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
     expect((await get(`/intentions/${id}`, `?projectId=${OWNER}`)).statusCode).toBe(200);
   });
+
+  // complete/cancel/fired took the id alone, so a scoped caller could resolve
+  // another project's commitments.
+  for (const action of ['complete', 'cancel', 'fired'] as const) {
+    test(`${action} from another project is refused and changes nothing`, async () => {
+      const id = await createIntention(OWNER);
+      expect((await intentionAction(id, action, `?projectId=${INTRUDER}`)).statusCode).toBe(404);
+
+      const still = (await get(`/intentions/${id}`)).json().data;
+      expect(still.status).toBe('pending');
+      expect(still.fireCount).toBe(0);
+    });
+
+    test(`${action} works with the owning scope and with none`, async () => {
+      const scoped = await createIntention(OWNER);
+      expect((await intentionAction(scoped, action, `?projectId=${OWNER}`)).statusCode).toBe(200);
+      const bare = await createIntention(OWNER);
+      expect((await intentionAction(bare, action)).statusCode).toBe(200);
+    });
+  }
 });
 
 describe('facts', () => {

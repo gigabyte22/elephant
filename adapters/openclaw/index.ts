@@ -920,10 +920,11 @@ export default {
         parameters: idReasonParams,
         async execute(_toolCallId: string, params: IdReasonParams) {
           if (!UUID_RE.test(params.id)) return text('id must be a UUID.');
-          const intention = await client.completeIntention(params.id, {
-            actor: config.agentId,
-            reason: params.reason,
-          });
+          const intention = await client.completeIntention(
+            params.id,
+            { actor: config.agentId, reason: params.reason },
+            docScope,
+          );
           return text(`Completed intention ${intention.id}.`);
         },
       },
@@ -938,10 +939,11 @@ export default {
         parameters: idReasonParams,
         async execute(_toolCallId: string, params: IdReasonParams) {
           if (!UUID_RE.test(params.id)) return text('id must be a UUID.');
-          const intention = await client.cancelIntention(params.id, {
-            actor: config.agentId,
-            reason: params.reason,
-          });
+          const intention = await client.cancelIntention(
+            params.id,
+            { actor: config.agentId, reason: params.reason },
+            docScope,
+          );
           return text(`Cancelled intention ${intention.id}.`);
         },
       },
@@ -957,10 +959,11 @@ export default {
         parameters: idReasonParams,
         async execute(_toolCallId: string, params: IdReasonParams) {
           if (!UUID_RE.test(params.id)) return text('id must be a UUID.');
-          const intention = await client.markIntentionFired(params.id, {
-            actor: config.agentId,
-            reason: params.reason,
-          });
+          const intention = await client.markIntentionFired(
+            params.id,
+            { actor: config.agentId, reason: params.reason },
+            docScope,
+          );
           return text(`Marked intention ${intention.id} fired (${intention.fireCount} total).`);
         },
       },

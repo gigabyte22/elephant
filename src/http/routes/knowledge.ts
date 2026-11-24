@@ -214,7 +214,7 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
         req.query,
         `knowledge document ${req.params.id}`,
       );
-      await container.knowledge.deleteAttachment(req.params.attachmentId);
+      await container.knowledge.deleteAttachment(req.params.id, req.params.attachmentId);
       return { ok: true as const, data: { deleted: true as const } };
     },
   });
@@ -224,10 +224,16 @@ export function registerKnowledgeRoutes(app: App, container: Container): void {
   app.route({
     method: 'GET',
     url: '/knowledge/attachments/:blobId',
-    schema: { params: z.object({ blobId: z.string().min(1) }) },
+    schema: {
+      params: z.object({ blobId: z.string().min(1) }),
+      querystring: ScopeGuardQuery,
+    },
     handler: async (req, reply) => {
-      const att = await container.knowledge.getAttachmentByBlob(req.params.blobId);
-      if (!att) throw notFound(`attachment blob ${req.params.blobId}`);
+      const att = assertInScope(
+        await container.knowledge.getAttachmentByBlob(req.params.blobId),
+        req.query,
+        `attachment blob ${req.params.blobId}`,
+      );
       const stream = await container.knowledge.openBlob(att.blobId);
       void reply
         .header('Content-Type', att.mimeType)
