@@ -140,6 +140,9 @@ GET    /knowledge/documents         list (scope-filtered: projectId, userId, pro
                                     # (an id present → 'filter', absent → 'none'). Only `shared` lists
                                     # the null-scoped documents alone; omitting an id spans every scope.
 DELETE /knowledge/documents/:id     soft-delete (use ?purge=true to also drop chunks)
+                                    # purge also drops attachment nodes and their blobs; the
+                                    # graph changes are one transaction, blobs go best-effort
+                                    # after it commits. → data: { deleted: true, chunksDeleted }
 
 POST   /procedures                  create a skill / workflow / how-to
 GET    /procedures/:id              fetch one procedure (scoped like /knowledge/documents/:id)
