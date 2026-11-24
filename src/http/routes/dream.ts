@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Container } from '../../index.ts';
-import { DreamInProgressError } from '../../services/DreamingService.ts';
-import { conflict, notFound } from '../errors.ts';
+import { DreamInProgressError, DreamShuttingDownError } from '../../services/DreamingService.ts';
+import { conflict, notFound, serviceUnavailable } from '../errors.ts';
 import type { App } from '../types.ts';
 import { okEnvelope, WireDreamRunSchema } from '../wire-schemas.ts';
 
@@ -20,6 +20,7 @@ export function registerDreamRoutes(app: App, container: Container): void {
         if (err instanceof DreamInProgressError) {
           throw conflict(`dream already running as job ${err.runningJobId}`);
         }
+        if (err instanceof DreamShuttingDownError) throw serviceUnavailable(err.message);
         throw err;
       }
     },

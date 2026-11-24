@@ -69,7 +69,7 @@ both Elephant and Cerebro.
 |---|---|
 | `POST /dream` -> 409 `dream already running as job <id>` | a cycle is in progress (cron or manual). Poll `GET /dream/<id>`; do not retry in a loop |
 | log `[dream-cron] skipped tick, run <id> still in progress` | harmless; the previous cycle was still draining |
-| `/health` `running: false` but a run shows `running` in `/dashboard/api/dreams` | the process died mid-run; the row is marked failed at the next boot once it is older than max(4 x `DREAM_DEADLINE_MS`, 1 h) |
+| `/health` `running: false` but a run shows `running` in `/dashboard/api/dreams` | the process was killed mid-run (or a `pnpm dream` is running in another process); the row is marked failed at the next boot or dream cron tick once it is older than max(4 x `DREAM_DEADLINE_MS`, 1 h). A normal stop records `interrupted by shutdown` instead |
 | `backlogEstimate` keeps growing | cycles are slower than episode arrival: LLM slow or failing, or the cron too infrequent. Raise `DREAM_MAX_EPISODES_PER_RUN`/`DREAM_DEADLINE_MS`, run the cron more often, or use a faster model |
 | facts are created but nothing is ever merged, promoted or pruned | every cycle hits its deadline; the graph-wide passes (entity resolution, supersede sweep, consolidation, promotion, prune) only run when the episode loop finishes in time. Raise `DREAM_DEADLINE_MS` or lower `DREAM_MAX_EPISODES_PER_RUN` |
 | run `failed` with an error | `GET /dream/<id>` shows `error`; usually the LLM endpoint or Neo4j |

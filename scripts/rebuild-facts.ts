@@ -1,4 +1,5 @@
-// Wipe derived knowledge (Facts + Insights) and reset the dream cursor so the
+// Wipe derived knowledge (Facts + Insights, and the consolidation verdicts
+// keyed on those facts' ids) and reset the dream cursor so the
 // next dream cycle re-extracts everything from the RETAINED episodes through
 // the current pipeline (prompts, dedup, consolidation). Episodes, Chunks,
 // Entities, KnowledgeDocuments, and AuditEvents are kept — this is a rebuild,
@@ -55,6 +56,8 @@ async function main(): Promise<void> {
 
   await deleteAll('Fact');
   await deleteAll('Insight');
+  // Keyed on fact ids that no longer exist; nothing could ever match them.
+  await deleteAll('ConsolidationVerdict');
 
   // Re-queue every episode. The dreamer selects on per-episode markers now,
   // so clearing them is what makes the whole backlog eligible again —

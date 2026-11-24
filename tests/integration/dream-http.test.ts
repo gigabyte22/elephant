@@ -3,13 +3,15 @@
 // which is how the cron's unhandled DreamInProgressError (a process-killer)
 // survived — the 409 path only ever ran in production.
 
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 import { createFakeEmbeddingAdapter, createFakeLLMAdapter } from '../../src/adapters/fakes.ts';
 import type { LLMAdapter } from '../../src/adapters/llm/types.ts';
 import { read as txRead, write as txWrite } from '../../src/config/neo4j.ts';
 import { buildHttpServer } from '../../src/http/server.ts';
 import { bootstrap, type Container, shutdown } from '../../src/index.ts';
 import { DreamRunRepository } from '../../src/repositories/DreamRunRepository.ts';
+import { EpisodeRepository } from '../../src/repositories/EpisodeRepository.ts';
+import { DreamInProgressError } from '../../src/services/DreamingService.ts';
 import { assertDestructiveAllowed } from './guard.ts';
 
 let container: Container;
@@ -98,6 +100,19 @@ async function drainDream(): Promise<void> {
   });
 }
 
+async function storedRuns(): Promise<Array<{ id: string; status: string; error: unknown }>> {
+  return txRead(async (tx) => {
+    const r = await tx.run(
+      'MATCH (d:DreamRun) RETURN d.id AS id, d.status AS status, d.error AS error',
+    );
+    return r.records.map((rec) => ({
+      id: rec.get('id') as string,
+      status: rec.get('status') as string,
+      error: rec.get('error') as unknown,
+    }));
+  });
+}
+
 async function seedEpisode(): Promise<void> {
   const res = await app.inject({
     method: 'POST',
@@ -154,9 +169,8 @@ describe('dream HTTP surface', () => {
       expect(first.statusCode).toBe(200);
       jobId = first.json().data.jobId;
 
-      // Once extractFacts is entered the cycle holds the mutex and has set
-      // runningJobId, so the 409 below is deterministic rather than racing
-      // trigger()'s two awaits.
+      // trigger() holds the mutex from the moment it returns; waiting until
+      // the cycle is inside extractFacts also proves it is genuinely running.
       await waitUntil(() => gate.entered);
 
       const second = await app.inject({ method: 'POST', url: '/dream', headers: auth });
@@ -171,42 +185,91 @@ describe('dream HTTP surface', () => {
     await drainDream();
   });
 
-  // The orphan. trigger()'s fast-fail guard reads runningJobId, which runCycle
-  // only sets once it has the mutex — two awaits later. Two triggers in the
-  // same tick therefore both get past the guard, both write a DreamRun row, and
-  // one then loses inside runCycle. That loser used to return early from the
-  // catch, stranding its row at 'running' forever.
-  test('a run that loses the start race is closed out, not left at running', async () => {
+  // Regression: trigger() used to check runningJobId, which was only set once
+  // runCycle took the mutex, two awaits later. A second trigger in that window
+  // was handed a job id too, then lost inside runCycle and left a row failed
+  // "not started". The lock is now taken before trigger() returns.
+  test('back-to-back triggers: one job id, the other refused, no orphan row', async () => {
+    await clearDb();
+    await seedEpisode();
+
+    const gate = makeGate();
+    activeGate = gate;
+    let jobId: string;
+    try {
+      jobId = container.dreaming.trigger().jobId;
+      let refused: unknown;
+      try {
+        container.dreaming.trigger();
+      } catch (err) {
+        refused = err;
+      }
+      expect(refused).toBeInstanceOf(DreamInProgressError);
+      expect((refused as DreamInProgressError).runningJobId).toBe(jobId);
+    } finally {
+      activeGate = null;
+      gate.release();
+    }
+    await drainDream();
+
+    expect(await storedRuns()).toMatchObject([{ id: jobId, status: 'completed' }]);
+  });
+
+  test('two concurrent POST /dream: one 200, one 409', async () => {
     await clearDb();
     await seedEpisode();
 
     const gate = makeGate();
     activeGate = gate;
     try {
-      const ids = [container.dreaming.trigger().jobId, container.dreaming.trigger().jobId];
-      expect(new Set(ids).size).toBe(2);
-
-      await waitUntil(() => gate.entered);
-      activeGate = null;
-      gate.release();
-      await drainDream();
-
-      const loadAll = async () =>
-        Promise.all(ids.map((id) => txRead((tx) => DreamRunRepository.get(tx, id))));
-
-      await waitUntil(async () =>
-        (await loadAll()).every((r) => r !== null && r.status !== 'running'),
-      );
-
-      const runs = await loadAll();
-      const failed = runs.filter((r) => r?.status === 'failed');
-      expect(runs.filter((r) => r?.status === 'completed')).toHaveLength(1);
-      expect(failed).toHaveLength(1);
-      expect(failed[0]?.error).toContain('already in progress');
+      const responses = await Promise.all([
+        app.inject({ method: 'POST', url: '/dream', headers: auth }),
+        app.inject({ method: 'POST', url: '/dream', headers: auth }),
+      ]);
+      expect(responses.map((r) => r.statusCode).sort()).toEqual([200, 409]);
     } finally {
       activeGate = null;
       gate.release();
     }
+    await drainDream();
+
+    expect(await storedRuns()).toMatchObject([{ status: 'completed' }]);
+  });
+
+  // Regression: only trigger() wrote a :DreamRun row, so a manual
+  // `pnpm dream` (a bare runCycle()) finalised into a MATCH that matched
+  // nothing and was invisible to /health, GET /dream/:jobId and the dashboard.
+  test('a bare runCycle() leaves a completed run record', async () => {
+    await clearDb();
+    await seedEpisode();
+
+    const run = await container.dreaming.runCycle();
+    expect(run.status).toBe('completed');
+
+    const stored = await txRead((tx) => DreamRunRepository.get(tx, run.id));
+    expect(stored?.status).toBe('completed');
+    expect(stored?.factsCreated).toBe(run.factsCreated);
+    expect((await container.dreaming.lastCompleted())?.id).toBe(run.id);
+
+    const res = await app.inject({ method: 'GET', url: `/dream/${run.id}`, headers: auth });
+    expect(res.json()).toMatchObject({ ok: true, data: { id: run.id, status: 'completed' } });
+  });
+
+  test('a bare runCycle() that throws leaves a failed run record', async () => {
+    await clearDb();
+    const spy = vi
+      .spyOn(EpisodeRepository, 'listPendingDream')
+      .mockRejectedValueOnce(new Error('simulated selector failure'));
+    try {
+      await expect(container.dreaming.runCycle()).rejects.toThrow('simulated selector failure');
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(await storedRuns()).toMatchObject([
+      { status: 'failed', error: 'simulated selector failure' },
+    ]);
+    expect(container.dreaming.currentRunningJobId()).toBeNull();
   });
 
   test('failStaleRunning closes out runs abandoned by a crash', async () => {

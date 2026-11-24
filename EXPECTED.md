@@ -85,6 +85,8 @@ GET    /observations?sessionId=…    session-scoped recall
                                     // shared session (filter semantics: null-user rows still match)
 
 POST   /dream                       trigger dream cycle (async, returns jobId)
+                                    // 409 when a cycle is already running (no job id is issued);
+                                    // 503 once the service has begun shutting down
 GET    /dream/:jobId                poll status
 GET    /health                      liveness + config readback (no auth required)
   → data: {
