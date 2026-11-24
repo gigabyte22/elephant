@@ -5,10 +5,11 @@
 
 import { createHash } from 'node:crypto';
 import { buffer } from 'node:stream/consumers';
+import type { ManagedTransaction } from 'neo4j-driver';
 import type { EmbeddingAdapter } from '../adapters/embeddings/types.ts';
 import type { ExtractionResult, ExtractionService } from '../adapters/extraction/types.ts';
 import type { LLMAdapter } from '../adapters/llm/types.ts';
-import type { BlobStore } from '../adapters/storage/types.ts';
+import type { BlobStore, StoredBlob } from '../adapters/storage/types.ts';
 import { projectToVault, tombstoneInVault } from '../adapters/vault/project.ts';
 import type { VaultWriter } from '../adapters/vault/types.ts';
 import { read, write } from '../config/neo4j.ts';
@@ -108,6 +109,24 @@ function buildChunks(
     overlapChars: p.overlapChars,
     ...opts.scope,
   }));
+}
+
+// Delete a blob on a cleanup path. A failure here is logged, never thrown: the
+// caller either has an original error to surface or has already committed the
+// graph change, and an orphaned file is the lesser problem in both cases.
+async function deleteBlobBestEffort(
+  blobStore: BlobStore,
+  blobId: string,
+  context: string,
+): Promise<void> {
+  try {
+    await blobStore.delete(blobId);
+  } catch (err) {
+    console.warn(
+      `[knowledge] ${context}: could not delete blob ${blobId}, leaving it orphaned:`,
+      (err as Error).message,
+    );
+  }
 }
 
 export function createKnowledgeIngestionService(deps: Deps) {
@@ -346,7 +365,7 @@ export function createKnowledgeIngestionService(deps: Deps) {
     documentId: string,
     input: AddAttachmentInput,
   ): Promise<KnowledgeAttachment> {
-    const { blobStore, extraction } = requireAttachmentDeps();
+    const { blobStore } = requireAttachmentDeps();
     const maxBytes = config.maxAttachmentBytes ?? 26_214_400;
 
     const existing = await read((tx) => KnowledgeDocumentRepository.get(tx, documentId));
@@ -360,6 +379,27 @@ export function createKnowledgeIngestionService(deps: Deps) {
 
     const scope: Scope = { projectId: existing.projectId, userId: existing.userId };
     const stored = await blobStore.put(data);
+    // Every put mints a fresh blobId, so a failure past this point would leave
+    // an orphaned file per attempt — and clients retry. Remove it before
+    // rethrowing; nothing in the graph references it yet.
+    try {
+      return await indexAttachment(documentId, input, scope, data, stored);
+    } catch (err) {
+      await deleteBlobBestEffort(blobStore, stored.blobId, `upload to ${documentId} failed`);
+      throw err;
+    }
+  }
+
+  // The part of addAttachment that runs after the blob is stored: extract,
+  // chunk + embed, then write the attachment node and its chunks atomically.
+  async function indexAttachment(
+    documentId: string,
+    input: AddAttachmentInput,
+    scope: Scope,
+    data: Buffer,
+    stored: StoredBlob,
+  ): Promise<KnowledgeAttachment> {
+    const { extraction } = requireAttachmentDeps();
     // allowSlow: false — an extractor that needs seconds to minutes (vision,
     // transcription, OCR of a scanned PDF) returns 'pending' instead of running
     // here, because this request is under a client timeout whose retries would
@@ -581,18 +621,6 @@ export function createKnowledgeIngestionService(deps: Deps) {
     await blobStore.delete(attachment.blobId);
   }
 
-  // Remove every attachment of a document (nodes + blobs). The caller deletes
-  // the derived chunks separately. Used by the document hard-purge path.
-  async function purgeAttachmentBlobs(documentId: string): Promise<void> {
-    const blobStore = deps.blobStore;
-    if (!blobStore) return;
-    const attachments = await read((tx) =>
-      KnowledgeAttachmentRepository.listByDocument(tx, documentId),
-    );
-    await write((tx) => KnowledgeAttachmentRepository.deleteForDocument(tx, documentId));
-    await Promise.all(attachments.map((a) => blobStore.delete(a.blobId)));
-  }
-
   async function getAttachment(attachmentId: string): Promise<KnowledgeAttachment | null> {
     return read((tx) => KnowledgeAttachmentRepository.getById(tx, attachmentId));
   }
@@ -605,28 +633,81 @@ export function createKnowledgeIngestionService(deps: Deps) {
     return requireAttachmentDeps().blobStore.getStream(blobId);
   }
 
+  // The graph half of a soft delete, run inside the caller's transaction so
+  // purge can commit it together with the attachment and chunk deletes.
+  async function softDeleteInTx(
+    tx: ManagedTransaction,
+    id: string,
+    at: Date,
+    actor: string | undefined,
+  ): Promise<void> {
+    await KnowledgeDocumentRepository.softDelete(tx, id, at);
+    await AuditService.record({
+      tx,
+      kind: 'soft_delete',
+      targetId: id,
+      targetKind: 'knowledge_document',
+      actor,
+    });
+  }
+
   async function softDelete(id: string, opts: { actor?: string } = {}): Promise<void> {
     // Pre-read for the vault tombstone: the ref needs the document's scope
     // to resolve its vault path.
     const existing = await read((tx) => KnowledgeDocumentRepository.get(tx, id));
     const at = new Date();
-    await write(async (tx) => {
-      await KnowledgeDocumentRepository.softDelete(tx, id, at);
-      await AuditService.record({
-        tx,
-        kind: 'soft_delete',
-        targetId: id,
-        targetKind: 'knowledge_document',
-        actor: opts.actor,
-      });
-    });
+    await write((tx) => softDeleteInTx(tx, id, at, opts.actor));
     if (existing) await tombstoneInVault(vault, 'knowledge_document', existing, at);
+  }
+
+  /**
+   * Soft-delete a document and hard-delete everything hanging off it: its
+   * attachment nodes, every chunk (body and attachment-derived), and the
+   * attachment blobs.
+   *
+   * All graph changes commit in one transaction, so a failure leaves the
+   * document live with its attachments intact rather than live with them gone.
+   * Blob files go only after that commit, best-effort: the graph is the source
+   * of truth, and a leftover file is harmless where a live document pointing at
+   * deleted bytes is not. Attachment nodes are removed even when no blob store
+   * is configured — the blobs are then unreachable regardless, and leaving the
+   * nodes would keep a purged document's attachments visible.
+   */
+  async function purge(
+    id: string,
+    opts: { actor?: string } = {},
+  ): Promise<{ chunksDeleted: number }> {
+    const at = new Date();
+    const { existing, attachments, chunksDeleted } = await write(async (tx) => {
+      // Read inside the transaction so the blob list matches exactly the nodes
+      // this transaction deletes.
+      const existing = await KnowledgeDocumentRepository.get(tx, id);
+      const attachments = await KnowledgeAttachmentRepository.listByDocument(tx, id);
+      await softDeleteInTx(tx, id, at, opts.actor);
+      await KnowledgeAttachmentRepository.deleteForDocument(tx, id);
+      const chunksDeleted = await KnowledgeChunkRepository.deleteForDocument(tx, id);
+      return { existing, attachments, chunksDeleted };
+    });
+
+    const blobStore = deps.blobStore;
+    if (blobStore) {
+      for (const a of attachments) {
+        await deleteBlobBestEffort(blobStore, a.blobId, `purge of ${id}`);
+      }
+    } else if (attachments.length > 0) {
+      console.warn(
+        `[knowledge] purge of ${id}: no blob store configured, ${attachments.length} attachment blob(s) left in place`,
+      );
+    }
+    if (existing) await tombstoneInVault(vault, 'knowledge_document', existing, at);
+    return { chunksDeleted };
   }
 
   return {
     ingest,
     update,
     softDelete,
+    purge,
     getWithAttachments,
     addAttachment,
     reextractAttachment,
@@ -634,7 +715,6 @@ export function createKnowledgeIngestionService(deps: Deps) {
     markAttachmentFailed,
     extractionQueueDepth,
     deleteAttachment,
-    purgeAttachmentBlobs,
     getAttachment,
     getAttachmentByBlob,
     openBlob,

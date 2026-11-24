@@ -26,14 +26,19 @@ scope?: {projectId, userId}, actor?, id?}`.
 - `PUT /knowledge/documents/:id` updates title/content/summary/tags/expiresAt; the prior state is archived as a
   revision and changed content is re-chunked.
 - `DELETE /knowledge/documents/:id` soft-deletes; `?purge=true` also hard-deletes its chunks, attachment nodes
-  and blob files.
+  and blob files. The soft delete and the chunk and attachment-node deletes commit in one transaction, so a
+  failed purge leaves the document live with everything intact. Blob files are deleted after that commit; a
+  blob that cannot be deleted is logged (`[knowledge] purge of <id>: could not delete blob ...`) and left on
+  disk, and the purge still succeeds.
 
 ## Attachments
 
 `POST /knowledge/documents/:id/attachments` with `{filename, mimeType, dataBase64, actor?}`. Limit
 `KNOWLEDGE_MAX_ATTACHMENT_BYTES` (25 MiB, raw bytes). The bytes are stored as a file (with their sha256) in
 `KNOWLEDGE_BLOB_DIR` (stack: `$STACK_ROOT/data/elephant-blobs`) and the extracted text becomes more knowledge
-chunks of that document, so the file's content is searchable through recall.
+chunks of that document, so the file's content is searchable through recall. If the upload fails after the
+file is stored (inline extraction or embedding throws, or the graph write fails), the file is deleted again and
+the original error is returned, so a retried upload does not leave orphaned files.
 
 Extraction is routed by MIME type:
 
