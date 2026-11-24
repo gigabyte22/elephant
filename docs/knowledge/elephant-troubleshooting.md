@@ -58,7 +58,8 @@ both Elephant and Cerebro.
 - `asOf` in the past or `from`/`to` restrict facts by valid time.
 - Add `debug=1` and read `data.trace`: per-stage timings, candidates seen, and source diagnostics. A source marked
   `starved` (also logged as a warning) means the filter was so selective that even the widest vector search found
-  too few survivors; raise `RETRIEVAL_ANN_MAX_K` if this is routine.
+  too few survivors (`RETRIEVAL_ANN_MAX_K` was queried); raise it if this is routine. A source whose whole index
+  holds fewer matching items than the limit is not starved: escalation stops once K covers the index.
 - Do not threshold on `score` (it is relative within one result set); use `vectorScore`.
 - `embedModel` != `schemaEmbedModel` or `embedder.dim` != `schemaVectorDim` in `/health`: vectors are not
   comparable; re-embed.

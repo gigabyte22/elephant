@@ -64,14 +64,14 @@ Most writes take an optional `actor` that is recorded in the audit trail. Query 
 | `PUT /procedures/:id` | update content/whenToUse (creates a new version linked by `:SUPERSEDES`) or stats (`successRate`, `invocationCount`, `lastSuccessAt`) |
 | `DELETE /procedures/:id` | soft delete |
 | `POST /intentions` | `{content, dueAt? or triggerHint?, recurring?, schedule?, importance?, scope?, sourceEpisodeId?, sourceFactId?}` |
-| `GET /intentions?status=`, `GET /intentions/due?before=`, `GET /intentions/:id` | list / due-or-overdue (for boot-time reconciliation, not polling) / one |
+| `GET /intentions?status=`, `GET /intentions/due?before=`, `GET /intentions/:id` | list / due-or-overdue (for boot-time reconciliation, not polling) / one. `due` lists `pending` only, so a one-time intention overdue by more than `INTENTION_EXPIRE_GRACE_DAYS` (7) drops out once the hourly reaper marks it `expired`; recurring ones stay |
 | `POST /intentions/:id/complete`, `/cancel`, `/fired` | terminal states, or record a firing without closing; optional `?projectId=&userId=` scope guard as on `GET /intentions/:id`. Elephant never fires intentions itself; the caller owns the clock |
 
 **Working state, audit, admin, dashboard data**
 
 | Route | Purpose |
 |---|---|
-| `POST /state` | `{scope:{agentId, sessionId?, userId?, projectId?}, key, value, ttlSec?}`; opaque live state, not a memory item |
+| `POST /state` | `{scope:{agentId, sessionId?, userId?, projectId?}, key, value, ttlSec?}`; opaque live state, not a memory item. An expired entry is unreadable at once and its node is deleted by the hourly working-state reaper |
 | `GET /state/:key?agentId=...`, `DELETE /state/:key?agentId=...`, `GET /state?agentId=...&prefix=` | read, delete, list keys |
 | `GET /audit/:targetId` | revisions and audit events for one item |
 | `GET /audit?actor=&from=&to=&limit=` | global audit log (limit <= 500) |

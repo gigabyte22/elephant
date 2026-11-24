@@ -63,7 +63,7 @@ That last stage closes a loop with pruning: recall bumps `referenceCount`, and `
 
 **Config** (`src/config/env.ts`). One Zod schema, ~90 vars, memoized `loadEnv()`. Use `boolEnv()`, never `z.coerce.boolean()` — `Boolean("false") === true` would make every opt-out flag impossible to disable. The same footgun is handled again by `queryBool` for query params. A `.superRefine` does cross-field validation (provider↔key pairing; retrieval weights must sum to 1.0 ±0.01).
 
-**Jobs** (`src/jobs/`). Croner schedulers, all `startXScheduler(container) => { stop, pattern }` with `protect: true`. `scripts/serve.ts` starts them and drains them on SIGTERM. Two are conditional — the OKF sweep needs `OKF_ENABLED`, the research reaper needs `RESEARCH_RETENTION_DAYS` — and both are staggered off the crons they would otherwise contend with for the driver pool (OKF 30 min off the dream cycle, the reaper 15 min off the hourly observation reap).
+**Jobs** (`src/jobs/`). Croner schedulers, all `startXScheduler(container) => { stop, pattern }` with `protect: true`. `scripts/serve.ts` starts them and drains them on SIGTERM. Two are conditional — the OKF sweep needs `OKF_ENABLED`, the research reaper needs `RESEARCH_RETENTION_DAYS` — and both are staggered off the crons they would otherwise contend with for the driver pool (OKF 30 min off the dream cycle, the reaper 15 min off the hourly observation reap). The intention and working-state reapers always run, hourly at fixed minutes :45 and :55, clear of those.
 
 ## Conventions
 

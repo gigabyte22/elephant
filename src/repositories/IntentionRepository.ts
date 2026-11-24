@@ -1,5 +1,6 @@
 import type { ManagedTransaction } from 'neo4j-driver';
 import type { Intention, IntentionStatus } from '../models/types.ts';
+import { newId } from '../utils/ids.ts';
 import { dateParam, nullableDateParam, toJsDate, toJsDateOrNull } from '../utils/neo4j-conv.ts';
 import {
   memoryItemParams,
@@ -126,7 +127,7 @@ export const IntentionRepository = {
       `MATCH (i:Intention)
        ${statusClause}
        RETURN i {.*} AS i
-       ORDER BY i.createdAt DESC
+       ORDER BY i.createdAt DESC, i.id DESC
        LIMIT toInteger($limit)`,
       { ...params, status: input.status ?? null, limit },
     );
@@ -156,7 +157,7 @@ export const IntentionRepository = {
          AND i.dueAt <= datetime($dueBefore)
          ${clause}
        RETURN i {.*} AS i
-       ORDER BY i.dueAt ASC
+       ORDER BY i.dueAt ASC, i.id ASC
        LIMIT toInteger($limit)`,
       { status, dueBefore: dateParam(input.dueBefore), limit, ...params },
     );
@@ -222,24 +223,66 @@ export const IntentionRepository = {
     }));
   },
 
-  // Optional cleanup: flip hard-overdue pending intentions to 'expired'. Not on
-  // the core path — `expired` can be handled lazily by the orchestrator. Mirrors
-  // ObservationRepository.reapExpired but transitions status instead of deleting.
+  // Flip hard-overdue one-time pending intentions to 'expired', and append one
+  // :AuditEvent per flipped intention in the same transaction (the other
+  // terminal transitions, complete/cancel, are audited too). Run hourly by
+  // src/jobs/IntentionReaper.ts; mirrors ObservationReaper but transitions
+  // status instead of deleting.
+  //
+  // Recurring intentions are never expired: their `dueAt` is the first fire
+  // time and markFired does not advance it, so a live recurring commitment
+  // looks "overdue" forever. Only the orchestrator can retire one (cancel).
+  //
+  // Two statements, not one per row: the first picks the batch, the second
+  // re-checks each row (a concurrent complete/cancel wins) and writes the
+  // status and the event together. Event ids are minted here so they stay
+  // UUIDv7 like every other id; `at` is shared by the batch, so the id is what
+  // orders a batch's events (see AuditEventRepository's tie-break).
   async reapExpired(
     tx: ManagedTransaction,
-    input: { now: Date; graceDays?: number; limit?: number },
+    input: { now: Date; graceDays?: number; limit?: number; actor?: string },
   ): Promise<number> {
     const graceDays = input.graceDays ?? 7;
     const limit = input.limit ?? 5000;
-    const result = await tx.run(
+    const now = dateParam(input.now);
+    const due = await tx.run(
       `MATCH (i:Intention)
        WHERE i.status = 'pending'
+         AND coalesce(i.recurring, false) = false
          AND i.dueAt IS NOT NULL
          AND i.dueAt <= datetime($now) - duration({days: $graceDays})
-       WITH i LIMIT toInteger($limit)
+       RETURN i.id AS id
+       ORDER BY i.dueAt ASC, i.id ASC
+       LIMIT toInteger($limit)`,
+      { now, graceDays, limit },
+    );
+    if (due.records.length === 0) return 0;
+    const rows = due.records.map((r) => ({ id: r.get('id') as string, eventId: newId() }));
+    const result = await tx.run(
+      `UNWIND $rows AS row
+       MATCH (i:Intention {id: row.id})
+       WHERE i.status = 'pending'
        SET i.status = 'expired', i.validTo = datetime($now)
+       CREATE (:AuditEvent {
+         id: row.eventId,
+         kind: 'update',
+         targetId: i.id,
+         targetKind: 'intention',
+         payload: $payload,
+         at: datetime($now),
+         actor: $actor
+       })
        RETURN count(*) AS expired`,
-      { now: dateParam(input.now), graceDays, limit },
+      {
+        rows,
+        now,
+        actor: input.actor ?? null,
+        payload: JSON.stringify({
+          reason: 'expired',
+          transition: 'pending->expired',
+          graceDays,
+        }),
+      },
     );
     return (result.records[0]?.get('expired') as number) ?? 0;
   },

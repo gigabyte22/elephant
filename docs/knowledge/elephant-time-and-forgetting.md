@@ -22,7 +22,9 @@ Write rules:
   is used; otherwise now.
 - Preferences: `PUT /preferences/:key` writes a new version and closes the previous one
   (`prior.validTo = new.validFrom`); preferences carry `recordedAt` too.
-- Intentions get `validTo` set when they reach a terminal status (completed, cancelled, expired).
+- Intentions get `validTo` set when they reach a terminal status (completed, cancelled, expired). `expired` is set
+  hourly by the intention reaper on one-time pending intentions more than `INTENTION_EXPIRE_GRACE_DAYS` (7) past
+  `dueAt`; recurring intentions are never expired.
 
 Decay, prune and the recency part of recall scoring use **transaction/access time** (`recordedAt`,
 `lastReferencedAt`), never the event time. That is why importing old conversations with historical timestamps
@@ -87,6 +89,7 @@ These are the only hard deletes:
 | What | When | Notes |
 |---|---|---|
 | Observations | hourly, once older than `MEMORY_OBSERVATION_TTL_DAYS` (default 7) | short-lived by design |
+| Expired working-state entries | hourly (`55 * * * *`), once past their `ttlSec` | Neo4j backend only (Redis expires keys itself); not a memory item, already unreadable once expired |
 | Research past its grace period | only if `RESEARCH_RETENTION_DAYS` is set; the reaper (`RESEARCH_REAP_CRON`, default `15 * * * *`) purges research whose `expiresAt` lapsed that many days ago, with its chunks and revision snapshots; audit events stay | unset by default, so nothing is purged |
 | Knowledge document chunks and attachment blobs | `DELETE /knowledge/documents/:id?purge=true` | without `purge` it is a soft delete |
 | One attachment | `DELETE /knowledge/documents/:id/attachments/:attachmentId` | removes its chunks, node and blob file |

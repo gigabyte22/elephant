@@ -140,7 +140,7 @@ export const EpisodeRepository = {
          AND coalesce(e.dreamAttempts, 0) < $maxAttempts
          AND (e.dreamNextAttemptAt IS NULL OR e.dreamNextAttemptAt <= datetime($now))
        RETURN e {.*} AS e
-       ORDER BY coalesce(e.recordedAt, e.timestamp) ASC
+       ORDER BY coalesce(e.recordedAt, e.timestamp) ASC, e.id ASC
        LIMIT toInteger($limit)`,
       {
         limit: input.limit,
@@ -163,7 +163,7 @@ export const EpisodeRepository = {
       `MATCH (e:Episode)
        WHERE e.summaryProvisional = true
        RETURN e.id AS id, e.rawTranscript AS rawTranscript
-       ORDER BY coalesce(e.recordedAt, e.timestamp) ASC
+       ORDER BY coalesce(e.recordedAt, e.timestamp) ASC, e.id ASC
        LIMIT toInteger($limit)`,
       { limit },
     );

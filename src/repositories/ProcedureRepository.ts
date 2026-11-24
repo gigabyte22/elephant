@@ -182,7 +182,7 @@ export const ProcedureRepository = {
       `MATCH (p:Procedure)
        ${where}
        RETURN p {.*} AS p
-       ORDER BY p.updatedAt DESC
+       ORDER BY p.updatedAt DESC, p.id DESC
        LIMIT toInteger($limit)`,
       { ...params, limit },
     );

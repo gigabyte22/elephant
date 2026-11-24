@@ -17,8 +17,10 @@ Recall runs about 28 small stages strictly in order:
    research and research chunks, intentions (each opt-in). Vector searches over-fetch (`limit` x
    `RETRIEVAL_OVERFETCH_MULTIPLIER`, default 3) and, because a Neo4j vector query returns the global top-K before
    any scope/time filter runs, widen K adaptively (up to `RETRIEVAL_ANN_MAX_K` 2000, growth x4, 3 attempts) when
-   too few rows survive. A historical `asOf` over-fetches another x4. A source that still cannot fill the limit is
-   marked "starved" in the trace and logged as a warning.
+   too few rows survive; the last attempt always jumps straight to the ceiling, so a start K of 60 runs 60, 240,
+   2000; it stops early once K covers every node of the index's label. A historical `asOf` over-fetches another
+   x4. A source that still cannot fill the limit at the ceiling is marked "starved" in the trace and logged as a
+   warning; the trace's `requestedK` is the K of the last query actually run.
 3. **Chunk -> fact projection**: facts derived from matching episode chunks join the candidate set.
 4. **Personalized PageRank** (opt-in, HippoRAG style): seeds from top facts and query-linked entities and walks
    the entity graph (`:HAS_FACT`, `:RELATES`, `:SYNONYM`). Needs the GDS projection the dream cycle refreshes

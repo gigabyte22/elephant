@@ -7,7 +7,7 @@
 
 import { read } from '../../../config/neo4j.ts';
 import { PreferenceRepository } from '../../../repositories/PreferenceRepository.ts';
-import { annWithEscalation } from '../../../repositories/vector-search.ts';
+import { annWithEscalation, countLabel } from '../../../repositories/vector-search.ts';
 import type { RetrievalStage } from '../types.ts';
 import { asOfOverfetchLimit, recallAsOf, recordSourceDiagnostics } from './helpers.ts';
 import { buildRetrievalScope, PROJECT_USER_AXES } from './scope-helpers.ts';
@@ -33,6 +33,7 @@ export function PreferenceVectorSource(): RetrievalStage {
               scope,
             }),
           ),
+        population: () => read((tx) => countLabel(tx, 'Preference')),
       });
       recordSourceDiagnostics(ctx, 'PreferenceVectorSource', outcome, 'ann');
       // Stable identity keyed by preference.id; the repo's valid-time filter

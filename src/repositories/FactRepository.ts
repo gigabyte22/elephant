@@ -426,7 +426,7 @@ export const FactRepository = {
        OPTIONAL MATCH (ent:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(ent.id) AS entityIds
        RETURN f {.*} AS f, entityIds
-       ORDER BY f.recordedAt DESC
+       ORDER BY f.recordedAt DESC, f.id DESC
        LIMIT toInteger($limit)`,
       {
         at: dateParam(input.at),
@@ -502,7 +502,7 @@ export const FactRepository = {
        OPTIONAL MATCH (e:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(e.id) AS entityIds
        RETURN f {.*} AS f, entityIds
-       ORDER BY f.recordedAt ASC
+       ORDER BY f.recordedAt ASC, f.id ASC
        LIMIT toInteger($limit)`,
       { limit: input.limit, before: dateParam(input.before) },
     );
@@ -592,7 +592,7 @@ export const FactRepository = {
        OPTIONAL MATCH (e2:Entity)-[:HAS_FACT]->(f)
        WITH f, collect(DISTINCT e2.id) AS entityIds
        RETURN f {.*} AS f, entityIds
-       ORDER BY f.importance DESC, f.recordedAt DESC
+       ORDER BY f.importance DESC, f.recordedAt DESC, f.id DESC
        LIMIT toInteger($limit)`,
       {
         entityIds: input.entityIds,

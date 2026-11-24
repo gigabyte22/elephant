@@ -209,7 +209,10 @@ export async function buildContainer(overrides: ContainerOverrides = {}): Promis
     }),
     intentions: createIntentionService({
       embedder,
-      config: { embedderMaxInputTokens: env.EMBED_MAX_INPUT_TOKENS },
+      config: {
+        embedderMaxInputTokens: env.EMBED_MAX_INPUT_TOKENS,
+        expireGraceDays: env.INTENTION_EXPIRE_GRACE_DAYS,
+      },
     }),
     research: createResearchService({ llm, embedder, vault, config: sharedConfig }),
     workingState: createWorkingStateService({ adapter: workingStateAdapter }),

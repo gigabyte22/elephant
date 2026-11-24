@@ -17,7 +17,9 @@ import { AuditService } from './AuditService.ts';
 
 interface Deps {
   embedder: EmbeddingAdapter;
-  config: { embedderMaxInputTokens?: number };
+  // expireGraceDays: how long past `dueAt` a one-time pending intention waits
+  // before reapExpired flips it to 'expired' (INTENTION_EXPIRE_GRACE_DAYS).
+  config: { embedderMaxInputTokens?: number; expireGraceDays?: number };
 }
 
 export interface IntentionScope extends Scope {
@@ -222,8 +224,16 @@ export function createIntentionService(deps: Deps) {
     });
   }
 
+  // Run hourly by src/jobs/IntentionReaper.ts. Recurring intentions are never
+  // expired; each expired one gets an audit event in the same transaction.
   async function reapExpired(now: Date = new Date()): Promise<number> {
-    return write((tx) => IntentionRepository.reapExpired(tx, { now }));
+    return write((tx) =>
+      IntentionRepository.reapExpired(tx, {
+        now,
+        graceDays: config.expireGraceDays,
+        actor: 'intention-reaper',
+      }),
+    );
   }
 
   return { create, get, list, listDue, complete, cancel, markFired, reapExpired };

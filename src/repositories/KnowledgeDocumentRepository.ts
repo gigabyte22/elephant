@@ -141,7 +141,7 @@ export const KnowledgeDocumentRepository = {
       `MATCH (d:KnowledgeDocument)
        ${liveClause}
        RETURN d {.*} AS d
-       ORDER BY d.updatedAt DESC
+       ORDER BY d.updatedAt DESC, d.id DESC
        LIMIT toInteger($limit)`,
       { ...params, limit },
     );

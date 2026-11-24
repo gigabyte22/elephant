@@ -60,7 +60,7 @@ export const KnowledgeAttachmentRepository = {
     const result = await tx.run(
       `MATCH (d:KnowledgeDocument {id: $documentId})-[:HAS_ATTACHMENT]->(a:KnowledgeAttachment)
        RETURN a {.*} AS a
-       ORDER BY a.createdAt ASC`,
+       ORDER BY a.createdAt ASC, a.id ASC`,
       { documentId },
     );
     return result.records.map((r) => toKnowledgeAttachment(r.get('a')));
@@ -114,7 +114,7 @@ export const KnowledgeAttachmentRepository = {
          AND coalesce(a.extractionAttempts, 0) < $maxAttempts
          AND (a.extractionNextAttemptAt IS NULL OR a.extractionNextAttemptAt <= datetime($now))
        RETURN a {.*} AS a
-       ORDER BY a.createdAt ASC
+       ORDER BY a.createdAt ASC, a.id ASC
        LIMIT toInteger($limit)`,
       {
         limit: input.limit,

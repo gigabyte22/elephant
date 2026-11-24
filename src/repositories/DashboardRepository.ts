@@ -317,10 +317,10 @@ export const DashboardRepository = {
     const filter = buildFactListFilter(input);
     const orderBy =
       input.sort === 'refs'
-        ? 'coalesce(f.referenceCount, 0) DESC, f.recordedAt DESC'
+        ? 'coalesce(f.referenceCount, 0) DESC, f.recordedAt DESC, f.id DESC'
         : input.sort === 'importance'
-          ? 'f.importance DESC, f.recordedAt DESC'
-          : 'f.recordedAt DESC';
+          ? 'f.importance DESC, f.recordedAt DESC, f.id DESC'
+          : 'f.recordedAt DESC, f.id DESC';
     const result = await tx.run(
       `MATCH (f:Fact)
        WHERE f.validTo IS NULL ${filter.clause}
@@ -508,8 +508,8 @@ export const DashboardRepository = {
       input.sort === 'title'
         ? 'toLower(n.title) ASC'
         : input.sort === 'created'
-          ? 'n.createdAt DESC'
-          : 'n.updatedAt DESC';
+          ? 'n.createdAt DESC, n.id DESC'
+          : 'n.updatedAt DESC, n.id DESC';
     const result = await tx.run(
       `MATCH (n:Research|KnowledgeDocument)
        WHERE ${clause}
@@ -856,7 +856,7 @@ export const DashboardRepository = {
     const result = await tx.run(
       `MATCH (d:DreamRun)
        RETURN d {.*} AS d
-       ORDER BY d.startedAt DESC
+       ORDER BY d.startedAt DESC, d.id DESC
        LIMIT toInteger($limit)`,
       { limit },
     );
@@ -910,12 +910,12 @@ const OVERVIEW_ORDER_BY: Record<string, string> = {
   insight: 'coalesce(n.importance, 0) DESC, n.createdAt DESC',
   preference: 'coalesce(n.referenceCount, 0) DESC, n.validFrom DESC',
   procedure: 'coalesce(n.invocationCount, 0) DESC, n.updatedAt DESC',
-  knowledge_document: 'n.updatedAt DESC',
-  research: 'n.updatedAt DESC',
-  episode: 'n.timestamp DESC',
-  observation: 'n.recordedAt DESC',
-  chunk: 'n.createdAt DESC',
-  knowledge_chunk: 'n.createdAt DESC',
+  knowledge_document: 'n.updatedAt DESC, n.id DESC',
+  research: 'n.updatedAt DESC, n.id DESC',
+  episode: 'n.timestamp DESC, n.id DESC',
+  observation: 'n.recordedAt DESC, n.id DESC',
+  chunk: 'n.createdAt DESC, n.id DESC',
+  knowledge_chunk: 'n.createdAt DESC, n.id DESC',
 };
 
 const OVERVIEW_RETURN = `RETURN n.id AS id, labels(n) AS labels, n.kind AS kind,

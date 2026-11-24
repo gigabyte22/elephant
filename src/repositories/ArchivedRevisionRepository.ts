@@ -50,7 +50,7 @@ export const ArchivedRevisionRepository = {
     const result = await tx.run(
       `MATCH (a:ArchivedRevision {originalId: $originalId})
        RETURN a {.*} AS a
-       ORDER BY a.archivedAt DESC
+       ORDER BY a.archivedAt DESC, a.id DESC
        LIMIT toInteger($limit)`,
       { originalId: input.originalId, limit: input.limit ?? 100 },
     );

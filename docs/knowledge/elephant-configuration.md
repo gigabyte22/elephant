@@ -102,6 +102,7 @@ verdict on one exact cluster stands). Pruning: `DREAM_PRUNE_WINDOW_DAYS` (30), `
 | `MEMORY_OBSERVATION_TTL_DAYS` | 7 | observations hard-deleted after this (hourly sweep) |
 | `RESEARCH_RETENTION_DAYS` | unset | unset = research is never purged; set = grace days after `expiresAt` |
 | `RESEARCH_REAP_CRON` | `15 * * * *` | only runs when retention is set |
+| `INTENTION_EXPIRE_GRACE_DAYS` | 7 | days past `dueAt` before the hourly intention reaper marks a one-time pending intention `expired` (recurring ones never expire) |
 | `KNOWLEDGE_EXTRACTION_CRON` | `*/2 * * * *` | attachment worker |
 | `OKF_ENABLED`, `OKF_DIR`, `OKF_SYNC_CRON` | false, `./.okf-vault`, `30 3 * * *` | markdown vault |
 | `ELEPHANT_STATE_DIR`, `ELEPHANT_SETTINGS_KEY` | `./.elephant-state`, unset | encrypted runtime settings |
