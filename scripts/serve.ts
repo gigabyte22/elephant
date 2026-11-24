@@ -40,7 +40,15 @@ async function main(): Promise<void> {
     extraction.stop();
     okfSync?.stop();
     researchReaper?.stop();
-    await app.close();
+    // Let an in-flight dream cycle wind down (or record it as interrupted)
+    // before the driver closes under it. Runs alongside app.close() so the two
+    // share one grace budget, which must fit inside the container's stop
+    // period; drain() refuses new cycles from its first line, so a POST /dream
+    // that slips in before the listener closes is turned away.
+    await Promise.all([
+      container.dreaming.drain(container.env.DREAM_SHUTDOWN_GRACE_MS),
+      app.close(),
+    ]);
     await shutdown();
     process.exit(0);
   };

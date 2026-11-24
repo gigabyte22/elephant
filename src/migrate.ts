@@ -130,6 +130,12 @@ export function buildStatements(embedDim: number): Statement[] {
       cypher:
         'CREATE CONSTRAINT working_state_scope_key IF NOT EXISTS FOR (w:WorkingState) REQUIRE (w.scopeKey, w.key) IS UNIQUE',
     },
+    // One remembered "no merge" judgement per exact consolidation cluster.
+    {
+      name: 'constraint:consolidation_verdict_key',
+      cypher:
+        'CREATE CONSTRAINT consolidation_verdict_key IF NOT EXISTS FOR (v:ConsolidationVerdict) REQUIRE v.key IS UNIQUE',
+    },
 
     // --- Generic text + temporal indexes --------------------------------
     {

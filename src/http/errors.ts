@@ -30,6 +30,10 @@ export function payloadTooLarge(message: string): HttpError {
   return new HttpError(413, message);
 }
 
+export function serviceUnavailable(message: string): HttpError {
+  return new HttpError(503, message);
+}
+
 export function errorHandler(err: FastifyError, _req: FastifyRequest, reply: FastifyReply): void {
   if (err instanceof HttpError) {
     void reply.code(err.statusCode).send({ ok: false, error: err.message });

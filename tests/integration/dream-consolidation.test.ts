@@ -33,6 +33,15 @@ const knobs = {
 let container: Container;
 let embedder: ReturnType<typeof createFakeEmbeddingAdapter>;
 
+function recordingLLM() {
+  return createFakeLLMAdapter({
+    consolidate: ({ cluster }) => {
+      knobs.consolidateCalls.push(cluster.map((c) => ({ id: c.id, content: c.content })));
+      return knobs.consolidateResult;
+    },
+  });
+}
+
 beforeAll(async () => {
   // The fake embedder's bag-of-tokens vectors put natural paraphrases around
   // cosine 0.65–0.85 — lower the floor so the test sentences cluster together.
@@ -40,13 +49,7 @@ beforeAll(async () => {
   process.env.DREAM_CONSOLIDATION_MIN_SIMILARITY = '0.6';
   __resetEnvForTests();
   embedder = createFakeEmbeddingAdapter({ dim: EMBED_DIM });
-  const llm = createFakeLLMAdapter({
-    consolidate: ({ cluster }) => {
-      knobs.consolidateCalls.push(cluster.map((c) => ({ id: c.id, content: c.content })));
-      return knobs.consolidateResult;
-    },
-  });
-  container = await bootstrap({ llm, embedder });
+  container = await bootstrap({ llm: recordingLLM(), embedder });
 });
 
 afterAll(async () => {
@@ -290,6 +293,144 @@ describe('dream consolidation pass', () => {
     const run = await container.dreaming.runCycle();
     expect(run.factsMerged).toBe(0);
     expect((await getFact(a))?.live).toBe(true);
+
+    // Remembered like a "keep", so the malformed answer is not re-requested
+    // every night.
+    expect(await verdicts()).toEqual([{ outcome: 'rejected_merge', size: 3 }]);
+  });
+});
+
+async function verdicts(): Promise<Array<{ outcome: string; size: number }>> {
+  return read(async (tx) => {
+    const r = await tx.run(
+      'MATCH (v:ConsolidationVerdict) RETURN v.outcome AS outcome, size(v.factIds) AS size',
+    );
+    return r.records.map((rec) => ({
+      outcome: rec.get('outcome') as string,
+      size: Number(rec.get('size')),
+    }));
+  });
+}
+
+const KEEP = {
+  decision: 'keep' as const,
+  mergeFactIds: [],
+  content: '',
+  confidence: 0,
+  importance: 0,
+};
+const FRAGMENTS = [
+  'the user daughter isabelle is six years old',
+  'the user oldest daughter is named isabelle',
+  'the user daughter isabelle is the oldest child',
+];
+
+// Regression: a "keep separate" verdict was stored nowhere, so the busiest
+// buckets were re-sent to the model every night and spent the whole budget.
+describe('consolidation verdicts are remembered', () => {
+  async function seedCluster(entityName: string): Promise<{ entity: string; ids: string[] }> {
+    const entity = await seedEntity(entityName);
+    const ids: string[] = [];
+    for (const content of FRAGMENTS) ids.push(await seedFact({ content, entityIds: [entity] }));
+    return { entity, ids };
+  }
+
+  test('a kept cluster is not re-judged until its membership changes', async () => {
+    const { entity, ids } = await seedCluster('Isabelle');
+    knobs.consolidateResult = KEEP;
+
+    await container.dreaming.runCycle();
+    expect(knobs.consolidateCalls).toHaveLength(1);
+    expect(knobs.consolidateCalls[0]!.map((c) => c.id).sort()).toEqual([...ids].sort());
+    expect(await verdicts()).toEqual([{ outcome: 'keep', size: 3 }]);
+
+    knobs.consolidateCalls = [];
+    await container.dreaming.runCycle();
+    expect(knobs.consolidateCalls).toHaveLength(0);
+
+    // A new member is a different cluster, so the model is asked again.
+    const added = await seedFact({
+      content: 'the user daughter isabelle is six and the oldest',
+      entityIds: [entity],
+    });
+    await container.dreaming.runCycle();
+    expect(knobs.consolidateCalls).toHaveLength(1);
+    expect(knobs.consolidateCalls[0]!.map((c) => c.id)).toContain(added);
+  });
+
+  test('a verdict older than the rejudge window is judged again', async () => {
+    await seedCluster('Isabelle');
+    knobs.consolidateResult = KEEP;
+
+    await container.dreaming.runCycle();
+    expect(knobs.consolidateCalls).toHaveLength(1);
+
+    await txWrite(async (tx) => {
+      await tx.run(
+        'MATCH (v:ConsolidationVerdict) SET v.decidedAt = datetime() - duration({days: 31})',
+      );
+    });
+    knobs.consolidateCalls = [];
+    await container.dreaming.runCycle();
+    expect(knobs.consolidateCalls).toHaveLength(1);
+    // Re-recorded with a fresh timestamp, not duplicated.
+    expect(await verdicts()).toHaveLength(1);
+  });
+
+  test('a model failure records no verdict, so the cluster is retried', async () => {
+    await seedCluster('Isabelle');
+    let calls = 0;
+    const failing = await bootstrap({
+      llm: createFakeLLMAdapter({
+        consolidate: () => {
+          calls += 1;
+          throw new Error('simulated model outage');
+        },
+      }),
+      embedder,
+    });
+
+    await failing.dreaming.runCycle();
+    await failing.dreaming.runCycle();
+    expect(calls).toBe(2);
+    expect(await verdicts()).toHaveLength(0);
+  });
+
+  describe('with a budget of one cluster per run', () => {
+    let tight: Container;
+
+    beforeAll(async () => {
+      process.env.DREAM_CONSOLIDATION_MAX_CLUSTERS_PER_RUN = '1';
+      __resetEnvForTests();
+      try {
+        tight = await bootstrap({ llm: recordingLLM(), embedder });
+      } finally {
+        delete process.env.DREAM_CONSOLIDATION_MAX_CLUSTERS_PER_RUN;
+        __resetEnvForTests();
+      }
+    });
+
+    test('a remembered cluster does not use up the budget', async () => {
+      await seedCluster('Isabelle');
+      await seedCluster('Oliver');
+      knobs.consolidateResult = KEEP;
+
+      await tight.dreaming.runCycle();
+      expect(knobs.consolidateCalls).toHaveLength(1);
+      const firstIds = knobs.consolidateCalls[0]!.map((c) => c.id).sort();
+
+      // The first cluster is skipped for free, so the budget reaches the other.
+      knobs.consolidateCalls = [];
+      await tight.dreaming.runCycle();
+      expect(knobs.consolidateCalls).toHaveLength(1);
+      expect(knobs.consolidateCalls[0]!.map((c) => c.id).sort()).not.toEqual(firstIds);
+
+      // Both remembered: nothing left to ask.
+      knobs.consolidateCalls = [];
+      await tight.dreaming.runCycle();
+      expect(knobs.consolidateCalls).toHaveLength(0);
+      expect(await verdicts()).toHaveLength(2);
+    });
   });
 });
 

@@ -13,14 +13,17 @@ conversations, and it does the memory hygiene (supersede, merge, promote, prune)
   from `ELEPHANT_DREAM_CRON` in `stack.env`, so check `/home/cerebro/stack/elephant/.env` for the live value).
 - On demand: `POST /dream` returns `{jobId}` immediately and runs the cycle in the background.
 - Only one cycle runs at a time per service process. A second trigger while one runs gets
-  **409 `dream already running as job <id>`**; a cron tick that lands during a run is skipped and logged as
+  **409 `dream already running as job <id>`** (even two triggers in the same instant: only one gets a job id);
+  a cron tick that lands during a run is skipped and logged as
   `[dream-cron] skipped tick, run <id> still in progress`. Both are harmless.
+- While the service is shutting down, `POST /dream` answers **503** and no new cycle starts.
 
 ## What one cycle does
 
 1. **Pick work.** Episodes not yet dreamed (`dreamedAt` null), with fewer than `DREAM_MAX_ATTEMPTS` (3) failed
    attempts and past their retry time, oldest by transaction time first, at most `DREAM_MAX_EPISODES_PER_RUN`
-   (50). A soft deadline `DREAM_DEADLINE_MS` (300000 = 5 min) is checked between episodes.
+   (50). A soft deadline `DREAM_DEADLINE_MS` (300000 = 5 min) is checked between episodes (and between units of
+   work in the deadline-gated passes below). A shutdown in progress counts as a passed deadline.
 2. **Install summaries.** Up to `DREAM_SUMMARY_SWEEP_MAX_EPISODES` (20) episodes whose summary is still the
    clipped placeholder from ingest get an LLM summary and a re-embedded vector.
 3. **Per episode**, in chronological order:
@@ -43,19 +46,25 @@ conversations, and it does the memory hygiene (supersede, merge, promote, prune)
    - **supersede sweep**: facts written directly through `POST /facts` are contradiction-checked here, up to
      `DREAM_SUPERSEDE_SWEEP_MAX_FACTS` (50) per cycle, only once they are at least 60 s old;
    - **consolidation** (`DREAM_ENABLE_CONSOLIDATION`): for entities with at least 3 live facts in one scope
-     bucket, cluster similar facts (similarity 0.8, clusters of up to 6, at most 10 clusters per run) and let the
-     LLM merge complementary fragments into one canonical fact;
+     bucket, cluster similar facts (similarity 0.8, clusters of up to 6, at most 10 clusters judged per run) and
+     let the LLM merge complementary fragments into one canonical fact. When the LLM says keep them separate (or
+     proposes a merge that fails validation), the verdict is stored as a `:ConsolidationVerdict` keyed on the
+     cluster's exact member facts, and that cluster is skipped, without using the per-run budget, for
+     `DREAM_CONSOLIDATION_REJUDGE_DAYS` (30). A cluster that gains or loses a fact is judged again at once; an
+     LLM error stores nothing, so the cluster is retried next cycle;
    - **insight promotion**: facts created this cycle with importance at least `DREAM_PROMOTE_INSIGHT_IMPORTANCE`
      (0.85) become insights, unless a near-identical insight exists (then it is corroborated instead);
-   - **prune** along the forgetting curve, then retire insights whose source facts are all dead.
+   - **prune** along the forgetting curve (oldest reference first, up to `DREAM_PRUNE_BATCH_LIMIT` prunes per
+     cycle), then retire insights whose source facts are all dead.
 5. If `RETRIEVAL_ENABLE_PPR=true`, refresh the GDS graph projection used by PageRank recall (runs even when the
-   deadline was hit).
+   deadline was hit, but not during shutdown).
 
 The dreamer extracts **facts only**. Preferences and intentions are never created by dreaming; callers write them.
 
-Each cycle is recorded as a `:DreamRun` with `status` (`running`, `completed`, `failed`), `episodesProcessed`,
-`factsCreated`, `factsSuperseded`, `factsPruned`, `factsMerged`, `insightsPromoted` and `error`. Every change it
-makes is audited with `actor: "dreamer"`.
+Each cycle, whether started by the cron, `POST /dream` or `pnpm dream`, is recorded as a `:DreamRun` with
+`status` (`running`, `completed`, `failed`), `episodesProcessed`, `factsCreated`, `factsSuperseded`,
+`factsPruned`, `factsMerged`, `insightsPromoted` and `error`. Every change it makes is audited with
+`actor: "dreamer"`.
 
 ## Triggering and monitoring
 
@@ -78,7 +87,9 @@ Reading `/health.data.dream`:
 - `running` / `runningJobId`: an in-progress cycle in this process. `lastRunDurationMs` is the last run's length.
 
 Prefer `POST /dream` over `pnpm dream`: the CLI (`scripts/dream.ts`) runs a cycle in a separate process whose
-lock does not see the service's, so it can overlap a scheduled run.
+lock does not see the service's, so it can overlap a scheduled run. Its run is recorded like any other (it shows
+in `lastRun`, `GET /dream/<id>` and the dashboard), but `/health` `running` only reflects the service's own
+process.
 
 ## Re-queuing dead-lettered episodes
 
@@ -97,15 +108,19 @@ docker exec elephant-neo4j cypher-shell -u neo4j -p "$PW" \
 
 ## Rebuilding all facts
 
-`pnpm rebuild:facts -- --yes` (from `/home/cerebro/stack/elephant`) deletes every fact and insight and marks all
-episodes undreamed, so the current pipeline re-extracts everything from the retained episodes. Episodes,
+`pnpm rebuild:facts -- --yes` (from `/home/cerebro/stack/elephant`) deletes every fact, insight and
+consolidation verdict and marks all episodes undreamed, so the current pipeline re-extracts everything from the retained episodes. Episodes,
 chunks, entities, documents and audit events are kept. Back up first, then trigger dreams until
 `backlogEstimate` reaches 0. On a large graph this means many LLM calls.
 
 ## Notes
 
-- A cycle killed with its process leaves its run row at `running`; at the next boot rows older than
-  max(4 x `DREAM_DEADLINE_MS`, 1 hour) are marked failed.
+- On SIGTERM/SIGINT the service waits up to `DREAM_SHUTDOWN_GRACE_MS` (8000) for a running cycle to stop at
+  its next deadline check (it then completes early, with whatever it finished); if it is still running, its row
+  is marked `failed` with `interrupted by shutdown`.
+- A cycle killed outright (SIGKILL, crash) leaves its run row at `running`. At boot and on every dream cron
+  tick, rows older than max(4 x `DREAM_DEADLINE_MS`, 1 hour) are marked failed (`abandoned: ...`). The threshold
+  is deliberately long so a genuinely running cycle, including a `pnpm dream` in another process, is untouched.
 - Long cycles hold the LLM (and, on a local deployment, the GPU) for minutes. Schedule the cron when the
   assistant is quiet, or lower `DREAM_MAX_EPISODES_PER_RUN` / `DREAM_DEADLINE_MS`.
 - Older docs mention a persistent "dream cursor"; the current code selects work by per-episode markers

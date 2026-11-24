@@ -19,6 +19,7 @@ Every response is `{"ok": true, "data": ...}` or `{"ok": false, "error": "<messa
 | 409 | conflict: a dream is already running; a redacted fact id was re-posted |
 | 413 | body over `MAX_BODY_BYTES` (10 MB) or attachment over its limit |
 | 500 | `"internal error"`; details only in the service log |
+| 503 | `POST /dream` while the service is shutting down |
 
 Writes accept a client-supplied `id` (UUID) so a retried write does not duplicate. Dates are ISO-8601 strings.
 Most writes take an optional `actor` that is recorded in the audit trail. Query booleans accept `true/1/yes/on`.
@@ -30,7 +31,7 @@ Most writes take an optional `actor` that is recorded in the audit trail. Query 
 | Route | Purpose |
 |---|---|
 | `GET /health` | no auth; Neo4j reachability, LLM/embedder names and limits, `schemaVectorDim`, `embedModel`/`schemaEmbedModel`, `dream{lastRun,lastRunDurationMs,running,runningJobId,backlogEstimate,deadLetteredEpisodes}`, `extraction{pending,deadLettered}`, capability flags `episodeMetadata`, `researchMetadata`, `researchSimilar` |
-| `POST /dream` | start a dream cycle now -> `{jobId}`; 409 if one is running |
+| `POST /dream` | start a dream cycle now -> `{jobId}`; 409 if one is running; 503 while the service is shutting down |
 | `GET /dream/:jobId` | status and counters of one run |
 
 **Conversation memory**

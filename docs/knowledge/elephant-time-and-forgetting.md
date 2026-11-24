@@ -62,7 +62,10 @@ A fact is pruned only when all of these hold:
 2. It has not been referenced for at least `DREAM_PRUNE_WINDOW_DAYS` (default 30).
 3. `retention` < `DREAM_PRUNE_RETENTION_FLOOR` (default 0.05).
 
-At most `DREAM_PRUNE_BATCH_LIMIT` (1000) facts are pruned per cycle. **Recall keeps memories alive:** every
+Facts at or above the exemption are never even considered. The rest are examined oldest reference first, page
+by page, until `DREAM_PRUNE_BATCH_LIMIT` (1000) facts have been pruned in the cycle, the candidates run out, or
+the cycle's deadline passes; a fact that the curve still spares is skipped and the walk continues past it.
+**Recall keeps memories alive:** every
 recall that returns a fact increments its `referenceCount` and updates `lastReferencedAt` (asynchronously by
 default; `RETRIEVAL_REFCOUNT_TICK_MODE=async|sync|off`). Examples from the code's own notes: importance 0.5 with no
 references is pruned shortly after the 30-day window; importance 0.6 with 3 references survives about 71

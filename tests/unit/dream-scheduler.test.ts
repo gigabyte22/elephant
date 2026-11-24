@@ -13,10 +13,13 @@ import type { Container } from '../../src/index.ts';
 import { DREAM_JOB_NAME, startDreamScheduler } from '../../src/jobs/DreamScheduler.ts';
 import { DreamInProgressError } from '../../src/services/DreamingService.ts';
 
-function containerWith(trigger: () => { jobId: string }): Container {
+function containerWith(
+  trigger: () => { jobId: string },
+  reconcileStaleRuns: () => Promise<number> = async () => 0,
+): Container {
   return {
     env: { MEMORY_DREAM_CRON: '0 3 * * *' },
-    dreaming: { trigger },
+    dreaming: { trigger, reconcileStaleRuns },
   } as unknown as Container;
 }
 
@@ -78,6 +81,47 @@ describe('startDreamScheduler', () => {
 
     await expect(dreamJob().trigger()).resolves.toBeUndefined();
     expect(trigger).toHaveBeenCalledOnce();
+  });
+
+  // A hard-killed cycle (SIGKILL, OOM) leaves its row at 'running'. Reaping
+  // only at boot meant it stayed that way until some later restart.
+  test('reconciles stale runs before triggering, on every tick', async () => {
+    const order: string[] = [];
+    const reconcile = vi.fn(async () => {
+      order.push('reconcile');
+      return 1;
+    });
+    const trigger = vi.fn(() => {
+      order.push('trigger');
+      return { jobId: 'j1' };
+    });
+    handle = startDreamScheduler(containerWith(trigger, reconcile));
+
+    await dreamJob().trigger();
+    await dreamJob().trigger();
+
+    expect(order).toEqual(['reconcile', 'trigger', 'reconcile', 'trigger']);
+  });
+
+  test('a failing reconcile neither blocks the trigger nor escapes the tick', async () => {
+    const reconcile = vi.fn(async () => {
+      throw new Error('neo4j unreachable');
+    });
+    const trigger = vi.fn(() => ({ jobId: 'j1' }));
+    handle = startDreamScheduler(containerWith(trigger, reconcile));
+
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      await expect(dreamJob().trigger()).resolves.toBeUndefined();
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(trigger).toHaveBeenCalledOnce();
+    expect(unhandled).not.toHaveBeenCalled();
   });
 
   test('deregisters the job on stop so a restart does not double-schedule', () => {

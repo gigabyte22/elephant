@@ -233,6 +233,11 @@ export const EnvSchema = z
     // Dream cycle bounds.
     DREAM_MAX_EPISODES_PER_RUN: z.coerce.number().int().positive().default(50),
     DREAM_DEADLINE_MS: z.coerce.number().int().positive().default(300_000),
+    // On SIGTERM/SIGINT, how long `pnpm serve` waits for an in-flight dream
+    // cycle to wind down (it stops at its next deadline check) before marking
+    // its run failed and exiting. Keep it under the container's stop grace
+    // period (Docker's default is 10 s).
+    DREAM_SHUTDOWN_GRACE_MS: z.coerce.number().int().nonnegative().default(8000),
     // Dream attempts per episode before it is dead-lettered, and the base of
     // the exponential backoff between them. Episodes used to be dropped on the
     // first failure, so a brief embedder outage destroyed that window.
@@ -314,6 +319,11 @@ export const EnvSchema = z
     DREAM_CONSOLIDATION_MAX_CLUSTER_SIZE: z.coerce.number().int().min(2).default(6),
     DREAM_CONSOLIDATION_MIN_SIMILARITY: z.coerce.number().min(0).max(1).default(0.8),
     DREAM_CONSOLIDATION_MIN_ENTITY_FACTS: z.coerce.number().int().min(2).default(3),
+    // Days a "keep separate" verdict on one exact cluster (same member facts)
+    // stands before the model is asked about it again. Stops the busiest
+    // entities spending the nightly cluster budget re-judging the same
+    // rejected clusters; a cluster that gains or loses a fact is judged anew.
+    DREAM_CONSOLIDATION_REJUDGE_DAYS: z.coerce.number().int().positive().default(30),
 
     // --- Personalized PageRank retrieval ---
     // HippoRAG-style Personalized PageRank retrieval. OFF by default — the
